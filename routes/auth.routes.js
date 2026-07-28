@@ -1,37 +1,34 @@
 import express from "express";
 
 import {
-
-getMasterAdmins,    
-createUser,
-getAllUsers
-}from "../controllers/auth.controller.js";
-import {
-    authMiddleware,
-isMasterAdmin
-}from "../middleware/auth.middleware.js";
-
-const router=express.Router();
+    getMasterAdmins,
+    createuserrole,
+    getUsers
+} from "../controllers/auth.controller.js";
 
 
-//MasterAdmin get api
-router.get(
-"/master-admins",
-getMasterAdmins
-);
+const router = express.Router();
 
+
+// Register User
 router.post(
-"/create-user",
-createUser
+    "/register",
+    createuserrole
 );
 
+
+// Get All Users
 router.get(
-    "/all-users",
-    getAllUsers
+    "/getAllUser",
+    getUsers
 );
 
 
-
+// Get Master Admins 
+router.get(
+    "/master-admins",
+    getMasterAdmins
+);
 
 
 export default router;

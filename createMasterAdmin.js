@@ -2,16 +2,20 @@ import "dotenv/config";
 import bcrypt from "bcrypt";
 import db from "./config/db.js";
 
-// Admin create
+
+// Create Master Admin
+
 const createMasterAdmin = async()=>{
 
 try{
+
 
 const {
     MASTER_ADMIN_NAME,
     MASTER_ADMIN_EMAIL,
     MASTER_ADMIN_PASSWORD,
     MASTER_ADMIN_PHONE
+
 }=process.env;
 
 
@@ -36,7 +40,7 @@ password,
 gst,
 company_address,
 location,
-role
+role_id
 )
 
 VALUES(?,?,?,?,?,?,?,?,?)
@@ -52,7 +56,7 @@ password,
 "NA",
 "Head Office",
 "India",
-"MASTER_ADMIN"
+0
 ]
 
 );
@@ -68,15 +72,16 @@ process.exit();
 }
 catch(error){
 
+
 console.log(error);
 
 process.exit(1);
 
-}
-
 
 }
 
+
+};
 
 
 
