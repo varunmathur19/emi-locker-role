@@ -32,31 +32,23 @@ await db.query(
 `
 INSERT INTO users
 (
-organization_name,
 name,
 email,
 phone,
 password,
-gst,
-company_address,
-location,
 role_id
 )
 
-VALUES(?,?,?,?,?,?,?,?,?)
+VALUES(?,?,?,?,?)
 
 `,
 
 [
-"Rechargkit",
 MASTER_ADMIN_NAME,
 MASTER_ADMIN_EMAIL,
 MASTER_ADMIN_PHONE,
 password,
-"NA",
-"Head Office",
-"India",
-0
+1
 ]
 
 );
@@ -72,17 +64,14 @@ process.exit();
 }
 catch(error){
 
-
 console.log(error);
 
 process.exit(1);
-
 
 }
 
 
 };
-
 
 
 createMasterAdmin();
