@@ -12,64 +12,84 @@ return rows[0];
 
 };
 
-export const createUser = async(data)=>{
+   export const createUser = async (data) => {
 
-
-const {
+  const {
     organization_name,
     name,
     email,
     phone,
     password,
-    gst,
     company_address,
-    location,
+    country,
+    state,
+    city,
     role_id,
-    created_by
+    created_by,
 
-}=data;
+    new_device,
+    old_device,
+    supreme_device,
+    pro_star,
+    lite,
+    google_tv,
+    supreme_lock
 
-
-
-const [result] = await db.query(
-
-`
-INSERT INTO users
-(
-organization_name,
-name,
-email,
-phone,
-password,
-gst,
-company_address,
-location,
-role_id,
-created_by
-)
-
-VALUES(?,?,?,?,?,?,?,?,?,?)
-
-`,
-
-[
-organization_name,
-name,
-email,
-phone,
-password,
-gst,
-company_address,
-location,
-role_id,
-created_by
-]
-
-);
+  } = data;
 
 
-return result.insertId;
+  const [result] = await db.query(
 
+    `
+    INSERT INTO users
+    (
+      organization_name,
+      name,
+      email,
+      phone,
+      password,
+      company_address,
+      country,
+      state,
+      city,
+      role_id,
+      created_by,
+      new_device,
+      old_device,
+      supreme_device,
+      pro_star,
+      lite,
+      google_tv,
+      supreme_lock
+    )
+
+    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+    `,
+
+    [
+      organization_name,
+      name,
+      email,
+      phone,
+      password,
+      company_address,
+      country,
+      state,
+      city,
+      role_id,
+      created_by,
+      new_device,
+      old_device,
+      supreme_device,
+      pro_star,
+      lite,
+      google_tv,
+      supreme_lock
+    ]
+
+  );
+
+  return result.insertId;
 
 };
 
@@ -89,9 +109,11 @@ u.organization_name,
 u.name,
 u.email,
 u.phone,
-u.gst,
+u.password,
 u.company_address,
-u.location,
+u.country,
+u.state,
+u.city,
 u.role_id,
 u.created_by,
 u.created_at,
@@ -104,7 +126,7 @@ FROM users u
 
 LEFT JOIN users c
 
-ON u.created_by=c.id
+ON u.created_by = c.id
 
 
 ORDER BY u.id ASC

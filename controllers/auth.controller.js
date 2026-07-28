@@ -9,14 +9,12 @@ import {
 import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
 
-//get api MasterAdmin
+// =========================
+// GET ALL Admin Master
+// =========================
 export const getMasterAdmins = async(req,res)=>{
-
 try{
-
-
 const [users] = await db.query(
-
 `
 SELECT 
 
@@ -28,103 +26,110 @@ u.phone,
 u.gst,
 u.company_address,
 u.location,
-
 u.role_id,
-
 u.created_at,
-
 creator.name AS created_by_name,
-
 creator.role_id AS created_by_role_id
-
-
 FROM users u
-
-
 LEFT JOIN users creator
-
 ON u.created_by = creator.id
-
-
 WHERE u.role_id = 0
-
-
 `
-
 );
-
-
-
 res.status(200).json({
-
 success:true,
-
 count:users.length,
-
 data:users
-
 });
-
-
 }
 catch(error){
-
 console.log(error);
-
-
 res.status(500).json({
-
 success:false,
-
 message:error.message
-
 });
-
-
 }
-
-
 };
 
 
-
+// =========================
+// create the user(onbaord)
+// =========================
 export const createuserrole = async (req, res) => {
+
   try {
 
     const {
+
       organization_name,
       role_id,
       name,
       email,
       phone,
       password,
-      gst,
+      confirm_password,
       company_address,
-      location,
-      created_by
-    } = req.body;
+      country,
+      state,
+      city,
+      created_by,
 
+      new_device,
+      old_device,
+      supreme_device,
+      pro_star,
+      lite,
+      google_tv,
+      supreme_lock
+
+    } = req.body;
 
 
     // Role Validation
 
-    if(!isValidRole(role_id)){
+    if (!isValidRole(role_id)) {
 
       return res.status(400).json({
 
-        success:false,
-        message:"Invalid role_id. Allowed roles are 1 to 7 only"
+        success: false,
+        message: "Invalid role_id. Allowed roles are 1 to 7 only"
 
       });
 
     }
 
 
+    // Retailer Validation
+
+    if (role_id == 6) {
+
+      if (
+
+        !new_device ||
+        !old_device ||
+        !supreme_device ||
+        !pro_star ||
+        !lite ||
+        !google_tv ||
+        !supreme_lock
+
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+          message: "All retailer device fields are required"
+
+        });
+
+      }
+
+    }
+
 
     // Check Email
 
     const existing = await findUserByEmail(email);
-
 
     if (existing) {
 
@@ -138,11 +143,23 @@ export const createuserrole = async (req, res) => {
     }
 
 
+    // Confirm Password
+
+    if (password !== confirm_password) {
+
+      return res.status(400).json({
+
+        success: false,
+        message: "Password and Confirm Password not match"
+
+      });
+
+    }
+
 
     // Password Hash
 
     const hashPassword = await bcrypt.hash(password, 10);
-
 
 
     // Create User
@@ -154,14 +171,22 @@ export const createuserrole = async (req, res) => {
       email,
       phone,
       password: hashPassword,
-      gst,
       company_address,
-      location,
+      country,
+      state,
+      city,
       role_id,
-      created_by: created_by || null
+      created_by: created_by || null,
+
+      new_device,
+      old_device,
+      supreme_device,
+      pro_star,
+      lite,
+      google_tv,
+      supreme_lock
 
     });
-
 
 
     res.status(201).json({
@@ -178,18 +203,27 @@ export const createuserrole = async (req, res) => {
         name,
         email,
         phone,
-        gst,
         company_address,
-        location,
-        created_by: created_by || null
+        country,
+        state,
+        city,
+        created_by: created_by || null,
+
+        new_device,
+        old_device,
+        supreme_device,
+        pro_star,
+        lite,
+        google_tv,
+        supreme_lock
 
       }
 
     });
 
+  }
 
-
-  } catch (error) {
+  catch (error) {
 
     console.log(error);
 
@@ -201,16 +235,13 @@ export const createuserrole = async (req, res) => {
     });
 
   }
+
 };
-
-
 
 
 // =========================
 // GET ALL USERS
 // =========================
-
-
 export const getUsers = async(req,res)=>{
 
 try{
@@ -243,6 +274,9 @@ message:error.message
 }
 
 };
+// =========================
+// GET ALL USERS
+// =========================
 
 
 
