@@ -1,0 +1,7 @@
+export const ROLES={
+
+MASTER_ADMIN:"MASTER_ADMIN",
+
+ADMIN:"ADMIN"
+
+}
