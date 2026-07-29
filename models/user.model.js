@@ -12,7 +12,28 @@ return rows[0];
 
 };
 
-   export const createUser = async (data) => {
+export const findUserById = async (id) => {
+
+  const [rows] = await db.query(
+
+    `
+    SELECT 
+    id,
+    name,
+    role_id
+    FROM users
+    WHERE id=?
+    `,
+    [id]
+
+  );
+
+
+  return rows[0];
+
+};
+
+export const createUser = async (data) => {
 
   const {
     organization_name,
@@ -173,5 +194,18 @@ WHERE id=?
 
 
 return rows[0];
+
+};
+
+
+export const getAllHierarchyUsers = async () => {
+
+    const [rows] = await db.query(`
+        SELECT *
+        FROM users
+        ORDER BY id ASC
+    `);
+
+    return rows;
 
 };

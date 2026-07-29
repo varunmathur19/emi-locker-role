@@ -3,11 +3,14 @@ import bcrypt from "bcrypt";
 import {
     findUserByEmail,
     createUser as createUserModel,
-   
-    getAllUsers
+    getAllUsers,
+    findUserById,
+    getAllHierarchyUsers
 } from "../models/user.model.js";
 import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
+import jwt from "jsonwebtoken";
+
 
 // =========================
 // GET ALL Admin Master
@@ -56,11 +59,8 @@ message:error.message
 // create the user(onbaord)
 // =========================
 export const createuserrole = async (req, res) => {
-
   try {
-
     const {
-
       organization_name,
       role_id,
       name,
@@ -72,8 +72,6 @@ export const createuserrole = async (req, res) => {
       country,
       state,
       city,
-      created_by,
-
       new_device,
       old_device,
       supreme_device,
@@ -81,30 +79,40 @@ export const createuserrole = async (req, res) => {
       lite,
       google_tv,
       supreme_lock
-
     } = req.body;
 
+    // Logged-in User ID from Token
+    const created_by = req.user.id;
 
-    // Role Validation
+    // Check Creator Exists
+    const creator = await findUserById(created_by);
 
-    if (!isValidRole(role_id)) {
-
-      return res.status(400).json({
-
+    if (!creator) {
+      return res.status(404).json({
         success: false,
-        message: "Invalid role_id. Allowed roles are 1 to 7 only"
-
+        message: "Creator not found"
       });
-
     }
 
+    // Role Validation
+    if (!isValidRole(role_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role_id. Allowed roles are 1 to 7 only"
+      });
+    }
+
+    // Hierarchy Validation
+    if (Number(role_id) <= Number(creator.role_id)) {
+      return res.status(400).json({
+        success: false,
+        message: "You cannot create same or upper level role"
+      });
+    }
 
     // Retailer Validation
-
-    if (role_id == 6) {
-
+    if (Number(role_id) === 6) {
       if (
-
         !new_device ||
         !old_device ||
         !supreme_device ||
@@ -112,61 +120,39 @@ export const createuserrole = async (req, res) => {
         !lite ||
         !google_tv ||
         !supreme_lock
-
       ) {
-
         return res.status(400).json({
-
           success: false,
           message: "All retailer device fields are required"
-
         });
-
       }
-
     }
 
-
-    // Check Email
-
+    // Email Check
     const existing = await findUserByEmail(email);
 
     if (existing) {
-
       return res.status(400).json({
-
         success: false,
         message: "Email already exists"
-
       });
-
     }
 
-
-    // Confirm Password
-
+    // Password Validation
     if (password !== confirm_password) {
-
       return res.status(400).json({
-
         success: false,
         message: "Password and Confirm Password not match"
-
       });
-
     }
 
-
-    // Password Hash
-
+    // Hash Password
     const hashPassword = await bcrypt.hash(password, 10);
 
-
     // Create User
-
     const userId = await createUserModel({
-
       organization_name,
+      role_id,
       name,
       email,
       phone,
@@ -175,9 +161,7 @@ export const createuserrole = async (req, res) => {
       country,
       state,
       city,
-      role_id,
-      created_by: created_by || null,
-
+      created_by,
       new_device,
       old_device,
       supreme_device,
@@ -185,18 +169,12 @@ export const createuserrole = async (req, res) => {
       lite,
       google_tv,
       supreme_lock
-
     });
 
-
-    res.status(201).json({
-
+    return res.status(201).json({
       success: true,
-
       message: "User Registered Successfully",
-
       data: {
-
         id: userId,
         organization_name,
         role_id,
@@ -207,8 +185,7 @@ export const createuserrole = async (req, res) => {
         country,
         state,
         city,
-        created_by: created_by || null,
-
+        created_by,
         new_device,
         old_device,
         supreme_device,
@@ -216,28 +193,71 @@ export const createuserrole = async (req, res) => {
         lite,
         google_tv,
         supreme_lock
-
       }
-
     });
 
-  }
-
-  catch (error) {
-
+  } catch (error) {
     console.log(error);
 
-    res.status(500).json({
-
+    return res.status(500).json({
       success: false,
       message: error.message
+    });
+  }
+};
 
+
+
+export const loginUser = async (req, res) => {
+  try {
+
+    const { email, password } = req.body;
+
+    const user = await findUserByEmail(email);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found"
+      });
+    }
+
+    const match = await bcrypt.compare(password, user.password);
+
+    if (!match) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid password"
+      });
+    }
+
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role_id: user.role_id,
+        email: user.email
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d"
+      }
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Login Successful",
+      token
+    });
+
+  } catch (error) {
+
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
 
   }
-
 };
-
 
 // =========================
 // GET ALL USERS
@@ -274,15 +294,72 @@ message:error.message
 }
 
 };
+
+
 // =========================
-// GET ALL USERS
+// GET ALL getHierarchy
 // =========================
 
 
+export const getHierarchyById = async (req, res) => {
 
+    try {
 
+        const { id } = req.params;
 
+        const users = await getAllHierarchyUsers();
 
+        const root = users.find(x => x.id == id);
 
+        if (!root) {
 
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
 
+        }
+
+        const buildTree = (userId) => {
+
+            const children = users.filter(x => x.created_by == userId);
+
+            return children.map(child => ({
+
+                id: child.id,
+                name: child.name,
+                role_id: child.role_id,
+                email: child.email,
+                phone: child.phone,
+                organization_name: child.organization_name,
+
+                children: buildTree(child.id)
+
+            }));
+
+        };
+
+        root.children = buildTree(root.id);
+
+        return res.status(200).json({
+
+            success: true,
+
+            data: root
+
+        });
+
+    }
+
+    catch(error){
+
+        res.status(500).json({
+
+            success:false,
+            message:error.message
+
+        });
+
+    }
+
+};

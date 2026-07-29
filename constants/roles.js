@@ -12,15 +12,10 @@ export const ROLES = {
 
     RETAILER: 6,
 
-    EMPLOYEE: 7
-
+    EMPLOYEE: 7,
 };
-
-
 // Role Validation
 
 export const isValidRole = (role_id)=>{
-
     return Object.values(ROLES).includes(Number(role_id));
-
 };
