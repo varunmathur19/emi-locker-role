@@ -299,8 +299,6 @@ message:error.message
 // =========================
 // GET ALL getHierarchy
 // =========================
-
-
 export const getHierarchyById = async (req, res) => {
 
     try {
