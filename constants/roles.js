@@ -14,8 +14,18 @@ export const ROLES = {
 
     EMPLOYEE: 7,
 };
+
 // Role Validation
 
 export const isValidRole = (role_id)=>{
     return Object.values(ROLES).includes(Number(role_id));
 };
+
+// Boolean Values
+
+export const BOOLEAN = {
+    FALSE: 0,
+    TRUE: 1
+};
+
+

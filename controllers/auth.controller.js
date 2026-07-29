@@ -4,7 +4,7 @@ import {
     findUserByEmail,
     createUser as createUserModel,
     getAllUsers,
-    findUserById,
+    findUserById, 
     getAllHierarchyUsers
 } from "../models/user.model.js";
 import db from "../config/db.js";
@@ -111,22 +111,50 @@ export const createuserrole = async (req, res) => {
     }
 
     // Retailer Validation
-    if (Number(role_id) === 6) {
-      if (
-        !new_device ||
-        !old_device ||
-        !supreme_device ||
-        !pro_star ||
-        !lite ||
-        !google_tv ||
-        !supreme_lock
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "All retailer device fields are required"
-        });
-      }
-    }
+ // Retailer Validation
+if (Number(role_id) === 6) {
+
+  if (
+    new_device === undefined ||
+    old_device === undefined ||
+    supreme_device === undefined ||
+    pro_star === undefined ||
+    lite === undefined ||
+    google_tv === undefined ||
+    supreme_lock === undefined
+  ) {
+
+    return res.status(400).json({
+      success: false,
+      message: "All retailer device fields are required"
+    });
+
+  }
+
+
+  // Only 0 and 1 allowed
+  const deviceFields = [
+    new_device,
+    old_device,
+    supreme_device,
+    pro_star,
+    lite,
+    google_tv,
+    supreme_lock
+  ];
+
+
+  if(deviceFields.some(value => ![0,1].includes(Number(value)))){
+
+    return res.status(400).json({
+      success:false,
+      message:"Device fields only accept 0 or 1"
+    });
+
+  }
+
+}
+
 
     // Email Check
     const existing = await findUserByEmail(email);
@@ -307,9 +335,9 @@ export const getHierarchyById = async (req, res) => {
 
         const users = await getAllHierarchyUsers();
 
-        const root = users.find(x => x.id == id);
+        const rootUser = users.find(x => x.id == id);
 
-        if (!root) {
+        if (!rootUser) {
 
             return res.status(404).json({
                 success: false,
@@ -318,9 +346,11 @@ export const getHierarchyById = async (req, res) => {
 
         }
 
+
         const buildTree = (userId) => {
 
             const children = users.filter(x => x.created_by == userId);
+
 
             return children.map(child => ({
 
@@ -331,13 +361,46 @@ export const getHierarchyById = async (req, res) => {
                 phone: child.phone,
                 organization_name: child.organization_name,
 
+                // Retailer Device Fields
+                new_device: Number(child.new_device),
+                old_device: Number(child.old_device),
+                supreme_device: Number(child.supreme_device),
+                pro_star: Number(child.pro_star),
+                lite: Number(child.lite),
+                google_tv: Number(child.google_tv),
+                supreme_lock: Number(child.supreme_lock),
+
+
                 children: buildTree(child.id)
 
             }));
 
         };
 
-        root.children = buildTree(root.id);
+
+        const root = {
+
+            id: rootUser.id,
+            name: rootUser.name,
+            role_id: rootUser.role_id,
+            email: rootUser.email,
+            phone: rootUser.phone,
+            organization_name: rootUser.organization_name,
+
+            // Retailer Device Fields
+            new_device: Number(rootUser.new_device),
+            old_device: Number(rootUser.old_device),
+            supreme_device: Number(rootUser.supreme_device),
+            pro_star: Number(rootUser.pro_star),
+            lite: Number(rootUser.lite),
+            google_tv: Number(rootUser.google_tv),
+            supreme_lock: Number(rootUser.supreme_lock),
+
+
+            children: buildTree(rootUser.id)
+
+        };
+
 
         return res.status(200).json({
 
@@ -346,6 +409,7 @@ export const getHierarchyById = async (req, res) => {
             data: root
 
         });
+
 
     }
 

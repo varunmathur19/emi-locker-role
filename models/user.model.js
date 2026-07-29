@@ -35,28 +35,29 @@ export const findUserById = async (id) => {
 
 export const createUser = async (data) => {
 
-  const {
-    organization_name,
-    name,
-    email,
-    phone,
-    password,
-    company_address,
-    country,
-    state,
-    city,
-    role_id,
-    created_by,
+ const {
 
-    new_device,
-    old_device,
-    supreme_device,
-    pro_star,
-    lite,
-    google_tv,
-    supreme_lock
+  organization_name,
+  name,
+  email,
+  phone,
+  password,
+  company_address,
+  country,
+  state,
+  city,
+  role_id,
+  created_by,
 
-  } = data;
+  new_device = 0,
+  old_device = 0,
+  supreme_device = 0,
+  pro_star = 0,
+  lite = 0,
+  google_tv = 0,
+  supreme_lock = 0
+
+ } = data;
 
 
   const [result] = await db.query(
@@ -99,13 +100,14 @@ export const createUser = async (data) => {
       city,
       role_id,
       created_by,
-      new_device,
-      old_device,
-      supreme_device,
-      pro_star,
-      lite,
-      google_tv,
-      supreme_lock
+
+      Number(new_device),
+      Number(old_device),
+      Number(supreme_device),
+      Number(pro_star),
+      Number(lite),
+      Number(google_tv),
+      Number(supreme_lock)
     ]
 
   );
@@ -113,9 +115,7 @@ export const createUser = async (data) => {
   return result.insertId;
 
 };
-
 // Get All Users
-
 export const getAllUsers = async()=>{
 
 
@@ -162,46 +162,32 @@ return rows;
 
 };
 
-// Get Single User
-
-export const getUserById = async(id)=>{
-
-const [rows] = await db.query(
-
-`
-SELECT
-id,
-organization_name,
-name,
-email,
-phone,
-gst,
-company_address,
-location,
-role_id,
-created_by,
-created_at
-
-FROM users
-
-WHERE id=?
-
-`,
-
-[id]
-
-);
-
-
-return rows[0];
-
-};
-
-
+//get getAllHierarchyUsers 
 export const getAllHierarchyUsers = async () => {
 
     const [rows] = await db.query(`
-        SELECT *
+        SELECT
+            id,
+            organization_name,
+            role_id,
+            name,
+            email,
+            phone,
+            company_address,
+            country,
+            state,
+            city,
+            created_by,
+            created_at,
+
+            new_device,
+            old_device,
+            supreme_device,
+            pro_star,
+            lite,
+            google_tv,
+            supreme_lock
+
         FROM users
         ORDER BY id ASC
     `);
