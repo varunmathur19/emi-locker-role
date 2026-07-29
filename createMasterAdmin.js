@@ -36,10 +36,11 @@ name,
 email,
 phone,
 password,
-role_id
+role_id,
+organization_name
 )
 
-VALUES(?,?,?,?,?)
+VALUES(?,?,?,?,?,?)
 
 `,
 
@@ -48,7 +49,8 @@ MASTER_ADMIN_NAME,
 MASTER_ADMIN_EMAIL,
 MASTER_ADMIN_PHONE,
 password,
-1
+1,
+"Master Organization"
 ]
 
 );

@@ -12,30 +12,52 @@ return rows[0];
 
 };
 
-   export const createUser = async (data) => {
+export const findUserById = async (id) => {
 
-  const {
-    organization_name,
+  const [rows] = await db.query(
+
+    `
+    SELECT 
+    id,
     name,
-    email,
-    phone,
-    password,
-    company_address,
-    country,
-    state,
-    city,
-    role_id,
-    created_by,
+    role_id
+    FROM users
+    WHERE id=?
+    `,
+    [id]
 
-    new_device,
-    old_device,
-    supreme_device,
-    pro_star,
-    lite,
-    google_tv,
-    supreme_lock
+  );
 
-  } = data;
+
+  return rows[0];
+
+};
+
+export const createUser = async (data) => {
+
+ const {
+
+  organization_name,
+  name,
+  email,
+  phone,
+  password,
+  company_address,
+  country,
+  state,
+  city,
+  role_id,
+  created_by,
+
+  new_device = 0,
+  old_device = 0,
+  supreme_device = 0,
+  pro_star = 0,
+  lite = 0,
+  google_tv = 0,
+  supreme_lock = 0
+
+ } = data;
 
 
   const [result] = await db.query(
@@ -78,13 +100,14 @@ return rows[0];
       city,
       role_id,
       created_by,
-      new_device,
-      old_device,
-      supreme_device,
-      pro_star,
-      lite,
-      google_tv,
-      supreme_lock
+
+      Number(new_device),
+      Number(old_device),
+      Number(supreme_device),
+      Number(pro_star),
+      Number(lite),
+      Number(google_tv),
+      Number(supreme_lock)
     ]
 
   );
@@ -92,9 +115,7 @@ return rows[0];
   return result.insertId;
 
 };
-
 // Get All Users
-
 export const getAllUsers = async()=>{
 
 
@@ -109,7 +130,6 @@ u.organization_name,
 u.name,
 u.email,
 u.phone,
-u.password,
 u.company_address,
 u.country,
 u.state,
@@ -141,37 +161,36 @@ return rows;
 
 };
 
-// Get Single User
+//get getAllHierarchyUsers 
+export const getAllHierarchyUsers = async () => {
 
-export const getUserById = async(id)=>{
+    const [rows] = await db.query(`
+        SELECT
+            id,
+            organization_name,
+            role_id,
+            name,
+            email,
+            phone,
+            company_address,
+            country,
+            state,
+            city,
+            created_by,
+            created_at,
 
-const [rows] = await db.query(
+            new_device,
+            old_device,
+            supreme_device,
+            pro_star,
+            lite,
+            google_tv,
+            supreme_lock
 
-`
-SELECT
-id,
-organization_name,
-name,
-email,
-phone,
-gst,
-company_address,
-location,
-role_id,
-created_by,
-created_at
+        FROM users
+        ORDER BY id ASC
+    `);
 
-FROM users
-
-WHERE id=?
-
-`,
-
-[id]
-
-);
-
-
-return rows[0];
+    return rows;
 
 };

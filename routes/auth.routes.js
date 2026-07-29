@@ -3,19 +3,26 @@ import express from "express";
 import {
     getMasterAdmins,
     createuserrole,
-    getUsers
+    getUsers,
+    // getHierarchy,
+    getHierarchyById,
+    loginUser,
 } from "../controllers/auth.controller.js";
+import { authMiddleware } from "../middleware/auth.middleware.js";
 
 
 const router = express.Router();
 
 
 // Register User
+
 router.post(
-    "/register",
-    createuserrole
+  "/register",
+  authMiddleware,
+  createuserrole
 );
 
+router.post("/login", loginUser);
 
 // Get All Users
 router.get(
@@ -30,5 +37,6 @@ router.get(
     getMasterAdmins
 );
 
+router.get("/hierarchy/:id", getHierarchyById);
 
 export default router;
