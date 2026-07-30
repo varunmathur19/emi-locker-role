@@ -13,48 +13,6 @@ import jwt from "jsonwebtoken";
 
 
 // =========================
-// GET ALL Admin Master
-// =========================
-export const getMasterAdmins = async(req,res)=>{
-try{
-const [users] = await db.query(
-`
-SELECT 
-
-u.id,
-u.organization_name,
-u.name,
-u.email,
-u.phone,
-u.gst,
-u.company_address,
-u.location,
-u.role_id,
-u.created_at,
-creator.name AS created_by_name,
-creator.role_id AS created_by_role_id
-FROM users u
-LEFT JOIN users creator
-ON u.created_by = creator.id
-WHERE u.role_id = 0
-`
-);
-res.status(200).json({
-success:true,
-count:users.length,
-data:users
-});
-}
-catch(error){
-console.log(error);
-res.status(500).json({
-success:false,
-message:error.message
-});
-}
-};
-
-// =========================
 // create the user(onbaord)
 // =========================
 export const createuserrole = async (req, res) => {
@@ -233,6 +191,9 @@ if (Number(role_id) === 6) {
   }
 };
 
+// =========================
+// Login staff
+// =========================
 export const loginUser = async (req, res) => {
   try {
 
@@ -458,3 +419,69 @@ catch(error){
 }
 
 };        
+
+// =========================
+// User Chain Api
+// =========================
+export const getDropdownUsers = async (req, res) => {
+  try {
+
+    const { role_id, parent_id } = req.query;
+
+    if (!role_id) {
+      return res.status(400).json({
+        success: false,
+        message: "role_id is required"
+      });
+    }
+
+    let sql = "";
+    let values = [];
+
+    // Admin
+    if (Number(role_id) === 1) {
+
+      sql = `
+        SELECT id,name
+        FROM users
+        WHERE role_id=1
+        ORDER BY name
+      `;
+
+    } else {
+
+      if (!parent_id) {
+        return res.status(400).json({
+          success: false,
+          message: "parent_id is required"
+        });
+      }
+
+      sql = `
+        SELECT id,name
+        FROM users
+        WHERE role_id=?
+        AND created_by=?
+        ORDER BY name
+      `;
+
+      values = [role_id, parent_id];
+    }
+
+    const [rows] = await db.query(sql, values);
+
+    return res.status(200).json({
+      success: true,
+      total: rows.length,
+      data: rows
+    });
+
+  } catch (error) {
+
+    return res.status(500).json({
+      success: false,
+      message: error.message
+    });
+
+  }
+};
