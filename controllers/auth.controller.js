@@ -54,7 +54,6 @@ message:error.message
 }
 };
 
-
 // =========================
 // create the user(onbaord)
 // =========================
@@ -234,8 +233,6 @@ if (Number(role_id) === 6) {
   }
 };
 
-
-
 export const loginUser = async (req, res) => {
   try {
 
@@ -323,8 +320,7 @@ message:error.message
 
 };
 
-
-// =========================
+// =========================  
 // GET ALL getHierarchy
 // =========================
 export const getHierarchyById = async (req, res) => {
@@ -386,7 +382,6 @@ export const getHierarchyById = async (req, res) => {
             email: rootUser.email,
             phone: rootUser.phone,
             organization_name: rootUser.organization_name,
-
             // Retailer Device Fields
             new_device: Number(rootUser.new_device),
             old_device: Number(rootUser.old_device),
@@ -425,3 +420,41 @@ export const getHierarchyById = async (req, res) => {
     }
 
 };
+
+// =========================
+// Logout api
+// =========================
+export const logoutUser = async(req,res)=>{
+
+try{
+
+    const user = req.user;
+
+
+    return res.status(200).json({
+
+        success:true,
+        message:"Logout Successfully",
+
+        user:{
+            // id:user.id,
+            // role_id:user.role_id,
+            email:user.email
+        }
+
+    });
+
+
+}
+catch(error){
+
+    return res.status(500).json({
+
+        success:false,
+        message:error.message
+
+    });
+
+}
+
+};        

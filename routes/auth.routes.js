@@ -7,6 +7,7 @@ import {
     // getHierarchy,
     getHierarchyById,
     loginUser,
+    logoutUser,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 
@@ -37,6 +38,14 @@ router.get(
     getMasterAdmins
 );
 
+//hierarchy 
 router.get("/hierarchy/:id", getHierarchyById);
+
+// logout
+router.post(
+"/logout",
+authMiddleware,
+logoutUser
+);
 
 export default router;
