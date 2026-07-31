@@ -1,15 +1,16 @@
 import express from "express";
 
 import {
-    getMasterAdmins,
     createuserrole,
     getUsers,
     // getHierarchy,
     getHierarchyById,
     loginUser,
     logoutUser,
+    getDropdownUsers,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
+import { validationResult } from "express-validator";
 
 
 const router = express.Router();
@@ -18,34 +19,30 @@ const router = express.Router();
 // Register User
 
 router.post(
-  "/register",
+  "/add-staff",
   authMiddleware,
-  createuserrole
+  createuserrole,
 );
 
 router.post("/login", loginUser);
 
 // Get All Users
 router.get(
-    "/getAllUser",
+    "/getAllStaffData",
     getUsers
 );
 
-
-// Get Master Admins 
-router.get(
-    "/master-admins",
-    getMasterAdmins
-);
-
 //hierarchy 
-router.get("/hierarchy/:id", getHierarchyById);
+router.get("/all-staff-data/:id", getHierarchyById);
 
 // logout
 router.post(
-"/logout",
+"/logout-staff",
 authMiddleware,
 logoutUser
 );
+
+//User Chain Api
+router.get("/hierarchy-dropdown", getDropdownUsers);
 
 export default router;
