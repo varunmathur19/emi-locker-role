@@ -1,5 +1,5 @@
 import db from "../config/db.js";
-
+import pool from "../config/db.js";
 
 export const findUserByEmail = async(email)=>{
 
@@ -194,3 +194,31 @@ export const getAllHierarchyUsers = async () => {
     return rows;
 
 };
+
+export const saveStaffPermissions = async (staffId, permissions) => {
+
+    for(const role of permissions){
+
+        await pool.query(
+            "INSERT INTO staff_role_permissions (staff_id, role_id) VALUES (?,?)",
+            [staffId, role]
+        );
+
+    }
+
+};
+
+export const getStaffPermissions = async(staffId)=>{
+
+    const [rows]=await pool.query(
+
+        "SELECT role_id FROM staff_role_permissions WHERE staff_id=?",
+
+        [staffId]
+
+    );
+
+    return rows.map(item=>Number(item.role_id));
+
+};
+
