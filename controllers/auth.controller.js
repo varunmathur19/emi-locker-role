@@ -292,17 +292,43 @@ export const getUsers = async(req,res)=>{
 
 try{
 
+const page = Number(req.query.page) || 1;
 
-const users = await getAllUsers();
+const limit = Number(req.query.limit) || 10;
+
+
+const offset = (page - 1) * limit;
+
+
+const role_id = req.query.role_id || null;
+
+
+
+const result = await getAllUsers(
+    limit,
+    offset,
+    role_id
+);
+
 
 
 res.status(200).json({
 
 success:true,
 
-total:users.length,
 
-data:users
+pagination:{
+    currentPage:page,
+    totalPages:Math.ceil(result.total / limit),
+    limit:limit
+},
+
+
+totalUsers:result.total,
+
+
+data:result.users
+
 
 });
 
@@ -317,10 +343,11 @@ message:error.message
 
 });
 
+
 }
 
-};
 
+};
 // =========================  
 // GET ALL getHierarchy
 // =========================
