@@ -1,25 +1,34 @@
-import express from "express"
-import { config } from "dotenv"
-config()
-import {connectDB} from "./config/db.js"
-import router from "./routes/auth.routes.js"
-connectDB()
+import express from "express";
+import cors from "cors";
+import { config } from "dotenv";
+config();
 
-const app=express()
+import { connectDB } from "./config/db.js";
+import router from "./routes/auth.routes.js";
 
-const PORT = process.env.PORT
+connectDB();
+
+const app = express();
+
+const PORT = process.env.PORT;
+
+// Middleware
+app.use(
+  cors({
+    origin: "http://localhost:3000", // Frontend URL
+    credentials: true,
+  })
+);
+
 app.use(express.json());
 
-app.use(
-"/api",
-router);
+// Routes
+app.use("/api", router);
 
+app.get("/", (req, res) => {
+  res.send("Hello World");
+});
 
-app.get("/",(req,res)=>{
-    res.send("hello world")
-})
-
-app.listen(PORT,(req,res)=>{
-    console.log(`server is running on port ${PORT}`);
-    
-})
+app.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
+});
