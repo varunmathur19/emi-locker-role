@@ -6,7 +6,6 @@ import {
     getAllUsers,
     findUserById, 
     getAllHierarchyUsers,
-    saveStaffPermissions, getStaffPermissions
 } from "../models/user.model.js";
 import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
@@ -18,548 +17,177 @@ import { ROLES } from "../constants/roles.js";
 // create the user(onbaord)
 // =========================
 export const createuserrole = async (req, res) => {
-
 try {
-
-
 const {
-
 organization_name,
-
 role_id,
-
 name,
-
 email,
-
 phone,
-
 password,
-
 confirm_password,
-
 company_address,
-
 country,
-
 state,
-
 city,
-
-staff_permissions,
-
 new_device,
-
 old_device,
-
 supreme_device,
-
 pro_star,
-
 lite,
-
 google_tv,
-
 supreme_lock
-
-
 } = req.body;
-
-
-
 // Login user id from JWT
-
 const created_by = req.user.id;
-
-
-
 // Creator check
-
 const creator = await findUserById(created_by);
-
-
-
 if(!creator){
-
 return res.status(404).json({
-
 success:false,
-
 message:"Creator not found"
-
 });
-
 }
-
-
-
-
-
 // Role validation
 
 if(!isValidRole(role_id)){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"Invalid role_id"
-
 });
-
-
 }
-
-
-
-
-
-/*
-====================================
- STAFF PERMISSION CHECK
-====================================
-*/
-
-
-// Agar Staff user create kar raha hai
-
-if(Number(creator.role_id) === ROLES.STAFF){
-
-
-
-const permissions = await getStaffPermissions(created_by);
-
-
-
-if(!permissions.includes(Number(role_id))){
-
-
-return res.status(403).json({
-
-success:false,
-
-message:"You don't have permission to create this role"
-
-});
-
-
-}
-
-
-
-// Staff Admin ya Staff create nahi kar sakta
-
-if(
-Number(role_id) === ROLES.ADMIN ||
-Number(role_id) === ROLES.STAFF
-){
-
-
-return res.status(403).json({
-
-success:false,
-
-message:"Staff cannot create Admin or Staff"
-
-});
-
-
-}
-
-
-
-}
-
-
-
-
-
-
-
 /*
 ====================================
  STAFF CREATE RULE
 ====================================
 */
 
+if (Number(role_id) === ROLES.STAFF) {
 
+    if (Number(creator.role_id) !== ROLES.ADMIN) {
+
+        return res.status(403).json({
+            success: false,
+            message: "Only Admin can create Staff"
+        });
+
+    }
+
+}
+/*
+====================================
+ STAFF CREATE RULE
+====================================
+*/
 // Sirf Admin Staff create karega
-
-
 if(Number(role_id) === ROLES.STAFF){
 
-
-
 if(Number(creator.role_id)!==ROLES.ADMIN){
-
-
 return res.status(403).json({
-
 success:false,
-
 message:"Only Admin can create Staff"
-
 });
-
-
-}
-
-
-
-
-
+}}
 // Staff permission required
-
-
-if(
-!Array.isArray(staff_permissions) ||
-staff_permissions.length===0
-){
-
-
-return res.status(400).json({
-
-success:false,
-
-message:"Staff permissions are required"
-
-});
-
-
-}
-
-
-
-
-// Admin permission nahi de sakte
-
-
-if(staff_permissions.includes(ROLES.ADMIN)){
-
-
-return res.status(400).json({
-
-success:false,
-
-message:"Staff cannot get Admin permission"
-
-});
-
-
-}
-
-
-
-
-
-// Staff permission validation
-
-
-const invalidPermission = staff_permissions.some(
-
-(role)=>!isValidRole(role)
-
-);
-
-
-
-if(invalidPermission){
-
-
-return res.status(400).json({
-
-success:false,
-
-message:"Invalid staff permission role"
-
-});
-
-
-}
-
-
-
-
-}
-
-
-
-
-
-
-
 
 /*
 ====================================
  NORMAL ROLE HIERARCHY CHECK
 ====================================
 */
-
-
 // Staff ke liye hierarchy skip hogi
-
-
 if(Number(creator.role_id)!==ROLES.STAFF){
-
-
-
 if(Number(role_id)!==ROLES.STAFF &&
-
 Number(role_id)<=Number(creator.role_id)
-
 ){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"You cannot create same or upper level role"
-
 });
-
-
 }
-
-
-
 }
-
-
-
-
-
-
-
-
 /*
 ====================================
  RETAILER DEVICE VALIDATION
 ====================================
 */
-
-
 if(Number(role_id)===ROLES.RETAILER){
-
-
-
 const deviceFields=[
-
 new_device,
-
 old_device,
-
 supreme_device,
-
 pro_star,
-
 lite,
-
 google_tv,
-
 supreme_lock
-
 ];
-
-
-
-
 if(deviceFields.some(value=>value===undefined)){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"All retailer device fields are required"
-
 });
-
-
 }
-
-
-
-
-
 if(
 deviceFields.some(
 value=>![0,1].includes(Number(value))
 )
-
 ){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"Device fields only accept 0 or 1"
-
 });
-
-
 }
-
-
-
 }
-
-
-
-
-
-
-
 // Email check
-
-
 const existing = await findUserByEmail(email);
-
-
-
 if(existing){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"Email already exists"
-
 });
-
-
 }
-
-
-
-
-
-
 // Password match
-
-
 if(password!==confirm_password){
-
-
 return res.status(400).json({
-
 success:false,
-
 message:"Password and Confirm Password not match"
-
 });
-
-
 }
-
-
-
-
-
-
 // Password hash
-
-
 const hashPassword = await bcrypt.hash(password,10);
-
-
-
-
-
-
-
 // Create user
-
-
 const userId = await createUserModel({
-
 organization_name,
-
 role_id,
-
 name,
-
 email,
-
 phone,
-
 password:hashPassword,
-
 company_address,
-
 country,
-
 state,
-
 city,
-
 created_by,
-
 new_device,
-
 old_device,
-
 supreme_device,
-
 pro_star,
-
 lite,
-
 google_tv,
-
 supreme_lock
-
-
 });
-
-
-
-
-
-
-
 /*
 ====================================
  SAVE STAFF PERMISSIONS
 ====================================
 */
 
-
-if(Number(role_id)===ROLES.STAFF){
-
-
-await saveStaffPermissions(
-
-userId,
-
-staff_permissions
-
-);
-
-
-}
-
-
-
-
-
-
-
 return res.status(201).json({
-
 success:true,
-
 message:"User Registered Successfully",
-
 data:{
-
 id:userId,
-
 organization_name,
-
 role_id,
 
 name,
@@ -578,23 +206,10 @@ city,
 
 created_by,
 
-staff_permissions:
-
-Number(role_id)===ROLES.STAFF
-
-? staff_permissions
-
-: null
-
 }
 
 
 });
-
-
-
-
-
 }
 
 catch(error){
@@ -677,17 +292,43 @@ export const getUsers = async(req,res)=>{
 
 try{
 
+const page = Number(req.query.page) || 1;
 
-const users = await getAllUsers();
+const limit = Number(req.query.limit) || 10;
+
+
+const offset = (page - 1) * limit;
+
+
+const role_id = req.query.role_id || null;
+
+
+
+const result = await getAllUsers(
+    limit,
+    offset,
+    role_id
+);
+
 
 
 res.status(200).json({
 
 success:true,
 
-total:users.length,
 
-data:users
+pagination:{
+    currentPage:page,
+    totalPages:Math.ceil(result.total / limit),
+    limit:limit
+},
+
+
+totalUsers:result.total,
+
+
+data:result.users
+
 
 });
 
@@ -702,10 +343,11 @@ message:error.message
 
 });
 
+
 }
 
-};
 
+};
 // =========================  
 // GET ALL getHierarchy
 // =========================
@@ -810,40 +452,40 @@ export const getHierarchyById = async (req, res) => {
 // =========================
 // Logout api
 // =========================
-export const logoutUser = async(req,res)=>{
+  export const logoutUser = async(req,res)=>{
 
-try{
+  try{
 
-    const user = req.user;
-
-
-    return res.status(200).json({
-
-        success:true,
-        message:"Logout Successfully",
-
-        user:{
-            // id:user.id,
-            // role_id:user.role_id,
-            email:user.email
-        }
-
-    });
+      const user = req.user;
 
 
-}
-catch(error){
+      return res.status(200).json({
 
-    return res.status(500).json({
+          success:true,
+          message:"Logout Successfully",
 
-        success:false,
-        message:error.message
+          user:{
+              // id:user.id,
+              // role_id:user.role_id,
+              email:user.email
+          }
 
-    });
+      });
 
-}
 
-};        
+  }
+  catch(error){
+
+      return res.status(500).json({
+
+          success:false,
+          message:error.message
+
+      });
+
+  }
+
+  };        
 
 // =========================
 // User Chain Api
@@ -855,16 +497,18 @@ export const getDropdownUsers = async (req, res) => {
 
     if (!role_id) {
       return res.status(400).json({
-        success: false,
-        message: "role_id is required"
+        success:false,
+        message:"role_id is required"
       });
     }
+
 
     let sql = "";
     let values = [];
 
-    // Admin
-    if (Number(role_id) === 1) {
+
+    // Admin / First level
+    if(Number(role_id) === 1){
 
       sql = `
         SELECT id,name
@@ -873,40 +517,60 @@ export const getDropdownUsers = async (req, res) => {
         ORDER BY name
       `;
 
-    } else {
-    
-      if (!parent_id) {
-        return res.status(400).json({
-          success: false,
-          message: "parent_id is required"
-        });
+
+    }else{
+
+
+      // Agar parent_id nahi hai to direct role ke sare users
+      if(!parent_id){
+
+        sql = `
+          SELECT id,name
+          FROM users
+          WHERE role_id=?
+          ORDER BY name
+        `;
+
+        values=[role_id];
+
+      }else{
+
+
+        // Selected parent ke under wale users
+        sql = `
+          SELECT id,name
+          FROM users
+          WHERE role_id=?
+          AND created_by=?
+          ORDER BY name
+        `;
+
+        values=[
+          role_id,
+          parent_id
+        ];
+
       }
 
-      sql = `
-        SELECT id,name
-        FROM users
-        WHERE role_id=?
-        AND created_by=?
-        ORDER BY name
-      `;
-
-      values = [role_id, parent_id];
     }
 
-    const [rows] = await db.query(sql, values);
+
+    const [rows] = await db.query(sql,values);
+
 
     return res.status(200).json({
-      success: true,
-      total: rows.length,
-      data: rows
+      success:true,
+      total:rows.length,
+      data:rows
     });
 
-  } catch (error) {
+
+  } catch(error){
 
     return res.status(500).json({
-      success: false,
-      message: error.message
+      success:false,
+      message:error.message
     });
 
   }
-}; 
+};

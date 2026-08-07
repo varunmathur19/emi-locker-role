@@ -116,12 +116,14 @@ export const createUser = async (data) => {
 
 };
 // Get All Users
-export const getAllUsers = async()=>{
+export const getAllUsers = async (
+limit,
+offset,
+role_id
+)=>{
 
 
-const [rows] = await db.query(
-
-`
+let query = `
 
 SELECT
 
@@ -144,20 +146,93 @@ c.role_id AS created_by_role_id
 
 FROM users u
 
+
 LEFT JOIN users c
 
 ON u.created_by = c.id
 
+`;
+
+
+let params=[];
+
+
+
+if(role_id){
+
+query += ` WHERE u.role_id = ? `;
+
+params.push(role_id);
+
+}
+
+
+
+query += `
 
 ORDER BY u.id ASC
 
+LIMIT ? OFFSET ?
 
-`
+`;
 
+
+
+params.push(
+limit,
+offset
 );
 
 
-return rows;
+
+const [rows] = await db.query(
+query,
+params
+);
+
+
+
+
+
+let countQuery = `
+
+SELECT COUNT(*) AS total
+
+FROM users u
+
+`;
+
+
+
+let countParams=[];
+
+
+
+if(role_id){
+
+countQuery += ` WHERE u.role_id = ?`;
+
+countParams.push(role_id);
+
+}
+
+
+
+const [count] = await db.query(
+countQuery,
+countParams
+);
+
+
+
+return {
+
+users:rows,
+
+total:count[0].total
+
+};
+
 
 };
 
@@ -195,30 +270,5 @@ export const getAllHierarchyUsers = async () => {
 
 };
 
-export const saveStaffPermissions = async (staffId, permissions) => {
 
-    for(const role of permissions){
-
-        await pool.query(
-            "INSERT INTO staff_role_permissions (staff_id, role_id) VALUES (?,?)",
-            [staffId, role]
-        );
-
-    }
-
-};
-
-export const getStaffPermissions = async(staffId)=>{
-
-    const [rows]=await pool.query(
-
-        "SELECT role_id FROM staff_role_permissions WHERE staff_id=?",
-
-        [staffId]
-
-    );
-
-    return rows.map(item=>Number(item.role_id));
-
-};
 

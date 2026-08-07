@@ -45,9 +45,9 @@ router.post(
     .trim()
     .notEmpty()
     .withMessage("Phone is required")
-    .isNumeric()
+    .matches(/^(\+91\s?)?[6-9]\d{9}$/)
     .withMessage("Phone must contain only numbers")
-    .isLength({ min: 10, max: 10 })
+    // .isLength({ min: 10, max: 10 })
     .withMessage("Phone number must be exactly 10 digits"),
   body("country")
     .trim()
