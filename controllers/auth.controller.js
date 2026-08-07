@@ -452,40 +452,40 @@ export const getHierarchyById = async (req, res) => {
 // =========================
 // Logout api
 // =========================
-export const logoutUser = async(req,res)=>{
+  export const logoutUser = async(req,res)=>{
 
-try{
+  try{
 
-    const user = req.user;
-
-
-    return res.status(200).json({
-
-        success:true,
-        message:"Logout Successfully",
-
-        user:{
-            // id:user.id,
-            // role_id:user.role_id,
-            email:user.email
-        }
-
-    });
+      const user = req.user;
 
 
-}
-catch(error){
+      return res.status(200).json({
 
-    return res.status(500).json({
+          success:true,
+          message:"Logout Successfully",
 
-        success:false,
-        message:error.message
+          user:{
+              // id:user.id,
+              // role_id:user.role_id,
+              email:user.email
+          }
 
-    });
+      });
 
-}
 
-};        
+  }
+  catch(error){
+
+      return res.status(500).json({
+
+          success:false,
+          message:error.message
+
+      });
+
+  }
+
+  };        
 
 // =========================
 // User Chain Api
