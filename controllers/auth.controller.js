@@ -497,16 +497,18 @@ export const getDropdownUsers = async (req, res) => {
 
     if (!role_id) {
       return res.status(400).json({
-        success: false,
-        message: "role_id is required"
+        success:false,
+        message:"role_id is required"
       });
     }
+
 
     let sql = "";
     let values = [];
 
-    // Admin
-    if (Number(role_id) === 1) {
+
+    // Admin / First level
+    if(Number(role_id) === 1){
 
       sql = `
         SELECT id,name
@@ -515,40 +517,60 @@ export const getDropdownUsers = async (req, res) => {
         ORDER BY name
       `;
 
-    } else {
-    
-      if (!parent_id) {
-        return res.status(400).json({
-          success: false,
-          message: "parent_id is required"
-        });
+
+    }else{
+
+
+      // Agar parent_id nahi hai to direct role ke sare users
+      if(!parent_id){
+
+        sql = `
+          SELECT id,name
+          FROM users
+          WHERE role_id=?
+          ORDER BY name
+        `;
+
+        values=[role_id];
+
+      }else{
+
+
+        // Selected parent ke under wale users
+        sql = `
+          SELECT id,name
+          FROM users
+          WHERE role_id=?
+          AND created_by=?
+          ORDER BY name
+        `;
+
+        values=[
+          role_id,
+          parent_id
+        ];
+
       }
 
-      sql = `
-        SELECT id,name
-        FROM users
-        WHERE role_id=?
-        AND created_by=?
-        ORDER BY name
-      `;
-
-      values = [role_id, parent_id];
     }
 
-    const [rows] = await db.query(sql, values);
+
+    const [rows] = await db.query(sql,values);
+
 
     return res.status(200).json({
-      success: true,
-      total: rows.length,
-      data: rows
+      success:true,
+      total:rows.length,
+      data:rows
     });
 
-  } catch (error) {
+
+  } catch(error){
 
     return res.status(500).json({
-      success: false,
-      message: error.message
+      success:false,
+      message:error.message
     });
 
   }
-}; 
+};
