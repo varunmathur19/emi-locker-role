@@ -889,6 +889,10 @@ export const getDropdownUsers = async (req, res) => {
   try {
     const { role_id, parent_id } = req.query;
 
+    // =====================================================
+    // VALIDATE ROLE ID
+    // =====================================================
+
     if (!role_id) {
       return res.status(400).json({
         success: false,
@@ -897,6 +901,21 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     const roleId = Number(role_id);
+    const parentId = parent_id ? Number(parent_id) : null;
+
+    if (Number.isNaN(roleId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role_id",
+      });
+    }
+
+    if (parent_id && Number.isNaN(parentId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid parent_id",
+      });
+    }
 
     let sql = "";
     let values = [];
@@ -934,15 +953,84 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // RETAILER
+    // =====================================================
+    // Retailer ka direct creator FOS hota hai.
+    //
+    // Lekin Distributor select karne par:
+    //
+    // parent_id = Distributor ID
+    //
+    // Retailer ko parent_distributor_id se find karna hai.
+    // =====================================================
+
+    else if (roleId === 6) {
+      if (!parentId) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          ORDER BY name
+        `;
+      } else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          AND parent_distributor_id = ?
+          ORDER BY name
+        `;
+
+        values = [parentId];
+      }
+    }
+
+    // =====================================================
+    // FOS
+    // =====================================================
+    // FOS ka parent Distributor hota hai.
+    //
+    // Distributor select:
+    // parent_id = Distributor ID
+    //
+    // FOS ko parent_distributor_id se find karenge.
+    // =====================================================
+
+    else if (roleId === 5) {
+      if (!parentId) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 5
+          ORDER BY name
+        `;
+      } else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 5
+          AND parent_distributor_id = ?
+          ORDER BY name
+        `;
+
+        values = [parentId];
+      }
+    }
+
+    // =====================================================
     // OTHER ROLES
     // =====================================================
 
     else {
       // ---------------------------------------------------
-      // parent_id nahi hai
+      // No parent
       // ---------------------------------------------------
 
-      if (!parent_id) {
+      if (!parentId) {
         sql = `
           SELECT
             ${columns}
@@ -955,7 +1043,7 @@ export const getDropdownUsers = async (req, res) => {
       }
 
       // ---------------------------------------------------
-      // parent_id ke under users
+      // Parent ke under users
       // ---------------------------------------------------
 
       else {
@@ -970,12 +1058,29 @@ export const getDropdownUsers = async (req, res) => {
 
         values = [
           roleId,
-          Number(parent_id),
+          parentId,
         ];
       }
     }
 
+    // =====================================================
+    // EXECUTE QUERY
+    // =====================================================
+
+    console.log("=================================");
+    console.log("GET DROPDOWN USERS");
+    console.log("Role ID:", roleId);
+    console.log("Parent ID:", parentId);
+    console.log("SQL:", sql);
+    console.log("Values:", values);
+
     const [rows] = await db.query(sql, values);
+
+    console.log("Dropdown Users:", rows);
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,
@@ -984,8 +1089,10 @@ export const getDropdownUsers = async (req, res) => {
     });
 
   } catch (error) {
-
-    console.error("getDropdownUsers Error:", error);
+    console.error(
+      "getDropdownUsers Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
