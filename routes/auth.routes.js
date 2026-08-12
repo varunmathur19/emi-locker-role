@@ -3,8 +3,6 @@ import express from "express";
 import {
     createuserrole,
     getUsers,
-    // getHierarchy,
-    getHierarchyById,
     loginUser,
     logoutUser,
     getDropdownUsers,
@@ -103,8 +101,7 @@ router.get(
     getUsers
 );
 
-//hierarchy 
-router.get("/all-staff-data/:id", getHierarchyById);
+
 
 // logout
 router.post(

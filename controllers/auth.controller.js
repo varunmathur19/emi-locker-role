@@ -801,106 +801,6 @@ message:error.message
 
 
 };
-// =========================  
-// GET ALL getHierarchy
-// =========================
-export const getHierarchyById = async (req, res) => {
-
-    try {
-
-        const { id } = req.params;
-
-        const users = await getAllHierarchyUsers();
-
-        const rootUser = users.find(x => x.id == id);
-
-        if (!rootUser) {
-
-            return res.status(404).json({
-                success: false,
-                message: "User not found"
-            });
-
-        }
-
-
-        const buildTree = (userId) => {
-
-            const children = users.filter(x => x.created_by == userId);
-
-
-            return children.map(child => ({
-
-                id: child.id,
-                name: child.name,
-                role_id: child.role_id,
-                email: child.email,
-                phone: child.phone,
-                organization_name: child.organization_name,
-
-                // Retailer Device Fields
-                new_device: Number(child.new_device),
-                old_device: Number(child.old_device),
-                supreme_device: Number(child.supreme_device),
-                pro_star: Number(child.pro_star),
-                lite: Number(child.lite),
-                google_tv: Number(child.google_tv),
-                supreme_lock: Number(child.supreme_lock),
-
-
-                children: buildTree(child.id)
-
-            }));
-
-        };
-
-
-        const root = {
-
-            id: rootUser.id,
-            name: rootUser.name,
-            role_id: rootUser.role_id,
-            email: rootUser.email,
-            phone: rootUser.phone,
-            organization_name: rootUser.organization_name,
-            // Retailer Device Fields
-            new_device: Number(rootUser.new_device),
-            old_device: Number(rootUser.old_device),
-            supreme_device: Number(rootUser.supreme_device),
-            pro_star: Number(rootUser.pro_star),
-            lite: Number(rootUser.lite),
-            google_tv: Number(rootUser.google_tv),
-            supreme_lock: Number(rootUser.supreme_lock),
-
-
-            children: buildTree(rootUser.id)
-
-        };
-
-
-        return res.status(200).json({
-
-            success: true,
-
-            data: root
-
-        });
-
-
-    }
-
-    catch(error){
-
-        res.status(500).json({
-
-            success:false,
-            message:error.message
-
-        });
-
-    }
-
-};
 
 // =========================
 // Logout api
@@ -945,85 +845,109 @@ export const getHierarchyById = async (req, res) => {
 // =========================
 export const getDropdownUsers = async (req, res) => {
   try {
-
     const { role_id, parent_id } = req.query;
 
     if (!role_id) {
       return res.status(400).json({
-        success:false,
-        message:"role_id is required"
+        success: false,
+        message: "role_id is required",
       });
     }
 
+    const roleId = Number(role_id);
 
     let sql = "";
     let values = [];
 
+    // =====================================================
+    // COMMON COLUMNS
+    // =====================================================
 
-    // Admin / First level
-    if(Number(role_id) === 1){
+    const columns = `
+      id,
+      name,
+      role_id,
+      created_by,
+      parent_admin_id,
+      parent_cnf_id,
+      parent_super_distributor_id,
+      parent_distributor_id,
+      parent_fos_id,
+      parent_retailer_id,
+      parent_staff_id
+    `;
 
+    // =====================================================
+    // ADMIN
+    // =====================================================
+
+    if (roleId === 1) {
       sql = `
-        SELECT id,name
+        SELECT
+          ${columns}
         FROM users
-        WHERE role_id=1
+        WHERE role_id = 1
         ORDER BY name
       `;
-
-
-    }else{
-
-
-      // Agar parent_id nahi hai to direct role ke sare users
-      if(!parent_id){
-
-        sql = `
-          SELECT id,name
-          FROM users
-          WHERE role_id=?
-          ORDER BY name
-        `;
-
-        values=[role_id];
-
-      }else{
-
-
-        // Selected parent ke under wale users
-        sql = `
-          SELECT id,name
-          FROM users
-          WHERE role_id=?
-          AND created_by=?
-          ORDER BY name
-        `;
-
-        values=[
-          role_id,
-          parent_id
-        ];
-
-      }
-
     }
 
+    // =====================================================
+    // OTHER ROLES
+    // =====================================================
 
-    const [rows] = await db.query(sql,values);
+    else {
+      // ---------------------------------------------------
+      // parent_id nahi hai
+      // ---------------------------------------------------
 
+      if (!parent_id) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = ?
+          ORDER BY name
+        `;
+
+        values = [roleId];
+      }
+
+      // ---------------------------------------------------
+      // parent_id ke under users
+      // ---------------------------------------------------
+
+      else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = ?
+          AND created_by = ?
+          ORDER BY name
+        `;
+
+        values = [
+          roleId,
+          Number(parent_id),
+        ];
+      }
+    }
+
+    const [rows] = await db.query(sql, values);
 
     return res.status(200).json({
-      success:true,
-      total:rows.length,
-      data:rows
+      success: true,
+      total: rows.length,
+      data: rows,
     });
 
+  } catch (error) {
 
-  } catch(error){
+    console.error("getDropdownUsers Error:", error);
 
     return res.status(500).json({
-      success:false,
-      message:error.message
+      success: false,
+      message: error.message,
     });
-
   }
 };

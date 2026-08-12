@@ -192,9 +192,6 @@ export const createUser = async (data) => {
   ];
 
 
-  console.log("SQL VALUES:", values);
-
-
   const [result] = await db.query(sql, values);
 
 
