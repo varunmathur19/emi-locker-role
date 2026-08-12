@@ -1,15 +1,13 @@
 import db from "../config/db.js";
 import pool from "../config/db.js";
 
-export const findUserByEmail = async(email)=>{
+export const findUserByEmail = async (email) => {
+  const [rows] = await db.query(
+    "SELECT * FROM users WHERE email=?",
+    [email]
+  );
 
-const [rows] = await db.query(
-"SELECT * FROM users WHERE email=?",
-[email]
-);
-
-return rows[0];
-
+  return rows[0];
 };
 
 export const findUserById = async (id) => {

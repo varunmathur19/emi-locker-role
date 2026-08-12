@@ -689,52 +689,94 @@ export const createuserrole = async (req, res) => {
 // =========================
 export const loginUser = async (req, res) => {
   try {
-
     const { email, password } = req.body;
+
+    // ==========================================
+    // FIND USER
+    // ==========================================
 
     const user = await findUserByEmail(email);
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
+
+    // ==========================================
+    // CHECK PASSWORD
+    // ==========================================
 
     const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
       return res.status(401).json({
         success: false,
-        message: "Invalid password"
+        message: "Invalid password",
       });
     }
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        role_id: user.role_id,
-        email: user.email
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "7d"
-      }
-    );
+    // ==========================================
+    // JWT TOKEN
+    // ==========================================
 
-    return res.status(200).json({
-      success: true,
-      message: "Login Successful",
-      token
-    });
+   const token = jwt.sign(
+  {
+    id: user.id,
+    role_id: user.role_id,
+    email: user.email,
 
+    // Complete hierarchy
+    parent_id: user.parent_id,
+    parent_admin_id: user.parent_admin_id,
+    parent_cnf_id: user.parent_cnf_id,
+    parent_super_distributor_id: user.parent_super_distributor_id,
+    parent_distributor_id: user.parent_distributor_id,
+    parent_fos_id: user.parent_fos_id,
+    parent_retailer_id: user.parent_retailer_id,
+    parent_employee_id: user.parent_employee_id,
+    parent_staff_id: user.parent_staff_id,
+  },
+  process.env.JWT_SECRET,
+  {
+    expiresIn: "7d",
+  }
+);
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+   return res.status(200).json({
+  success: true,
+  message: "Login Successful",
+  token,
+
+  user: {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role_id: user.role_id,
+
+    parent_id: user.parent_id,
+    parent_admin_id: user.parent_admin_id,
+    parent_cnf_id: user.parent_cnf_id,
+    parent_super_distributor_id: user.parent_super_distributor_id,
+    parent_distributor_id: user.parent_distributor_id,
+    parent_fos_id: user.parent_fos_id,
+    parent_retailer_id: user.parent_retailer_id,
+    parent_employee_id: user.parent_employee_id,
+    parent_staff_id: user.parent_staff_id,
+  },
+});
   } catch (error) {
+    console.error("Login Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
-
   }
 };
 
