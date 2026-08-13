@@ -70,7 +70,31 @@ router.post(
 
 );
 
- 
+router.post("/login",
+    body("email")
+     .trim()
+     .notEmpty()
+    .isEmail()
+    .withMessage("Please enter a valid email"),
+     body("password")
+    .notEmpty()
+    .withMessage("Password is required"),
+
+     (req, res, next) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: errors.array().map((error) => error.msg),
+      });
+    }
+
+    next();
+  },
+     loginUser
+    );
+
 // Get All Users
 router.get(
     "/getAllStaffData",
