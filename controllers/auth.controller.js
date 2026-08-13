@@ -954,49 +954,16 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
-    // RETAILER
-    // =====================================================
-    // Retailer ka direct creator FOS hota hai.
-    //
-    // Lekin Distributor select karne par:
-    //
-    // parent_id = Distributor ID
-    //
-    // Retailer ko parent_distributor_id se find karna hai.
-    // =====================================================
-
-    else if (roleId === 6) {
-      if (!parentId) {
-        sql = `
-          SELECT
-            ${columns}
-          FROM users
-          WHERE role_id = 6
-          ORDER BY name
-        `;
-      } else {
-        sql = `
-          SELECT
-            ${columns}
-          FROM users
-          WHERE role_id = 6
-          AND parent_distributor_id = ?
-          ORDER BY name
-        `;
-
-        values = [parentId];
-      }
-    }
-
-    // =====================================================
     // FOS
     // =====================================================
-    // FOS ka parent Distributor hota hai.
     //
     // Distributor select:
+    //
+    // role_id = 5
     // parent_id = Distributor ID
     //
-    // FOS ko parent_distributor_id se find karenge.
+    // FOS ke parent_distributor_id me Distributor ID hona chahiye.
+    //
     // =====================================================
 
     else if (roleId === 5) {
@@ -1023,12 +990,64 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // RETAILER
+    // =====================================================
+    //
+    // Retailer ke 2 possible cases hain:
+    //
+    // CASE 1:
+    // Distributor -> FOS -> Retailer
+    //
+    // parent_fos_id = FOS ID
+    //
+    // CASE 2:
+    // Distributor -> Direct Retailer
+    //
+    // created_by = Distributor ID
+    //
+    // Isliye Distributor select karne par dono check karenge:
+    //
+    // parent_distributor_id = Distributor ID
+    //
+    // OR
+    //
+    // created_by = Distributor ID
+    //
+    // =====================================================
+
+    else if (roleId === 6) {
+      if (!parentId) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          ORDER BY name
+        `;
+      } else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          AND (
+            parent_distributor_id = ?
+            OR created_by = ?
+          )
+          ORDER BY name
+        `;
+
+        values = [parentId, parentId];
+      }
+    }
+
+    // =====================================================
     // OTHER ROLES
     // =====================================================
 
     else {
       // ---------------------------------------------------
-      // No parent
+      // NO PARENT
       // ---------------------------------------------------
 
       if (!parentId) {
@@ -1044,7 +1063,7 @@ export const getDropdownUsers = async (req, res) => {
       }
 
       // ---------------------------------------------------
-      // Parent ke under users
+      // PARENT KE UNDER USERS
       // ---------------------------------------------------
 
       else {
@@ -1065,7 +1084,7 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
-    // EXECUTE QUERY
+    // DEBUG
     // =====================================================
 
     console.log("=================================");
@@ -1075,9 +1094,14 @@ export const getDropdownUsers = async (req, res) => {
     console.log("SQL:", sql);
     console.log("Values:", values);
 
+    // =====================================================
+    // EXECUTE QUERY
+    // =====================================================
+
     const [rows] = await db.query(sql, values);
 
     console.log("Dropdown Users:", rows);
+    console.log("Total Users:", rows.length);
 
     // =====================================================
     // RESPONSE
