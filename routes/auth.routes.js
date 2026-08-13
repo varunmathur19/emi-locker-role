@@ -101,8 +101,6 @@ router.get(
     getUsers
 );
 
-
-
 // logout
 router.post(
 "/logout-staff",

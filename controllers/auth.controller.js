@@ -719,57 +719,58 @@ export const loginUser = async (req, res) => {
 
     // ==========================================
     // JWT TOKEN
+    // Only required information in token
     // ==========================================
 
-   const token = jwt.sign(
-  {
-    id: user.id,
-    role_id: user.role_id,
-    email: user.email,
-
-    // Complete hierarchy
-    parent_id: user.parent_id,
-    parent_admin_id: user.parent_admin_id,
-    parent_cnf_id: user.parent_cnf_id,
-    parent_super_distributor_id: user.parent_super_distributor_id,
-    parent_distributor_id: user.parent_distributor_id,
-    parent_fos_id: user.parent_fos_id,
-    parent_retailer_id: user.parent_retailer_id,
-    parent_employee_id: user.parent_employee_id,
-    parent_staff_id: user.parent_staff_id,
-  },
-  process.env.JWT_SECRET,
-  {
-    expiresIn: "7d",
-  }
-);
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role_id: user.role_id,
+        email: user.email,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
+    );
 
     // ==========================================
     // RESPONSE
+    // Parent IDs are NOT inside JWT.
+    // They are sent separately in user object.
+    // Frontend can store them in localStorage.
     // ==========================================
 
-   return res.status(200).json({
-  success: true,
-  message: "Login Successful",
-  token,
+    return res.status(200).json({
+      success: true,
+      message: "Login Successful",
 
-  user: {
-    id: user.id,
-    name: user.name,
-    email: user.email,
-    role_id: user.role_id,
+      token,
 
-    parent_id: user.parent_id,
-    parent_admin_id: user.parent_admin_id,
-    parent_cnf_id: user.parent_cnf_id,
-    parent_super_distributor_id: user.parent_super_distributor_id,
-    parent_distributor_id: user.parent_distributor_id,
-    parent_fos_id: user.parent_fos_id,
-    parent_retailer_id: user.parent_retailer_id,
-    parent_employee_id: user.parent_employee_id,
-    parent_staff_id: user.parent_staff_id,
-  },
-});
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role_id: user.role_id,
+
+        // ======================================
+        // HIERARCHY DATA
+        // NOT PART OF JWT
+        // ======================================
+
+        parent_id: user.parent_id,
+        parent_admin_id: user.parent_admin_id,
+        parent_cnf_id: user.parent_cnf_id,
+        parent_super_distributor_id:
+          user.parent_super_distributor_id,
+        parent_distributor_id:
+          user.parent_distributor_id,
+        parent_fos_id: user.parent_fos_id,
+        parent_retailer_id: user.parent_retailer_id,
+        parent_employee_id: user.parent_employee_id,
+        parent_staff_id: user.parent_staff_id,
+      },
+    });
   } catch (error) {
     console.error("Login Error:", error);
 
