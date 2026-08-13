@@ -689,52 +689,95 @@ export const createuserrole = async (req, res) => {
 // =========================
 export const loginUser = async (req, res) => {
   try {
-
     const { email, password } = req.body;
+
+    // ==========================================
+    // FIND USER
+    // ==========================================
 
     const user = await findUserByEmail(email);
 
     if (!user) {
       return res.status(404).json({
         success: false,
-        message: "User not found"
+        message: "User not found",
       });
     }
+
+    // ==========================================
+    // CHECK PASSWORD
+    // ==========================================
 
     const match = await bcrypt.compare(password, user.password);
 
     if (!match) {
       return res.status(401).json({
         success: false,
-        message: "Invalid password"
+        message: "Invalid password",
       });
     }
+
+    // ==========================================
+    // JWT TOKEN
+    // Only required information in token
+    // ==========================================
 
     const token = jwt.sign(
       {
         id: user.id,
         role_id: user.role_id,
-        email: user.email
+        email: user.email,
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "7d"
+        expiresIn: "7d",
       }
     );
+
+    // ==========================================
+    // RESPONSE
+    // Parent IDs are NOT inside JWT.
+    // They are sent separately in user object.
+    // Frontend can store them in localStorage.
+    // ==========================================
 
     return res.status(200).json({
       success: true,
       message: "Login Successful",
-      token
-    });
 
+      token,
+
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role_id: user.role_id,
+
+        // ======================================
+        // HIERARCHY DATA
+        // NOT PART OF JWT
+        // ======================================
+
+        parent_id: user.parent_id,
+        parent_admin_id: user.parent_admin_id,
+        parent_cnf_id: user.parent_cnf_id,
+        parent_super_distributor_id:
+          user.parent_super_distributor_id,
+        parent_distributor_id:
+          user.parent_distributor_id,
+        parent_fos_id: user.parent_fos_id,
+        parent_retailer_id: user.parent_retailer_id,
+        parent_employee_id: user.parent_employee_id,
+        parent_staff_id: user.parent_staff_id,
+      },
+    });
   } catch (error) {
+    console.error("Login Error:", error);
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message,
     });
-
   }
 };
 
@@ -847,6 +890,10 @@ export const getDropdownUsers = async (req, res) => {
   try {
     const { role_id, parent_id } = req.query;
 
+    // =====================================================
+    // VALIDATE ROLE ID
+    // =====================================================
+
     if (!role_id) {
       return res.status(400).json({
         success: false,
@@ -855,6 +902,21 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     const roleId = Number(role_id);
+    const parentId = parent_id ? Number(parent_id) : null;
+
+    if (Number.isNaN(roleId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role_id",
+      });
+    }
+
+    if (parent_id && Number.isNaN(parentId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid parent_id",
+      });
+    }
 
     let sql = "";
     let values = [];
@@ -892,15 +954,103 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // FOS
+    // =====================================================
+    //
+    // Distributor select:
+    //
+    // role_id = 5
+    // parent_id = Distributor ID
+    //
+    // FOS ke parent_distributor_id me Distributor ID hona chahiye.
+    //
+    // =====================================================
+
+    else if (roleId === 5) {
+      if (!parentId) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 5
+          ORDER BY name
+        `;
+      } else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 5
+          AND parent_distributor_id = ?
+          ORDER BY name
+        `;
+
+        values = [parentId];
+      }
+    }
+
+    // =====================================================
+    // RETAILER
+    // =====================================================
+    //
+    // Retailer ke 2 possible cases hain:
+    //
+    // CASE 1:
+    // Distributor -> FOS -> Retailer
+    //
+    // parent_fos_id = FOS ID
+    //
+    // CASE 2:
+    // Distributor -> Direct Retailer
+    //
+    // created_by = Distributor ID
+    //
+    // Isliye Distributor select karne par dono check karenge:
+    //
+    // parent_distributor_id = Distributor ID
+    //
+    // OR
+    //
+    // created_by = Distributor ID
+    //
+    // =====================================================
+
+    else if (roleId === 6) {
+      if (!parentId) {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          ORDER BY name
+        `;
+      } else {
+        sql = `
+          SELECT
+            ${columns}
+          FROM users
+          WHERE role_id = 6
+          AND (
+            parent_distributor_id = ?
+            OR created_by = ?
+          )
+          ORDER BY name
+        `;
+
+        values = [parentId, parentId];
+      }
+    }
+
+    // =====================================================
     // OTHER ROLES
     // =====================================================
 
     else {
       // ---------------------------------------------------
-      // parent_id nahi hai
+      // NO PARENT
       // ---------------------------------------------------
 
-      if (!parent_id) {
+      if (!parentId) {
         sql = `
           SELECT
             ${columns}
@@ -913,7 +1063,7 @@ export const getDropdownUsers = async (req, res) => {
       }
 
       // ---------------------------------------------------
-      // parent_id ke under users
+      // PARENT KE UNDER USERS
       // ---------------------------------------------------
 
       else {
@@ -928,12 +1078,34 @@ export const getDropdownUsers = async (req, res) => {
 
         values = [
           roleId,
-          Number(parent_id),
+          parentId,
         ];
       }
     }
 
+    // =====================================================
+    // DEBUG
+    // =====================================================
+
+    console.log("=================================");
+    console.log("GET DROPDOWN USERS");
+    console.log("Role ID:", roleId);
+    console.log("Parent ID:", parentId);
+    console.log("SQL:", sql);
+    console.log("Values:", values);
+
+    // =====================================================
+    // EXECUTE QUERY
+    // =====================================================
+
     const [rows] = await db.query(sql, values);
+
+    console.log("Dropdown Users:", rows);
+    console.log("Total Users:", rows.length);
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,
@@ -942,8 +1114,10 @@ export const getDropdownUsers = async (req, res) => {
     });
 
   } catch (error) {
-
-    console.error("getDropdownUsers Error:", error);
+    console.error(
+      "getDropdownUsers Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
