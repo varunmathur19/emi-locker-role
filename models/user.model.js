@@ -201,9 +201,7 @@ export const getAllUsers = async (
   offset,
   role_id
 ) => {
-
   let query = `
-
     SELECT
 
       u.id,
@@ -249,48 +247,99 @@ export const getAllUsers = async (
       -- =========================
 
       c.name AS created_by_name,
-      c.role_id AS created_by_role_id
+      c.organization_name AS created_by_company,
+      c.role_id AS created_by_role_id,
+
+      -- =========================
+      -- PARENT DETAILS
+      -- =========================
+
+      p.name AS parent_name,
+      p.organization_name AS parent_company,
+      p.role_id AS parent_role_id,
+      p.id AS parent_id
 
     FROM users u
+
+    -- =========================
+    -- CREATOR
+    -- =========================
 
     LEFT JOIN users c
       ON u.created_by = c.id
 
+    -- =========================
+    -- PARENT
+    -- =========================
+
+    LEFT JOIN users p
+      ON p.id = CASE
+
+        -- Admin ka parent Master Admin hoga
+        WHEN u.role_id = 1
+          THEN u.created_by
+
+        -- CNF ka parent Admin
+        WHEN u.role_id = 2
+          THEN u.parent_admin_id
+
+        -- Super Distributor ka parent CNF
+        WHEN u.role_id = 3
+          THEN u.parent_cnf_id
+
+        -- Distributor ka parent Super Distributor
+        WHEN u.role_id = 4
+          THEN u.parent_super_distributor_id
+
+        -- FOS ka parent Distributor
+        WHEN u.role_id = 5
+          THEN u.parent_distributor_id
+
+        -- Retailer ka parent:
+        -- FOS available ho to FOS
+        WHEN u.role_id = 6
+          THEN COALESCE(
+            u.parent_fos_id,
+            u.parent_distributor_id
+          )
+
+        -- Employee ka parent Retailer
+        WHEN u.role_id = 7
+          THEN u.parent_retailer_id
+
+        -- Staff ka parent
+        WHEN u.role_id = 8
+          THEN u.parent_staff_id
+
+        ELSE NULL
+
+      END
   `;
 
   let params = [];
-
 
   // =========================
   // ROLE FILTER
   // =========================
 
   if (role_id) {
-
     query += ` WHERE u.role_id = ? `;
-
     params.push(role_id);
-
   }
-
 
   // =========================
   // PAGINATION
   // =========================
 
   query += `
-
-    ORDER BY u.id ASC
-
+    ORDER BY u.id DESC
     LIMIT ? OFFSET ?
-
   `;
 
   params.push(
     Number(limit),
     Number(offset)
   );
-
 
   // =========================
   // GET USERS
@@ -301,45 +350,31 @@ export const getAllUsers = async (
     params
   );
 
-
   // =========================
   // COUNT
   // =========================
 
   let countQuery = `
-
     SELECT COUNT(*) AS total
-
     FROM users u
-
   `;
 
   let countParams = [];
 
-
   if (role_id) {
-
     countQuery += ` WHERE u.role_id = ? `;
-
     countParams.push(role_id);
-
   }
-
 
   const [count] = await db.query(
     countQuery,
     countParams
   );
 
-
   return {
-
     users: rows,
-
     total: count[0].total
-
   };
-
 };
 
 //get getAllHierarchyUsers 
