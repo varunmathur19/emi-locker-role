@@ -203,7 +203,6 @@ export const getAllUsers = async (
 ) => {
 
   let query = `
-
     SELECT
 
       u.id,
@@ -249,48 +248,77 @@ export const getAllUsers = async (
       -- =========================
 
       c.name AS created_by_name,
-      c.role_id AS created_by_role_id
+      c.role_id AS created_by_role_id,
+
+      -- =========================
+      -- PARENT DETAILS
+      -- =========================
+
+      p.name AS parent_name,
+      p.organization_name AS parent_company,
+      p.role_id AS parent_role_id,
+      p.id AS parent_id
 
     FROM users u
 
+    -- Creator
     LEFT JOIN users c
       ON u.created_by = c.id
 
+    -- Parent
+    LEFT JOIN users p
+      ON p.id = CASE
+
+        WHEN u.role_id = 2
+          THEN u.parent_admin_id
+
+        WHEN u.role_id = 3
+          THEN u.parent_cnf_id
+
+        WHEN u.role_id = 4
+          THEN u.parent_super_distributor_id
+
+        WHEN u.role_id = 5
+          THEN u.parent_distributor_id
+
+        WHEN u.role_id = 6
+          THEN u.parent_fos_id
+
+        WHEN u.role_id = 7
+          THEN u.parent_retailer_id
+
+        WHEN u.role_id = 8
+          THEN u.parent_staff_id
+
+        ELSE NULL
+
+      END
   `;
 
   let params = [];
-
 
   // =========================
   // ROLE FILTER
   // =========================
 
   if (role_id) {
-
     query += ` WHERE u.role_id = ? `;
-
     params.push(role_id);
-
   }
-
 
   // =========================
   // PAGINATION
   // =========================
 
   query += `
-
-    ORDER BY u.id ASC
-
+    ORDER BY u.id DESC
     LIMIT ? OFFSET ?
-
   `;
 
   params.push(
     Number(limit),
     Number(offset)
   );
-
 
   // =========================
   // GET USERS
@@ -301,45 +329,31 @@ export const getAllUsers = async (
     params
   );
 
-
   // =========================
   // COUNT
   // =========================
 
   let countQuery = `
-
     SELECT COUNT(*) AS total
-
     FROM users u
-
   `;
 
   let countParams = [];
 
-
   if (role_id) {
-
     countQuery += ` WHERE u.role_id = ? `;
-
     countParams.push(role_id);
-
   }
-
 
   const [count] = await db.query(
     countQuery,
     countParams
   );
 
-
   return {
-
     users: rows,
-
     total: count[0].total
-
   };
-
 };
 
 //get getAllHierarchyUsers 
