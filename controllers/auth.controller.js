@@ -1125,3 +1125,172 @@ export const getDropdownUsers = async (req, res) => {
     });
   }
 };
+
+
+export const updatedstaffdata = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const {
+      organization_name,
+      name,
+      email,
+      phone,
+      company_address,
+      country,
+      state,
+      city,
+
+      parent_admin_id,
+      parent_cnf_id,
+      parent_super_distributor_id,
+      parent_distributor_id,
+      parent_fos_id,
+      parent_retailer_id,
+
+      new_device,
+      old_device,
+      supreme_device,
+      pro_star,
+      lite,
+      google_tv,
+      supreme_lock,
+    } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    // Check user exists
+    const [existingUser] = await db.query(
+      "SELECT id FROM users WHERE id = ?",
+      [id]
+    );
+
+    if (existingUser.length === 0) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    // Update according to ID
+    const [result] = await db.query(
+      `
+      UPDATE users
+      SET
+        organization_name = ?,
+        name = ?,
+        email = ?,
+        phone = ?,
+        company_address = ?,
+        country = ?,
+        state = ?,
+        city = ?,
+
+        parent_admin_id = ?,
+        parent_cnf_id = ?,
+        parent_super_distributor_id = ?,
+        parent_distributor_id = ?,
+        parent_fos_id = ?,
+        parent_retailer_id = ?,
+
+        new_device = ?,
+        old_device = ?,
+        supreme_device = ?,
+        pro_star = ?,
+        lite = ?,
+        google_tv = ?,
+        supreme_lock = ?
+
+      WHERE id = ?
+      `,
+      [
+        organization_name,
+        name,
+        email,
+        phone,
+        company_address,
+        country,
+        state,
+        city,
+
+        parent_admin_id || null,
+        parent_cnf_id || null,
+        parent_super_distributor_id || null,
+        parent_distributor_id || null,
+        parent_fos_id || null,
+        parent_retailer_id || null,
+
+        new_device ?? 0,
+        old_device ?? 0,
+        supreme_device ?? 0,
+        pro_star ?? 0,
+        lite ?? 0,
+        google_tv ?? 0,
+        supreme_lock ?? 0,
+
+        id,
+      ]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "No changes made",
+      });
+    }
+
+    // Get updated user data
+    const [updatedUser] = await db.query(
+      `
+      SELECT
+        id,
+        organization_name,
+        name,
+        email,
+        phone,
+        company_address,
+        country,
+        state,
+        city,
+        role_id,
+
+        parent_admin_id,
+        parent_cnf_id,
+        parent_super_distributor_id,
+        parent_distributor_id,
+        parent_fos_id,
+        parent_retailer_id,
+
+        new_device,
+        old_device,
+        supreme_device,
+        pro_star,
+        lite,
+        google_tv,
+        supreme_lock
+      FROM users
+      WHERE id = ?
+      `,
+      [id]
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Staff data updated successfully",
+      data: updatedUser[0],
+    });
+  } catch (error) {
+    console.error("UPDATE STAFF ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update staff data",
+      error: error.message,
+    });
+  }
+};

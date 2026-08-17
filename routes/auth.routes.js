@@ -6,6 +6,7 @@ import {
     loginUser,
     logoutUser,
     getDropdownUsers,
+    updatedstaffdata,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -110,5 +111,7 @@ logoutUser
 
 //User Chain Api
 router.get("/hierarchy-dropdown", getDropdownUsers);
+
+router.patch("/update-staff-data/:id",updatedstaffdata)
 
 export default router;
