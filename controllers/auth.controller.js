@@ -1087,12 +1087,8 @@ export const getDropdownUsers = async (req, res) => {
     // DEBUG
     // =====================================================
 
-    console.log("=================================");
-    console.log("GET DROPDOWN USERS");
-    console.log("Role ID:", roleId);
-    console.log("Parent ID:", parentId);
-    console.log("SQL:", sql);
-    console.log("Values:", values);
+ 
+
 
     // =====================================================
     // EXECUTE QUERY
@@ -1100,8 +1096,7 @@ export const getDropdownUsers = async (req, res) => {
 
     const [rows] = await db.query(sql, values);
 
-    console.log("Dropdown Users:", rows);
-    console.log("Total Users:", rows.length);
+
 
     // =====================================================
     // RESPONSE
@@ -1290,6 +1285,87 @@ export const updatedstaffdata = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to update staff data",
+      error: error.message,
+    });
+  }
+};
+
+export const getStaffDataById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        organization_name,
+        role_id,
+        name,
+        email,
+        phone,
+        password,
+        company_address,
+        country,
+        state,
+        city,
+
+        parent_admin_id,
+        parent_cnf_id,
+        parent_super_distributor_id,
+        parent_distributor_id,
+        parent_fos_id,
+        parent_retailer_id,
+        parent_staff_id,
+
+        new_device,
+        old_device,
+        supreme_device,
+        pro_star,
+        lite,
+        google_tv,
+        supreme_lock
+
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: rows[0],
+    });
+
+  } catch (error) {
+    console.error("Get Staff Data Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get staff data",
       error: error.message,
     });
   }

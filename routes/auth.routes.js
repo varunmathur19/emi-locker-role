@@ -7,6 +7,7 @@ import {
     logoutUser,
     getDropdownUsers,
     updatedstaffdata,
+    getStaffDataById,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -113,5 +114,11 @@ logoutUser
 router.get("/hierarchy-dropdown", getDropdownUsers);
 
 router.patch("/update-staff-data/:id",updatedstaffdata)
+
+//get the data for updated user-staff
+router.get(
+  "/staff-data/:id",
+  getStaffDataById
+);
 
 export default router;
