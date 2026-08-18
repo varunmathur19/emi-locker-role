@@ -1374,18 +1374,6 @@ export const getStaffDataById = async (req, res) => {
 
 export const loginAsUser = async (req, res) => {
   try {
-    const { user_id } = req.body;
-
-    // ==========================================
-    // VALIDATION
-    // ==========================================
-
-    if (!user_id) {
-      return res.status(400).json({
-        success: false,
-        message: "user_id is required",
-      });
-    }
 
     // ==========================================
     // CURRENT LOGGED-IN USER
@@ -1393,54 +1381,16 @@ export const loginAsUser = async (req, res) => {
 
     const loggedInUser = req.user;
 
-    if (!loggedInUser) {
-      return res.status(401).json({
+    // ==========================================
+    // TARGET USER ID
+    // ==========================================
+
+    const { user_id } = req.body;
+
+    if (!user_id) {
+      return res.status(400).json({
         success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    // ==========================================
-    // CHECK ORIGINAL ROLE
-    // ==========================================
-
-    /*
-      First login:
-      Master Admin
-      role_id = 0
-
-      Master Admin -> Admin:
-      token:
-      role_id = 1
-      original_role_id = 0
-
-      Admin -> Distributor:
-      token:
-      role_id = 4
-      original_role_id = 0
-
-      Distributor -> Retailer:
-      token:
-      role_id = 6
-      original_role_id = 0
-    */
-
-    const originalRoleId =
-      loggedInUser.original_role_id !== undefined &&
-      loggedInUser.original_role_id !== null
-        ? Number(loggedInUser.original_role_id)
-        : Number(loggedInUser.role_id);
-
-    // ==========================================
-    // ONLY ORIGINAL MASTER ADMIN
-    // CAN ACCESS ANY USER
-    // ==========================================
-
-    if (originalRoleId !== 0) {
-      return res.status(403).json({
-        success: false,
-        message:
-          "You are not allowed to login as another user",
+        message: "User ID is required",
       });
     }
 
@@ -1448,39 +1398,161 @@ export const loginAsUser = async (req, res) => {
     // FIND TARGET USER
     // ==========================================
 
-    const targetUser = await findUserById(user_id);
+    const targetUser =
+      await findUserById(user_id);
 
     if (!targetUser) {
       return res.status(404).json({
         success: false,
-        message: "Target user not found",
+        message: "User not found",
       });
     }
 
     // ==========================================
-    // CREATE NEW ACCESS TOKEN
+    // SAME USER CHECK
+    // ==========================================
+
+    if (
+      Number(loggedInUser.id) ===
+      Number(targetUser.id)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "You are already logged in as this user",
+      });
+    }
+
+    // ==========================================
+    // ORIGINAL ROLE
+    // ==========================================
+    //
+    // Normal login:
+    //
+    // Distributor = 4
+    //
+    // Impersonation:
+    //
+    // Distributor -> FOS
+    //
+    // Current role = 5
+    // Original role = 4
+    //
+    // Permission hamesha ORIGINAL ROLE
+    // se calculate hogi.
+    // ==========================================
+
+    const originalRoleId =
+      loggedInUser.is_impersonating &&
+      loggedInUser.original_role_id !== null &&
+      loggedInUser.original_role_id !== undefined
+        ? Number(
+            loggedInUser.original_role_id
+          )
+        : Number(
+            loggedInUser.role_id
+          );
+
+    const originalUserId =
+      loggedInUser.is_impersonating &&
+      loggedInUser.original_user_id
+        ? Number(
+            loggedInUser.original_user_id
+          )
+        : Number(
+            loggedInUser.id
+          );
+
+    // ==========================================
+    // ROLE HIERARCHY
+    //
+    // 0 Master Admin
+    // 1 Admin
+    // 2 CNF
+    // 3 Super Distributor
+    // 4 Distributor
+    // 5 FOS
+    // 6 Retailer
+    // 7 Employee
+    // 8 Staff
+    // ==========================================
+
+    // Target lower-level role hona chahiye
+    // ORIGINAL LOGIN USER ke comparison mein.
+    //
+    // Example:
+    //
+    // Distributor (4)
+    //     ↓
+    // FOS (5)       ALLOWED
+    //
+    // FOS (5)
+    //     ↓
+    // Distributor (4)  BLOCKED
+    //
+    // But agar Distributor -> FOS hua hai,
+    // originalRoleId abhi bhi 4 hai.
+    //
+    // Isliye:
+    //
+    // Distributor -> FOS -> Distributor
+    // ALLOWED
+    //
+
+    if (
+      Number(targetUser.role_id) <=
+      Number(originalRoleId)
+    ) {
+
+      // IMPORTANT:
+      // Agar target original user khud hai,
+      // toh usko wapas login karne dena hai.
+
+      if (
+        Number(targetUser.id) !==
+        Number(originalUserId)
+      ) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You can only login as a lower level user",
+        });
+      }
+    }
+
+    // ==========================================
+    // CREATE TARGET USER TOKEN
     // ==========================================
 
     const token = jwt.sign(
       {
+        // CURRENT USER
         id: targetUser.id,
-        role_id: targetUser.role_id,
+
+        role_id:
+          Number(targetUser.role_id),
+
         email: targetUser.email,
 
         // ======================================
-        // VERY IMPORTANT
-        // ORIGINAL MASTER ADMIN
+        // ORIGINAL LOGIN USER
         // ======================================
 
         original_user_id:
-          loggedInUser.original_user_id ||
-          loggedInUser.id,
+          originalUserId,
 
-        original_role_id: 0,
+        original_role_id:
+          originalRoleId,
+
+        // ======================================
+        // IMPERSONATION
+        // ======================================
 
         is_impersonating: true,
       },
+
       process.env.JWT_SECRET,
+
       {
         expiresIn: "7d",
       }
@@ -1491,45 +1563,62 @@ export const loginAsUser = async (req, res) => {
     // ==========================================
 
     return res.status(200).json({
+
       success: true,
-      message: "User access successful",
+
+      message:
+        "Login as user successful",
 
       token,
 
       user: {
-        id: targetUser.id,
-        name: targetUser.name,
-        email: targetUser.email,
-        role_id: targetUser.role_id,
 
-        parent_id: targetUser.parent_id,
+        id: targetUser.id,
+
+        name: targetUser.name,
+
+        email: targetUser.email,
+
+        role_id:
+          Number(targetUser.role_id),
+
+        parent_id:
+          targetUser.parent_id || null,
 
         parent_admin_id:
-          targetUser.parent_admin_id,
+          targetUser.parent_admin_id || null,
 
         parent_cnf_id:
-          targetUser.parent_cnf_id,
+          targetUser.parent_cnf_id || null,
 
         parent_super_distributor_id:
-          targetUser.parent_super_distributor_id,
+          targetUser.parent_super_distributor_id ||
+          null,
 
         parent_distributor_id:
-          targetUser.parent_distributor_id,
+          targetUser.parent_distributor_id ||
+          null,
 
         parent_fos_id:
-          targetUser.parent_fos_id,
+          targetUser.parent_fos_id ||
+          null,
 
         parent_retailer_id:
-          targetUser.parent_retailer_id,
+          targetUser.parent_retailer_id ||
+          null,
 
         parent_employee_id:
-          targetUser.parent_employee_id,
+          targetUser.parent_employee_id ||
+          null,
 
         parent_staff_id:
-          targetUser.parent_staff_id,
+          targetUser.parent_staff_id ||
+          null,
       },
     });
+
   } catch (error) {
+
     console.error(
       "Login As User Error:",
       error
@@ -1537,8 +1626,7 @@ export const loginAsUser = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "User access failed",
-      error: error.message,
+      message: error.message,
     });
   }
 };
