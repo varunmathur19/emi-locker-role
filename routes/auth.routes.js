@@ -21,56 +21,131 @@ const router = express.Router();
 
 router.post(
   "/add-staff",
+
+  // ==========================================
+  // AUTH
+  // ==========================================
+
   authMiddleware,
+
+
+  // ==========================================
+  // ORGANIZATION NAME
+  // ==========================================
+
   body("organization_name")
     .trim()
     .notEmpty()
     .withMessage("Organization Name is required"),
+
+
+  // ==========================================
+  // NAME
+  // ==========================================
+
   body("name")
     .trim()
     .notEmpty()
     .withMessage("Name is required"),
+
+
+  // ==========================================
+  // EMAIL
+  // ==========================================
+
   body("email")
     .trim()
     .notEmpty()
     .withMessage("Email is required")
     .isEmail()
-    .withMessage("Please enter a valid email"),
+    .withMessage("Please enter a valid email")
+    .normalizeEmail(),
+
+
+  // ==========================================
+  // ROLE ID
+  // ==========================================
+
   body("role_id")
-    .trim()
     .notEmpty()
     .withMessage("Role ID is required")
-    .isInt({ min: 1, max: 8 })
-    .withMessage("Role ID must be a number between 1 and 8"),
+    .isInt({ min: 1, max: 9 })
+    .withMessage(
+      "Role ID must be a number between 1 and 9"
+    ),
+
+
+  // ==========================================
+  // PHONE
+  // ==========================================
+
   body("phone")
     .trim()
     .notEmpty()
     .withMessage("Phone is required")
-    .matches(/^(\+91\s?)?[6-9]\d{9}$/)
-    .withMessage("Phone must contain only numbers")
-    // .isLength({ min: 10, max: 10 })
-    .withMessage("Phone number must be exactly 10 digits"),
+    .matches(/^(?:\+91\s?)?[6-9]\d{9}$/)
+    .withMessage(
+      "Phone must be a valid 10 digit Indian mobile number"
+    ),
+
+
+  // ==========================================
+  // COUNTRY
+  // ==========================================
+
   body("country")
     .trim()
     .notEmpty()
     .withMessage("Country is required"),
+
+
+  // ==========================================
+  // STATE
+  // ==========================================
+
   body("state")
     .trim()
     .notEmpty()
     .withMessage("State is required"),
-  (req,res,next)=>{
-    const errors = validationResult(req);
-    if(!errors.isEmpty()){
-      return res.status(400).json({
-        success:false,
-        message:"Validation Error",
-        errors:errors.array()
-      });
-    }
-  next();
-  },
-  createuserrole
 
+
+  // ==========================================
+  // CITY
+  // ==========================================
+
+  body("city")
+    .trim()
+    .notEmpty()
+    .withMessage("City is required"),
+
+
+  // ==========================================
+  // VALIDATION RESULT
+  // ==========================================
+
+  (req, res, next) => {
+
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Validation Error",
+        errors: errors.array(),
+      });
+
+    }
+
+    next();
+  },
+
+
+  // ==========================================
+  // CONTROLLER
+  // ==========================================
+
+  createuserrole
 );
 
 router.post("/login",

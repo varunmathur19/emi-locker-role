@@ -13,11 +13,25 @@ import jwt from "jsonwebtoken";
 import { ROLES } from "../constants/roles.js";
 
 
-// =========================
-// create the user(onbaord)
-// =========================
+
+
+// import {
+//   findUserByEmail,
+//   findUserById,
+//   createUser as createUserModel,
+// } from "../models/userModel.js";
+
+// import {
+//   ROLES,
+//   isValidRole,
+// } from "../constants/roles.js";
+
+
 export const createuserrole = async (req, res) => {
   try {
+    // =====================================================
+    // REQUEST BODY
+    // =====================================================
 
     const {
       organization_name,
@@ -32,40 +46,105 @@ export const createuserrole = async (req, res) => {
       state,
       city,
 
-      // =========================
-      // HIERARCHY
-      // =========================
-      parent_admin_id,
-      parent_cnf_id,
-      parent_super_distributor_id,
-      parent_distributor_id,
-      parent_fos_id,
-      parent_retailer_id,
-      parent_staff_id,
-
-      // =========================
       // DEVICE PERMISSIONS
-      // =========================
       new_device,
       old_device,
       supreme_device,
       pro_star,
       lite,
       google_tv,
-      supreme_lock
-
+      supreme_lock,
     } = req.body;
 
+    // =====================================================
+    // BASIC VALIDATION
+    // =====================================================
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Name is required",
+      });
+    }
+
+    if (!email || !email.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
+
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is required",
+      });
+    }
+
+    if (!confirm_password) {
+      return res.status(400).json({
+        success: false,
+        message: "Confirm Password is required",
+      });
+    }
+
+    // =====================================================
+    // CLEAN DATA
+    // =====================================================
+
+    const cleanName = name.trim();
+    const cleanEmail = email.trim().toLowerCase();
+
+    // =====================================================
+    // PASSWORD MATCH
+    // =====================================================
+
+    if (password !== confirm_password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password and Confirm Password not match",
+      });
+    }
+
+    // =====================================================
+    // ROLE
+    // =====================================================
+
+    const role = Number(role_id);
+
+    if (!isValidRole(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role_id",
+      });
+    }
+
+    // =====================================================
+    // MASTER ADMIN CANNOT BE CREATED
+    // =====================================================
+
+    if (role === ROLES.MASTER_ADMIN) {
+      return res.status(403).json({
+        success: false,
+        message: "Master Admin cannot be created",
+      });
+    }
 
     // =====================================================
     // LOGGED-IN USER
     // =====================================================
 
-    const created_by = req.user.id;
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
 
+    const created_by = Number(req.user.id);
 
     // =====================================================
-    // CREATOR CHECK
+    // FIND CREATOR
     // =====================================================
 
     const creator = await findUserById(created_by);
@@ -73,440 +152,205 @@ export const createuserrole = async (req, res) => {
     if (!creator) {
       return res.status(404).json({
         success: false,
-        message: "Creator not found"
+        message: "Creator not found",
       });
     }
 
-
-    // =====================================================
-    // ROLE VALIDATION
-    // =====================================================
-
-    if (!isValidRole(role_id)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role_id"
-      });
-    }
-
-    const role = Number(role_id);
     const creatorRole = Number(creator.role_id);
 
-
     // =====================================================
-    // STAFF CREATE RULE
-    // Only Admin can create Staff
+    // ROLE CREATION PERMISSION
     // =====================================================
-
-    if (role === ROLES.STAFF) {
-
-      if (creatorRole !== ROLES.ADMIN) {
-
-        return res.status(403).json({
-          success: false,
-          message: "Only Admin can create Staff"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // NORMAL ROLE HIERARCHY
-    // =====================================================
-
-    if (creatorRole !== ROLES.STAFF) {
-
-      if (
-        role !== ROLES.STAFF &&
-        role <= creatorRole
-      ) {
-
-        return res.status(400).json({
-          success: false,
-          message: "You cannot create same or upper level role"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // CNF
-    // CNF -> Admin
+    //
+    // Higher role can create ANY lower role.
+    //
+    // Example:
+    //
+    // Admin 1
+    //   -> CNF 2
+    //   -> Super Distributor 3
+    //   -> Distributor 4
+    //   -> FOS 5
+    //   -> Retailer 6
+    //   -> Sub Retailer 7
+    //   -> Employee 8
+    //   -> Staff 9 ONLY
+    //
+    // CNF 2
+    //   -> Super Distributor 3
+    //   -> Distributor 4
+    //   -> FOS 5
+    //   -> Retailer 6
+    //   -> Sub Retailer 7
+    //   -> Employee 8
+    //
+    // Distributor 4
+    //   -> FOS 5
+    //   -> Retailer 6
+    //   -> Sub Retailer 7
+    //   -> Employee 8
+    //
+    // Retailer 6
+    //   -> Sub Retailer 7
+    //   -> Employee 8
+    //
     // =====================================================
 
-    if (role === ROLES.CNF) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // SUPER DISTRIBUTOR
-    // Super -> CNF -> Admin
-    // =====================================================
-
-    if (role === ROLES.SUPER_DISTRIBUTOR) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-      if (!parent_cnf_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_cnf_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // DISTRIBUTOR
-    // Distributor -> Super -> CNF -> Admin
-    // =====================================================
-
-    if (role === ROLES.DISTRIBUTOR) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-      if (!parent_cnf_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_cnf_id is required"
-        });
-
-      }
-
-      if (!parent_super_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_super_distributor_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // FOS
-    // FOS -> Distributor -> Super -> CNF -> Admin
-    // =====================================================
-
-    if (role === ROLES.FOS) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-      if (!parent_cnf_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_cnf_id is required"
-        });
-
-      }
-
-      if (!parent_super_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_super_distributor_id is required"
-        });
-
-      }
-
-      if (!parent_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_distributor_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // RETAILER
-    // Retailer -> FOS -> Distributor -> Super -> CNF -> Admin
-    // =====================================================
-
-    if (role === ROLES.RETAILER) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-      if (!parent_cnf_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_cnf_id is required"
-        });
-
-      }
-
-      if (!parent_super_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_super_distributor_id is required"
-        });
-
-      }
-
-      if (!parent_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_distributor_id is required"
-        });
-
-      }
-
-      if (!parent_fos_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_fos_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
-    // EMPLOYEE
-    // Employee -> Retailer -> FOS -> Distributor
-    // -> Super -> CNF -> Admin
-    // =====================================================
-
-    if (role === ROLES.EMPLOYEE) {
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required"
-        });
-
-      }
-
-      if (!parent_cnf_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_cnf_id is required"
-        });
-
-      }
-
-      if (!parent_super_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_super_distributor_id is required"
-        });
-
-      }
-
-      if (!parent_distributor_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_distributor_id is required"
-        });
-
-      }
-
-      if (!parent_fos_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_fos_id is required"
-        });
-
-      }
-
-      if (!parent_retailer_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_retailer_id is required"
-        });
-
-      }
-
-    }
-
-
-    // =====================================================
+    // -----------------------------------------------------
     // STAFF
-    // Staff -> Admin
-    // =====================================================
-
+    // -----------------------------------------------------
+    //
+    // Staff sirf Admin create kar sakta hai.
+    //
     if (role === ROLES.STAFF) {
-
       if (creatorRole !== ROLES.ADMIN) {
-
         return res.status(403).json({
           success: false,
-          message: "Only Admin can create Staff"
+          message: "Only Admin can create Staff",
         });
-
       }
-
-      if (!parent_admin_id) {
-
-        return res.status(400).json({
-          success: false,
-          message: "parent_admin_id is required for Staff"
-        });
-
-      }
-
     }
 
+    // -----------------------------------------------------
+    // NORMAL ROLES
+    // -----------------------------------------------------
+    else {
+      // Employee aur Staff se koi normal role create nahi hoga
+      if (
+        creatorRole === ROLES.EMPLOYEE ||
+        creatorRole === ROLES.STAFF
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "You do not have permission to create users",
+        });
+      }
+
+      // Master Admin can create any normal role
+      if (creatorRole === ROLES.MASTER_ADMIN) {
+        // Allowed
+      }
+
+      // Higher role can create any lower role
+      else if (role <= creatorRole) {
+        return res.status(403).json({
+          success: false,
+          message:
+            `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
+        });
+      }
+    }
 
     // =====================================================
     // EMAIL CHECK
     // =====================================================
 
-    const existing = await findUserByEmail(email);
+    const existingUser = await findUserByEmail(cleanEmail);
 
-    if (existing) {
-
+    if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists"
+        message: "Email already exists",
       });
-
     }
 
-
     // =====================================================
-    // PASSWORD CHECK
+    // DEVICE PERMISSIONS
+    // =====================================================
+    //
+    // IMPORTANT:
+    //
+    // Device permissions ONLY Retailer ke liye hain.
+    //
+    // Retailer:
+    // role_id = 6
+    //
+    // Baaki roles:
+    // device values automatically 0 save hongi.
+    //
     // =====================================================
 
-    if (password !== confirm_password) {
-
-      return res.status(400).json({
-        success: false,
-        message: "Password and Confirm Password not match"
-      });
-
-    }
-
+    let retailerDevices = {
+      new_device: 0,
+      old_device: 0,
+      supreme_device: 0,
+      pro_star: 0,
+      lite: 0,
+      google_tv: 0,
+      supreme_lock: 0,
+    };
 
     // =====================================================
     // RETAILER DEVICE VALIDATION
     // =====================================================
 
     if (role === ROLES.RETAILER) {
-
-      const deviceFields = [
+      const deviceFields = {
         new_device,
         old_device,
         supreme_device,
         pro_star,
         lite,
         google_tv,
-        supreme_lock
-      ];
+        supreme_lock,
+      };
 
-      if (
-        deviceFields.some(
-          value => value === undefined
-        )
-      ) {
+      for (const [field, value] of Object.entries(deviceFields)) {
+        // Agar value nahi bheji gayi
+        // toh 0 save hoga
 
-        return res.status(400).json({
-          success: false,
-          message: "All retailer device fields are required"
-        });
+        if (
+          value === undefined ||
+          value === null ||
+          value === ""
+        ) {
+          retailerDevices[field] = 0;
+          continue;
+        }
 
+        const numericValue = Number(value);
+
+        // Only 0 or 1
+        if (![0, 1].includes(numericValue)) {
+          return res.status(400).json({
+            success: false,
+            message: `${field} must be either 0 or 1`,
+          });
+        }
+
+        retailerDevices[field] = numericValue;
       }
-
-      if (
-        deviceFields.some(
-          value => ![0, 1].includes(Number(value))
-        )
-      ) {
-
-        return res.status(400).json({
-          success: false,
-          message: "Device fields only accept 0 or 1"
-        });
-
-      }
-
     }
-
 
     // =====================================================
     // HASH PASSWORD
     // =====================================================
 
-    const hashPassword =
-      await bcrypt.hash(password, 10);
+    const hashPassword = await bcrypt.hash(password, 10);
 
+    // =====================================================
+    // PARENT ID
+    // =====================================================
+
+    // Jis user ne create kiya
+    // uski ID parent_id hogi.
+
+    const parent_id = created_by;
 
     // =====================================================
     // CREATE USER
     // =====================================================
 
     const userId = await createUserModel({
+      // ===================================================
+      // BASIC DETAILS
+      // ===================================================
 
       organization_name,
 
-      role_id: role,
+      name: cleanName,
 
-      name,
-
-      email,
+      email: cleanEmail,
 
       phone,
 
@@ -520,100 +364,71 @@ export const createuserrole = async (req, res) => {
 
       city,
 
+      // ===================================================
+      // ROLE
+      // ===================================================
+
+      role_id: role,
+
+      // ===================================================
+      // CREATOR
+      // ===================================================
+
       created_by,
 
+      // ===================================================
+      // PARENT
+      // ===================================================
 
-      // =================================================
-      // HIERARCHY IDS
-      // =================================================
+      parent_id,
 
-      parent_admin_id:
-        parent_admin_id
-          ? Number(parent_admin_id)
-          : null,
-
-      parent_cnf_id:
-        parent_cnf_id
-          ? Number(parent_cnf_id)
-          : null,
-
-      parent_super_distributor_id:
-        parent_super_distributor_id
-          ? Number(parent_super_distributor_id)
-          : null,
-
-      parent_distributor_id:
-        parent_distributor_id
-          ? Number(parent_distributor_id)
-          : null,
-
-      parent_fos_id:
-        parent_fos_id
-          ? Number(parent_fos_id)
-          : null,
-
-      parent_retailer_id:
-        parent_retailer_id
-          ? Number(parent_retailer_id)
-          : null,
-
-      parent_staff_id:
-        parent_staff_id
-          ? Number(parent_staff_id)
-          : null,
-
-
-      // =================================================
+      // ===================================================
       // DEVICE PERMISSIONS
-      // =================================================
+      //
+      // Sirf Retailer ke liye actual values.
+      // Baaki sab ke liye 0.
+      // ===================================================
 
-      new_device:
-        Number(new_device || 0),
+      new_device: retailerDevices.new_device,
 
-      old_device:
-        Number(old_device || 0),
+      old_device: retailerDevices.old_device,
 
-      supreme_device:
-        Number(supreme_device || 0),
+      supreme_device: retailerDevices.supreme_device,
 
-      pro_star:
-        Number(pro_star || 0),
+      pro_star: retailerDevices.pro_star,
 
-      lite:
-        Number(lite || 0),
+      lite: retailerDevices.lite,
 
-      google_tv:
-        Number(google_tv || 0),
+      google_tv: retailerDevices.google_tv,
 
-      supreme_lock:
-        Number(supreme_lock || 0)
-
+      supreme_lock: retailerDevices.supreme_lock,
     });
 
-
     // =====================================================
-    // RESPONSE
+    // SUCCESS RESPONSE
     // =====================================================
 
     return res.status(201).json({
-
       success: true,
 
       message: "User Registered Successfully",
 
       data: {
+        // =================================================
+        // USER
+        // =================================================
 
         id: userId,
 
         organization_name,
 
-        role_id: role,
+        name: cleanName,
 
-        name,
-
-        email,
+        email: cleanEmail,
 
         phone,
+
+        role_id: role,
 
         company_address,
 
@@ -623,65 +438,45 @@ export const createuserrole = async (req, res) => {
 
         city,
 
+        // =================================================
+        // CREATOR
+        // =================================================
+
         created_by,
 
+        // =================================================
+        // PARENT
+        // =================================================
+
+        parent_id,
 
         // =================================================
-        // HIERARCHY
+        // DEVICE PERMISSIONS
         // =================================================
 
-        parent_admin_id:
-          parent_admin_id
-            ? Number(parent_admin_id)
-            : null,
+        new_device: retailerDevices.new_device,
 
-        parent_cnf_id:
-          parent_cnf_id
-            ? Number(parent_cnf_id)
-            : null,
+        old_device: retailerDevices.old_device,
 
-        parent_super_distributor_id:
-          parent_super_distributor_id
-            ? Number(parent_super_distributor_id)
-            : null,
+        supreme_device: retailerDevices.supreme_device,
 
-        parent_distributor_id:
-          parent_distributor_id
-            ? Number(parent_distributor_id)
-            : null,
+        pro_star: retailerDevices.pro_star,
 
-        parent_fos_id:
-          parent_fos_id
-            ? Number(parent_fos_id)
-            : null,
+        lite: retailerDevices.lite,
 
-        parent_retailer_id:
-          parent_retailer_id
-            ? Number(parent_retailer_id)
-            : null,
+        google_tv: retailerDevices.google_tv,
 
-        parent_staff_id:
-          parent_staff_id
-            ? Number(parent_staff_id)
-            : null
-
-      }
-
+        supreme_lock: retailerDevices.supreme_lock,
+      },
     });
-
 
   } catch (error) {
-
-    console.log("Create User Error:", error);
+    console.error("Create User Error:", error);
 
     return res.status(500).json({
-
       success: false,
-
-      message: error.message
-
+      message: error.message,
     });
-
   }
 };
 // =========================
