@@ -229,185 +229,111 @@ export const createUser = async (data) => {
   return result.insertId;
 };
 // Get All Users
-export const getAllUsers = async (
-  limit,
-  offset,
-  role_id
-) => {
-  let query = `
-    SELECT
+export const getAllUsers = async (limit, offset, role_id = null) => {
+  try {
+    // =====================================================
+    // WHERE CONDITION
+    // =====================================================
 
-      u.id,
-      u.organization_name,
-      u.name,
-      u.email,
-      u.phone,
-      u.company_address,
-      u.country,
-      u.state,
-      u.city,
+    let whereCondition = "";
+    let queryParams = [];
 
-      u.role_id,
-      u.created_by,
-      u.created_at,
+    if (role_id !== null && role_id !== "") {
+      whereCondition = `WHERE u.role_id = ?`;
+      queryParams.push(Number(role_id));
+    }
 
-      -- =========================
-      -- HIERARCHY
-      -- =========================
+    // =====================================================
+    // GET USERS
+    // =====================================================
 
-      u.parent_admin_id,
-      u.parent_cnf_id,
-      u.parent_super_distributor_id,
-      u.parent_distributor_id,
-      u.parent_fos_id,
-      u.parent_retailer_id,
-      u.parent_staff_id,
+    const sql = `
+      SELECT
+        u.id,
+        u.organization_name,
+        u.name,
+        u.email,
+        u.phone,
+        u.company_address,
+        u.country,
+        u.state,
+        u.city,
+        u.role_id,
+        u.created_by,
+        u.parent_id,
 
-      -- =========================
-      -- DEVICE PERMISSIONS
-      -- =========================
+        -- ================================================
+        -- PARENT DETAILS
+        -- ================================================
 
-      u.new_device,
-      u.old_device,
-      u.supreme_device,
-      u.pro_star,
-      u.lite,
-      u.google_tv,
-      u.supreme_lock,
+        p.name AS parent_name,
+        p.organization_name AS parent_organization_name,
 
-      -- =========================
-      -- CREATOR DETAILS
-      -- =========================
+        -- ================================================
+        -- DEVICE PERMISSIONS
+        -- ================================================
 
-      c.name AS created_by_name,
-      c.organization_name AS created_by_company,
-      c.role_id AS created_by_role_id,
+        u.new_device,
+        u.old_device,
+        u.supreme_device,
+        u.pro_star,
+        u.lite,
+        u.google_tv,
+        u.supreme_lock,
 
-      -- =========================
-      -- PARENT DETAILS
-      -- =========================
+        u.created_at,
+        u.updated_at
 
-      p.name AS parent_name,
-      p.organization_name AS parent_company,
-      p.role_id AS parent_role_id,
-      p.id AS parent_id
+      FROM users u
 
-    FROM users u
+      LEFT JOIN users p
+        ON p.id = u.parent_id
 
-    -- =========================
-    -- CREATOR
-    -- =========================
+      ${whereCondition}
 
-    LEFT JOIN users c
-      ON u.created_by = c.id
+      ORDER BY u.id DESC
 
-    -- =========================
-    -- PARENT
-    -- =========================
+      LIMIT ? OFFSET ?
+    `;
 
-    LEFT JOIN users p
-      ON p.id = CASE
+    queryParams.push(Number(limit));
+    queryParams.push(Number(offset));
 
-        -- Admin ka parent Master Admin hoga
-        WHEN u.role_id = 1
-          THEN u.created_by
+    const [users] = await db.query(
+      sql,
+      queryParams
+    );
 
-        -- CNF ka parent Admin
-        WHEN u.role_id = 2
-          THEN u.parent_admin_id
+    // =====================================================
+    // TOTAL COUNT
+    // =====================================================
 
-        -- Super Distributor ka parent CNF
-        WHEN u.role_id = 3
-          THEN u.parent_cnf_id
+    const countSql = `
+      SELECT COUNT(*) AS total
+      FROM users u
+      ${whereCondition}
+    `;
 
-        -- Distributor ka parent Super Distributor
-        WHEN u.role_id = 4
-          THEN u.parent_super_distributor_id
+    const [countResult] = await db.query(
+      countSql,
+      role_id !== null && role_id !== ""
+        ? [Number(role_id)]
+        : []
+    );
 
-        -- FOS ka parent Distributor
-        WHEN u.role_id = 5
-          THEN u.parent_distributor_id
+    return {
+      users,
+      total: Number(countResult[0].total),
+    };
 
-        -- Retailer ka parent:
-        -- FOS available ho to FOS
-        WHEN u.role_id = 6
-          THEN COALESCE(
-            u.parent_fos_id,
-            u.parent_distributor_id
-          )
+  } catch (error) {
+    console.error(
+      "Get All Users Model Error:",
+      error
+    );
 
-        -- Employee ka parent Retailer
-        WHEN u.role_id = 7
-          THEN u.parent_retailer_id
-
-        -- Staff ka parent
-        WHEN u.role_id = 8
-          THEN u.parent_staff_id
-
-        ELSE NULL
-
-      END
-  `;
-
-  let params = [];
-
-  // =========================
-  // ROLE FILTER
-  // =========================
-
-  if (role_id) {
-    query += ` WHERE u.role_id = ? `;
-    params.push(role_id);
+    throw error;
   }
-
-  // =========================
-  // PAGINATION
-  // =========================
-
-  query += `
-    ORDER BY u.id DESC
-    LIMIT ? OFFSET ?
-  `;
-
-  params.push(
-    Number(limit),
-    Number(offset)
-  );
-
-  // =========================
-  // GET USERS
-  // =========================
-
-  const [rows] = await db.query(
-    query,
-    params
-  );
-
-  // =========================
-  // COUNT
-  // =========================
-
-  let countQuery = `
-    SELECT COUNT(*) AS total
-    FROM users u
-  `;
-
-  let countParams = [];
-
-  if (role_id) {
-    countQuery += ` WHERE u.role_id = ? `;
-    countParams.push(role_id);
-  }
-
-  const [count] = await db.query(
-    countQuery,
-    countParams
-  );
-
-  return {
-    users: rows,
-    total: count[0].total
-  };
 };
 
 //get getAllHierarchyUsers 

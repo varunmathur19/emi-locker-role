@@ -579,65 +579,90 @@ export const loginUser = async (req, res) => {
 // =========================
 // GET ALL USERS
 // =========================
-export const getUsers = async(req,res)=>{
+export const getUsers = async (req, res) => {
+  try {
 
-try{
+    // ==========================================
+    // PAGINATION
+    // ==========================================
 
-const page = Number(req.query.page) || 1;
+    const page =
+      Number(req.query.page) || 1;
 
-const limit = Number(req.query.limit) || 10;
+    const limit =
+      Number(req.query.limit) || 10;
 
-
-const offset = (page - 1) * limit;
-
-
-const role_id = req.query.role_id || null;
-
-
-
-const result = await getAllUsers(
-    limit,
-    offset,
-    role_id
-);
+    const offset =
+      (page - 1) * limit;
 
 
+    // ==========================================
+    // OPTIONAL ROLE FILTER
+    // ==========================================
 
-res.status(200).json({
-
-success:true,
-
-
-pagination:{
-    currentPage:page,
-    totalPages:Math.ceil(result.total / limit),
-    limit:limit
-},
+    const role_id =
+      req.query.role_id !== undefined &&
+      req.query.role_id !== ""
+        ? Number(req.query.role_id)
+        : null;
 
 
-totalUsers:result.total,
+    // ==========================================
+    // GET USERS
+    // ==========================================
+
+    const result =
+      await getAllUsers(
+        limit,
+        offset,
+        role_id
+      );
 
 
-data:result.users
+    // ==========================================
+    // RESPONSE
+    // ==========================================
 
+    return res.status(200).json({
 
-});
+      success: true,
 
+      pagination: {
 
-}
-catch(error){
+        currentPage: page,
 
-res.status(500).json({
+        totalPages:
+          Math.ceil(
+            result.total / limit
+          ),
 
-success:false,
-message:error.message
+        limit,
 
-});
+        totalUsers:
+          result.total,
 
+      },
 
-}
+      data: result.users,
 
+    });
 
+  } catch (error) {
+
+    console.error(
+      "Get Users Error:",
+      error
+    );
+
+    return res.status(500).json({
+
+      success: false,
+
+      message: error.message,
+
+    });
+
+  }
 };
 
 // =========================
