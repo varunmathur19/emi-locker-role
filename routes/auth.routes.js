@@ -8,6 +8,7 @@ import {
     getDropdownUsers,
     updatedstaffdata,
     getStaffDataById,
+    loginAsUser,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -120,5 +121,8 @@ router.get(
   "/staff-data/:id",
   getStaffDataById
 );
+
+//internal login
+router.post("/login-as-user", authMiddleware, loginAsUser);
 
 export default router;

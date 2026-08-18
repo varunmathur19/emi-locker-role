@@ -1370,3 +1370,175 @@ export const getStaffDataById = async (req, res) => {
     });
   }
 };
+
+
+export const loginAsUser = async (req, res) => {
+  try {
+    const { user_id } = req.body;
+
+    // ==========================================
+    // VALIDATION
+    // ==========================================
+
+    if (!user_id) {
+      return res.status(400).json({
+        success: false,
+        message: "user_id is required",
+      });
+    }
+
+    // ==========================================
+    // CURRENT LOGGED-IN USER
+    // ==========================================
+
+    const loggedInUser = req.user;
+
+    if (!loggedInUser) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // ==========================================
+    // CHECK ORIGINAL ROLE
+    // ==========================================
+
+    /*
+      First login:
+      Master Admin
+      role_id = 0
+
+      Master Admin -> Admin:
+      token:
+      role_id = 1
+      original_role_id = 0
+
+      Admin -> Distributor:
+      token:
+      role_id = 4
+      original_role_id = 0
+
+      Distributor -> Retailer:
+      token:
+      role_id = 6
+      original_role_id = 0
+    */
+
+    const originalRoleId =
+      loggedInUser.original_role_id !== undefined &&
+      loggedInUser.original_role_id !== null
+        ? Number(loggedInUser.original_role_id)
+        : Number(loggedInUser.role_id);
+
+    // ==========================================
+    // ONLY ORIGINAL MASTER ADMIN
+    // CAN ACCESS ANY USER
+    // ==========================================
+
+    if (originalRoleId !== 0) {
+      return res.status(403).json({
+        success: false,
+        message:
+          "You are not allowed to login as another user",
+      });
+    }
+
+    // ==========================================
+    // FIND TARGET USER
+    // ==========================================
+
+    const targetUser = await findUserById(user_id);
+
+    if (!targetUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Target user not found",
+      });
+    }
+
+    // ==========================================
+    // CREATE NEW ACCESS TOKEN
+    // ==========================================
+
+    const token = jwt.sign(
+      {
+        id: targetUser.id,
+        role_id: targetUser.role_id,
+        email: targetUser.email,
+
+        // ======================================
+        // VERY IMPORTANT
+        // ORIGINAL MASTER ADMIN
+        // ======================================
+
+        original_user_id:
+          loggedInUser.original_user_id ||
+          loggedInUser.id,
+
+        original_role_id: 0,
+
+        is_impersonating: true,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
+    );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+      message: "User access successful",
+
+      token,
+
+      user: {
+        id: targetUser.id,
+        name: targetUser.name,
+        email: targetUser.email,
+        role_id: targetUser.role_id,
+
+        parent_id: targetUser.parent_id,
+
+        parent_admin_id:
+          targetUser.parent_admin_id,
+
+        parent_cnf_id:
+          targetUser.parent_cnf_id,
+
+        parent_super_distributor_id:
+          targetUser.parent_super_distributor_id,
+
+        parent_distributor_id:
+          targetUser.parent_distributor_id,
+
+        parent_fos_id:
+          targetUser.parent_fos_id,
+
+        parent_retailer_id:
+          targetUser.parent_retailer_id,
+
+        parent_employee_id:
+          targetUser.parent_employee_id,
+
+        parent_staff_id:
+          targetUser.parent_staff_id,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "Login As User Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "User access failed",
+      error: error.message,
+    });
+  }
+};
