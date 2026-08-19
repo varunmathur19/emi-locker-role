@@ -731,6 +731,42 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // ROLE HIERARCHY
+    //
+    // 1 = Admin
+    // 2 = CNF
+    // 3 = Super Distributor
+    // 4 = Distributor
+    // 5 = FOS
+    // 6 = Retailer
+    // 7 = Sub Retailer
+    // 8 = Employee
+    // 9 = Staff
+    // =====================================================
+
+    const hierarchy = {
+      2: [1, 2],
+      3: [2, 3],
+      4: [2, 3, 4],
+      5: [2, 3, 4, 5],
+      6: [2, 3, 4, 5, 6],
+      7: [2, 3, 4, 5, 6, 7],
+      8: [2, 3, 4, 5, 6, 7, 8],
+      9: [2, 3, 4, 5, 6, 7, 8, 9],
+    };
+
+    // =====================================================
+    // CHECK ROLE
+    // =====================================================
+
+    if (!hierarchy[createRoleId]) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid or unsupported role_id",
+      });
+    }
+
+    // =====================================================
     // VALIDATE PARENT ID
     // =====================================================
 
@@ -752,153 +788,170 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
-    // HIERARCHY
+    // CASE 1
     //
-    // role 2 = CNF
-    // role 3 = Super Distributor
-    // role 4 = Distributor
-    // role 5 = FOS
-    // role 6 = Retailer
-    // role 7 = Employee
-    // role 8 = Staff
+    // NO PARENT
     //
     // Example:
     //
-    // Creating Distributor (4)
+    // role_id = 4
     //
-    // [2, 3, 4]
-    //
-    // Creating FOS (5)
-    //
-    // [2, 3, 4, 5]
-    // =====================================================
-
-    const hierarchy = {
-      2: [2],
-
-      3: [2, 3],
-
-      4: [2, 3, 4],
-
-      5: [2, 3, 4, 5],
-
-      6: [2, 3, 4, 5, 6],
-
-      7: [2, 3, 4, 5, 6, 7],
-
-      8: [8],
-    };
-
-    // =====================================================
-    // CHECK ROLE
-    // =====================================================
-
-    if (!hierarchy[createRoleId]) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or unsupported role_id",
-      });
-    }
-
-    const levels =
-      hierarchy[createRoleId];
-
-    // =====================================================
-    // FIND CURRENT LEVEL
-    //
-    // No parent_id:
-    //
-    // first level
-    //
-    // parent_id diya:
-    //
-    // us parent ke baad next level
-    // =====================================================
-
-    let currentLevelIndex = 0;
-
-    // =====================================================
-    // NO PARENT
+    // Return first parent = CNF
     // =====================================================
 
     if (selectedParentId === null) {
+      const firstParentRole =
+        hierarchy[createRoleId][0];
 
-      currentLevelIndex = 0;
-
-    }
-
-    // =====================================================
-    // PARENT SELECTED
-    // =====================================================
-
-    else {
-
-      /*
-       * Parent ID se database mein user ka role
-       * find karenge.
-       *
-       * Example:
-       *
-       * parent_id = 10
-       * user 10 = CNF
-       *
-       * Then next role = Super Distributor
-       */
-
-      const [parentRows] = await db.query(
+      const [rows] = await db.query(
         `
           SELECT
             id,
             name,
+            email,
+            phone,
             role_id,
-            parent_id
+            parent_id,
+            created_by
           FROM users
-          WHERE id = ?
-          LIMIT 1
+          WHERE role_id = ?
+          ORDER BY name ASC
         `,
-        [selectedParentId]
+        [firstParentRole]
       );
 
-      if (!parentRows.length) {
-        return res.status(404).json({
-          success: false,
-          message: "Parent user not found",
-        });
-      }
+      console.log(
+        "=========================================="
+      );
 
-      const parentRoleId =
-        Number(parentRows[0].role_id);
+      console.log(
+        "HIERARCHY DROPDOWN - FIRST LEVEL"
+      );
 
-      // ===================================================
-      // FIND PARENT ROLE IN HIERARCHY
-      // ===================================================
+      console.log(
+        "Create Role:",
+        createRoleId
+      );
 
-      const parentIndex =
-        levels.indexOf(parentRoleId);
+      console.log(
+        "Fetch Role:",
+        firstParentRole
+      );
 
-      if (parentIndex === -1) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Selected parent is not valid for this role hierarchy",
-        });
-      }
+      console.log(
+        "Total:",
+        rows.length
+      );
 
-      // ===================================================
-      // NEXT LEVEL
-      // ===================================================
+      console.log(
+        "=========================================="
+      );
 
-      currentLevelIndex =
-        parentIndex + 1;
+      return res.status(200).json({
+        success: true,
 
+        create_role_id:
+          createRoleId,
+
+        parent_id:
+          null,
+
+        current_role_id:
+          firstParentRole,
+
+        current_role_name:
+          getRoleName(firstParentRole),
+
+        total:
+          rows.length,
+
+        data:
+          rows,
+      });
     }
 
     // =====================================================
-    // HIERARCHY COMPLETE
+    // CASE 2
+    //
+    // PARENT SELECTED
+    // =====================================================
+
+    const [parentRows] = await db.query(
+      `
+        SELECT
+          id,
+          name,
+          role_id,
+          parent_id
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+      `,
+      [selectedParentId]
+    );
+
+    // =====================================================
+    // PARENT NOT FOUND
+    // =====================================================
+
+    if (!parentRows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Parent user not found",
+      });
+    }
+
+    const parentRoleId =
+      Number(parentRows[0].role_id);
+
+    // =====================================================
+    // CREATE ROLE HIERARCHY
+    // =====================================================
+
+    const levels =
+      hierarchy[createRoleId];
+
+    const parentIndex =
+      levels.indexOf(parentRoleId);
+
+    // =====================================================
+    // INVALID PARENT
+    // =====================================================
+
+    if (parentIndex === -1) {
+      return res.status(400).json({
+        success: false,
+
+        message:
+          "Selected parent is not valid for this role hierarchy",
+
+        create_role_id:
+          createRoleId,
+
+        selected_parent_id:
+          selectedParentId,
+
+        selected_parent_role_id:
+          parentRoleId,
+
+        allowed_parent_roles:
+          levels,
+      });
+    }
+
+    // =====================================================
+    // NEXT ROLE
+    // =====================================================
+
+    const nextRoleIndex =
+      parentIndex + 1;
+
+    // =====================================================
+    // NO NEXT ROLE
     // =====================================================
 
     if (
-      currentLevelIndex >=
+      nextRoleIndex >=
       levels.length
     ) {
       return res.status(200).json({
@@ -913,7 +966,11 @@ export const getDropdownUsers = async (req, res) => {
         current_role_id:
           null,
 
-        total: 0,
+        current_role_name:
+          null,
+
+        total:
+          0,
 
         data: [],
 
@@ -922,73 +979,15 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // ROLE TO FETCH
-    // =====================================================
-
     const fetchRoleId =
-      levels[currentLevelIndex];
+      levels[nextRoleIndex];
 
     // =====================================================
-    // QUERY
+    // FETCH CHILD USERS
     // =====================================================
 
-    let sql = "";
-    let values = [];
-
-    // =====================================================
-    // FIRST LEVEL
-    //
-    // No parent selected
-    //
-    // Example:
-    //
-    // role_id=4
-    //
-    // returns all CNF
-    // =====================================================
-
-    if (
-      selectedParentId === null
-    ) {
-
-      sql = `
-        SELECT
-          id,
-          name,
-          email,
-          phone,
-          role_id,
-          parent_id,
-          created_by
-        FROM users
-        WHERE role_id = ?
-        ORDER BY name ASC
-      `;
-
-      values = [
-        fetchRoleId,
-      ];
-
-    }
-
-    // =====================================================
-    // NEXT LEVEL
-    //
-    // Example:
-    //
-    // role_id=4
-    // parent_id=10
-    //
-    // user 10 = CNF
-    //
-    // returns Super Distributor
-    // where parent_id = 10
-    // =====================================================
-
-    else {
-
-      sql = `
+    const [rows] = await db.query(
+      `
         SELECT
           id,
           name,
@@ -1001,14 +1000,12 @@ export const getDropdownUsers = async (req, res) => {
         WHERE role_id = ?
         AND parent_id = ?
         ORDER BY name ASC
-      `;
-
-      values = [
+      `,
+      [
         fetchRoleId,
         selectedParentId,
-      ];
-
-    }
+      ]
+    );
 
     // =====================================================
     // DEBUG
@@ -1038,33 +1035,23 @@ export const getDropdownUsers = async (req, res) => {
     );
 
     console.log(
-      "Current Level:",
+      "Parent Role:",
+      parentRoleId
+    );
+
+    console.log(
+      "Next Role:",
       fetchRoleId
     );
 
     console.log(
-      "SQL:",
-      sql
-    );
-
-    console.log(
-      "Values:",
-      values
+      "Total:",
+      rows.length
     );
 
     console.log(
       "=========================================="
     );
-
-    // =====================================================
-    // DATABASE
-    // =====================================================
-
-    const [rows] =
-      await db.query(
-        sql,
-        values
-      );
 
     // =====================================================
     // RESPONSE
@@ -1078,6 +1065,9 @@ export const getDropdownUsers = async (req, res) => {
 
       parent_id:
         selectedParentId,
+
+      parent_role_id:
+        parentRoleId,
 
       current_role_id:
         fetchRoleId,
