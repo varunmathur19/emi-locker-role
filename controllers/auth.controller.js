@@ -1979,3 +1979,219 @@ export const deleteModule = async (req, res) => {
 
   }
 };
+
+
+export const updateModule = async (req, res) => {
+  try {
+
+    // =================================================
+    // ROLE CHECK
+    // =================================================
+
+    if (Number(req.user?.role_id) !== 0) {
+
+      return res.status(403).json({
+        success: false,
+        message:
+          "Only Master Admin can update module",
+      });
+
+    }
+
+    // =================================================
+    // GET DATA
+    // =================================================
+
+    const {
+      oldModule,
+      newModule,
+    } = req.body;
+
+    // =================================================
+    // VALIDATION
+    // =================================================
+
+    if (
+      typeof oldModule !== "string" ||
+      !oldModule.trim()
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Old module name is required",
+      });
+
+    }
+
+    if (
+      typeof newModule !== "string" ||
+      !newModule.trim()
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "New module name is required",
+      });
+
+    }
+
+    const oldName =
+      oldModule.trim();
+
+    const newName =
+      newModule.trim();
+
+    // =================================================
+    // GET MASTER ADMIN MODULES
+    // =================================================
+
+    const [rows] = await db.query(
+      `
+      SELECT modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+      `
+    );
+
+    if (!rows.length) {
+
+      return res.status(404).json({
+        success: false,
+        message:
+          "Master Admin not found",
+      });
+
+    }
+
+    // =================================================
+    // PARSE MODULES
+    // =================================================
+
+    let modules =
+      rows[0].modules;
+
+    if (!modules) {
+
+      modules = [];
+
+    } else if (
+      typeof modules === "string"
+    ) {
+
+      try {
+
+        modules =
+          JSON.parse(modules);
+
+      } catch (error) {
+
+        modules = [];
+
+      }
+
+    }
+
+    if (!Array.isArray(modules)) {
+
+      modules = [];
+
+    }
+
+    // =================================================
+    // FIND OLD MODULE
+    // =================================================
+
+    const moduleIndex =
+      modules.findIndex(
+        (item) =>
+          String(item)
+            .trim()
+            .toLowerCase() ===
+          oldName.toLowerCase()
+      );
+
+    if (moduleIndex === -1) {
+
+      return res.status(404).json({
+        success: false,
+        message:
+          "Module not found",
+      });
+
+    }
+
+    // =================================================
+    // DUPLICATE NEW MODULE CHECK
+    // =================================================
+
+    const duplicate =
+      modules.some(
+        (item, index) =>
+          index !== moduleIndex &&
+          String(item)
+            .trim()
+            .toLowerCase() ===
+          newName.toLowerCase()
+      );
+
+    if (duplicate) {
+
+      return res.status(409).json({
+        success: false,
+        message:
+          "Module already exists",
+      });
+
+    }
+
+    // =================================================
+    // UPDATE MODULE
+    // =================================================
+
+    modules[moduleIndex] =
+      newName;
+
+    // =================================================
+    // UPDATE DATABASE
+    // =================================================
+
+    await db.query(
+      `
+      UPDATE users
+      SET modules = ?
+      WHERE role_id = 0
+      `,
+      [
+        JSON.stringify(modules)
+      ]
+    );
+
+    // =================================================
+    // RESPONSE
+    // =================================================
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Module updated successfully",
+      modules,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "UPDATE MODULE ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to update module",
+    });
+
+  }
+};

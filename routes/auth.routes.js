@@ -12,6 +12,7 @@ import {
     addModule,
     getModules,
     deleteModule,
+    updateModule,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -219,6 +220,12 @@ router.get(
 router.delete(
   "/delete-module",
   deleteModule
+);
+
+router.put(
+  "/update-module",
+  authMiddleware,
+  updateModule
 );
 
 export default router;
