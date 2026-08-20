@@ -1634,3 +1634,348 @@ export const loginAsUser = async (req, res) => {
     });
   }
 };
+
+
+// =====================================================
+// SIDEMENU MODULE
+// =====================================================
+export const addModule = async (req, res) => {
+  try {
+    // ==========================================
+    // ONLY MASTER ADMIN
+    // ==========================================
+
+    if (Number(req.user?.role_id) !== 0) {
+      return res.status(403).json({
+        success: false,
+        message: "Only Master Admin can add modules",
+      });
+    }
+
+    const { module } = req.body;
+
+    // ==========================================
+    // VALIDATION
+    // ==========================================
+
+    if (!module || typeof module !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Module is required",
+      });
+    }
+
+    const moduleName = module.trim().toLowerCase();
+
+    // ==========================================
+    // GET MASTER ADMIN
+    // ==========================================
+
+    const [rows] = await db.query(
+      `
+      SELECT id, modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+      `
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Master Admin not found",
+      });
+    }
+
+    const masterAdmin = rows[0];
+
+    // ==========================================
+    // GET EXISTING MODULES
+    // ==========================================
+
+    let modules = [];
+
+    if (masterAdmin.modules) {
+      modules =
+        typeof masterAdmin.modules === "string"
+          ? JSON.parse(masterAdmin.modules)
+          : masterAdmin.modules;
+    }
+
+    // Safety check
+    if (!Array.isArray(modules)) {
+      modules = [];
+    }
+
+    // ==========================================
+    // DUPLICATE CHECK
+    // ==========================================
+
+    if (modules.includes(moduleName)) {
+      return res.status(409).json({
+        success: false,
+        message: "Module already exists",
+        modules,
+      });
+    }
+
+    // ==========================================
+    // ADD MODULE
+    // ==========================================
+
+    modules.push(moduleName);
+
+    // ==========================================
+    // UPDATE MASTER ADMIN
+    // ==========================================
+
+    await db.query(
+      `
+      UPDATE users
+      SET modules = ?
+      WHERE id = ?
+      `,
+      [
+        JSON.stringify(modules),
+        masterAdmin.id,
+      ]
+    );
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.status(201).json({
+      success: true,
+      message: "Module added successfully",
+      modules,
+    });
+
+  } catch (error) {
+    console.error("Add Module Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+export const getModules = async (req, res) => {
+  try {
+    // ==========================================
+    // GET MASTER ADMIN MODULES
+    // ==========================================
+
+    const [rows] = await db.query(
+      `
+      SELECT modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+      `
+    );
+
+    // ==========================================
+    // MASTER ADMIN NOT FOUND
+    // ==========================================
+
+    if (!rows.length) {
+      return res.json({
+        success: true,
+        modules: [],
+      });
+    }
+
+    // ==========================================
+    // GET MODULES
+    // ==========================================
+
+    let modules = [];
+
+    if (rows[0].modules) {
+      modules =
+        typeof rows[0].modules === "string"
+          ? JSON.parse(rows[0].modules)
+          : rows[0].modules;
+    }
+
+    // ==========================================
+    // SAFETY CHECK
+    // ==========================================
+
+    if (!Array.isArray(modules)) {
+      modules = [];
+    }
+
+    // ==========================================
+    // RESPONSE
+    // ==========================================
+
+    return res.json({
+      success: true,
+      modules,
+    });
+
+  } catch (error) {
+    console.error("Get Modules Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+    });
+  }
+};
+
+export const deleteModule = async (req, res) => {
+  try {
+
+    console.log(
+      "DELETE MODULE BODY:",
+      req.body
+    );
+
+    const { module } = req.body || {};
+
+    if (!module) {
+      return res.status(400).json({
+        success: false,
+        message: "Module name is required",
+      });
+    }
+
+    const moduleName =
+      String(module).trim();
+
+    // ==========================================
+    // GET MASTER ADMIN
+    // ==========================================
+
+    const [rows] = await db.query(
+      `
+      SELECT modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+      `
+    );
+
+    if (!rows.length) {
+      return res.status(404).json({
+        success: false,
+        message: "Master Admin not found",
+      });
+    }
+
+    // ==========================================
+    // GET MODULE ARRAY
+    // ==========================================
+
+    let modules = [];
+
+    if (rows[0].modules) {
+
+      modules =
+        typeof rows[0].modules === "string"
+          ? JSON.parse(rows[0].modules)
+          : rows[0].modules;
+
+    }
+
+    if (!Array.isArray(modules)) {
+      modules = [];
+    }
+
+    console.log(
+      "OLD MODULES:",
+      modules
+    );
+
+    // ==========================================
+    // FIND MODULE
+    // ==========================================
+
+    const moduleExists =
+      modules.some(
+        (item) =>
+          String(item)
+            .trim()
+            .toLowerCase() ===
+          moduleName.toLowerCase()
+      );
+
+    if (!moduleExists) {
+
+      return res.status(404).json({
+        success: false,
+        message: `Module "${moduleName}" not found`,
+      });
+
+    }
+
+    // ==========================================
+    // DELETE MODULE
+    // ==========================================
+
+    const updatedModules =
+      modules.filter(
+        (item) =>
+          String(item)
+            .trim()
+            .toLowerCase() !==
+          moduleName.toLowerCase()
+      );
+
+    console.log(
+      "UPDATED MODULES:",
+      updatedModules
+    );
+
+    // ==========================================
+    // UPDATE DATABASE
+    // ==========================================
+
+    const [result] = await db.query(
+      `
+      UPDATE users
+      SET modules = ?
+      WHERE role_id = 0
+      `,
+      [
+        JSON.stringify(
+          updatedModules
+        ),
+      ]
+    );
+
+    console.log(
+      "UPDATE RESULT:",
+      result
+    );
+
+    // ==========================================
+    // SUCCESS
+    // ==========================================
+
+    return res.status(200).json({
+      success: true,
+      message: "Module deleted successfully",
+      modules: updatedModules,
+    });
+
+  } catch (error) {
+
+    console.error(
+      "Delete Module Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to delete module",
+      error: error.message,
+    });
+
+  }
+};

@@ -9,6 +9,9 @@ import {
     updatedstaffdata,
     getStaffDataById,
     loginAsUser,
+    addModule,
+    getModules,
+    deleteModule,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -199,5 +202,23 @@ router.get(
 
 //internal login
 router.post("/login-as-user", authMiddleware, loginAsUser);
+
+//Add module
+router.post(
+  "/add-module",
+  authMiddleware,
+  addModule
+);
+
+router.get(
+  "/modules",
+  authMiddleware,
+  getModules
+);
+
+router.delete(
+  "/delete-module",
+  deleteModule
+);
 
 export default router;
