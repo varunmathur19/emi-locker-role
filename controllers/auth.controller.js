@@ -2253,8 +2253,7 @@ export const updateModule = async (req, res) => {
 
       return res.status(403).json({
         success: false,
-        message:
-          "Only Master Admin can update module",
+        message: "Only Master Admin can update module",
       });
 
     }
@@ -2271,7 +2270,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // VALIDATION
+    // VALIDATE OLD MODULE
     // =================================================
 
     if (
@@ -2281,12 +2280,15 @@ export const updateModule = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message:
-          "Old module name is required",
+        message: "Old module name is required",
       });
 
     }
 
+
+    // =================================================
+    // VALIDATE NEW MODULE
+    // =================================================
 
     if (
       typeof newModule !== "string" ||
@@ -2295,30 +2297,28 @@ export const updateModule = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message:
-          "New module name is required",
+        message: "New module name is required",
       });
 
     }
 
 
     // =================================================
-    // FILE VALIDATION
+    // VALIDATE NEW ICON
     // =================================================
 
     if (!req.file) {
 
       return res.status(400).json({
         success: false,
-        message:
-          "New icon image is required",
+        message: "New icon image is required",
       });
 
     }
 
 
     // =================================================
-    // CLEAN MODULE NAMES
+    // CLEAN NAMES
     // =================================================
 
     const oldModuleName =
@@ -2353,11 +2353,13 @@ export const updateModule = async (req, res) => {
 
       return res.status(404).json({
         success: false,
-        message:
-          "Master Admin not found",
+        message: "Master Admin not found",
       });
 
     }
+
+
+    const masterAdmin = rows[0];
 
 
     // =================================================
@@ -2365,7 +2367,7 @@ export const updateModule = async (req, res) => {
     // =================================================
 
     let modules =
-      rows[0].modules;
+      masterAdmin.modules;
 
 
     if (!modules) {
@@ -2392,8 +2394,7 @@ export const updateModule = async (req, res) => {
 
         return res.status(500).json({
           success: false,
-          message:
-            "Invalid modules data",
+          message: "Invalid modules data",
         });
 
       }
@@ -2409,11 +2410,31 @@ export const updateModule = async (req, res) => {
 
       return res.status(500).json({
         success: false,
-        message:
-          "Modules data must be an array",
+        message: "Modules data must be an array",
       });
 
     }
+
+
+    // =================================================
+    // CONVERT OLD FORMAT
+    // =================================================
+
+    modules =
+      modules.map((item) => {
+
+        if (typeof item === "string") {
+
+          return {
+            name: item,
+            icon: null,
+          };
+
+        }
+
+        return item;
+
+      });
 
 
     // =================================================
@@ -2441,29 +2462,31 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // OLD MODULE NOT FOUND
+    // MODULE NOT FOUND
     // =================================================
 
     if (moduleIndex === -1) {
 
-      // Uploaded new icon delete
-      if (req.file) {
+      // Delete uploaded new file
 
-        const filePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
+      const uploadedFilePath =
+        path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        if (
-          fs.existsSync(filePath)
-        ) {
+      if (
+        fs.existsSync(
+          uploadedFilePath
+        )
+      ) {
 
-          fs.unlinkSync(filePath);
-
-        }
+        fs.unlinkSync(
+          uploadedFilePath
+        );
 
       }
+
 
       return res.status(404).json({
         success: false,
@@ -2485,13 +2508,17 @@ export const updateModule = async (req, res) => {
           if (
             index === moduleIndex
           ) {
+
             return false;
+
           }
+
 
           const name =
             typeof item === "string"
               ? item
               : item?.name;
+
 
           return (
             String(name || "")
@@ -2504,26 +2531,32 @@ export const updateModule = async (req, res) => {
       );
 
 
+    // =================================================
+    // DUPLICATE MODULE
+    // =================================================
+
     if (duplicateModule) {
 
-      // Delete uploaded icon
-      if (req.file) {
+      // Delete newly uploaded file
 
-        const filePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
+      const uploadedFilePath =
+        path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        if (
-          fs.existsSync(filePath)
-        ) {
+      if (
+        fs.existsSync(
+          uploadedFilePath
+        )
+      ) {
 
-          fs.unlinkSync(filePath);
-
-        }
+        fs.unlinkSync(
+          uploadedFilePath
+        );
 
       }
+
 
       return res.status(409).json({
         success: false,
@@ -2535,12 +2568,16 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // OLD ICON DELETE
+    // OLD MODULE DATA
     // =================================================
 
     const oldModuleData =
       modules[moduleIndex];
 
+
+    // =================================================
+    // DELETE OLD ICON
+    // =================================================
 
     if (
       typeof oldModuleData === "object" &&
@@ -2549,6 +2586,7 @@ export const updateModule = async (req, res) => {
 
       const oldIconPath =
         oldModuleData.icon;
+
 
       const oldFilePath =
         path.join(
@@ -2561,7 +2599,9 @@ export const updateModule = async (req, res) => {
 
 
       if (
-        fs.existsSync(oldFilePath)
+        fs.existsSync(
+          oldFilePath
+        )
       ) {
 
         fs.unlinkSync(
@@ -2608,11 +2648,8 @@ export const updateModule = async (req, res) => {
       AND role_id = 0
       `,
       [
-        JSON.stringify(
-          modules
-        ),
-
-        rows[0].id,
+        JSON.stringify(modules),
+        masterAdmin.id,
       ]
     );
 
@@ -2629,6 +2666,7 @@ export const updateModule = async (req, res) => {
         "Module updated successfully",
 
       module: {
+
         oldModule:
           oldModuleName,
 
@@ -2637,6 +2675,7 @@ export const updateModule = async (req, res) => {
 
         icon:
           newIconPath,
+
       },
 
       modules,
@@ -2654,23 +2693,36 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // DELETE NEW FILE IF ERROR
+    // DELETE UPLOADED FILE ON ERROR
     // =================================================
 
     if (req.file) {
 
-      const filePath =
-        path.join(
-          uploadDir,
-          req.file.filename
-        );
+      try {
 
-      if (
-        fs.existsSync(filePath)
-      ) {
+        const filePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
 
-        fs.unlinkSync(
-          filePath
+
+        if (
+          fs.existsSync(filePath)
+        ) {
+
+          fs.unlinkSync(
+            filePath
+          );
+
+        }
+
+      }
+      catch (fileError) {
+
+        console.error(
+          "FILE DELETE ERROR:",
+          fileError
         );
 
       }

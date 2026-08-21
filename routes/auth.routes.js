@@ -17,7 +17,7 @@ import {
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
-import { uploadModuleIcon } from "../middleware/upload.js";
+import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
 
 const router = express.Router();
@@ -228,7 +228,7 @@ router.delete(
 router.put(
   "/update-module",
   authMiddleware,
-  uploadModuleIcon,
+  uploadModuleNewIcon,
   updateModule
 );
 
