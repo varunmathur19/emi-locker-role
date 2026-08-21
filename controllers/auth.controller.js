@@ -2722,11 +2722,17 @@ export const updateModule = async (req, res) => {
     // ROLE CHECK
     // =================================================
 
-    if (Number(req.user?.role_id) !== 0) {
+    if (
+      Number(req.user?.role_id) !== 0
+    ) {
 
       return res.status(403).json({
+
         success: false,
-        message: "Only Master Admin can update module",
+
+        message:
+          "Only Master Admin can update module",
+
       });
 
     }
@@ -2739,11 +2745,12 @@ export const updateModule = async (req, res) => {
     const {
       oldModule,
       newModule,
+      newSequence,
     } = req.body;
 
 
     // =================================================
-    // VALIDATE OLD MODULE
+    // OLD MODULE IS REQUIRED
     // =================================================
 
     if (
@@ -2752,46 +2759,93 @@ export const updateModule = async (req, res) => {
     ) {
 
       return res.status(400).json({
+
         success: false,
-        message: "Old module name is required",
+
+        message:
+          "Old module name is required",
+
       });
 
     }
 
 
     // =================================================
-    // VALIDATE NEW MODULE
+    // CHECK WHAT IS BEING UPDATED
+    // =================================================
+
+    const hasNewModule =
+      typeof newModule === "string" &&
+      newModule.trim() !== "";
+
+
+    const hasNewSequence =
+      newSequence !== undefined &&
+      newSequence !== null &&
+      String(newSequence).trim() !== "";
+
+
+    const hasNewIcon =
+      !!req.file;
+
+
+    // =================================================
+    // AT LEAST ONE FIELD REQUIRED
     // =================================================
 
     if (
-      typeof newModule !== "string" ||
-      !newModule.trim()
+      !hasNewModule &&
+      !hasNewSequence &&
+      !hasNewIcon
     ) {
 
       return res.status(400).json({
+
         success: false,
-        message: "New module name is required",
+
+        message:
+          "At least one field is required to update",
+
       });
 
     }
 
 
     // =================================================
-    // VALIDATE NEW ICON
+    // VALIDATE SEQUENCE
+    // ONLY IF PROVIDED
     // =================================================
 
-    if (!req.file) {
+    let sequence = null;
 
-      return res.status(400).json({
-        success: false,
-        message: "New icon image is required",
-      });
+
+    if (hasNewSequence) {
+
+      sequence =
+        Number(newSequence);
+
+
+      if (
+        !Number.isInteger(sequence) ||
+        sequence < 1
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Valid sequence number is required",
+
+        });
+
+      }
 
     }
 
 
     // =================================================
-    // CLEAN NAMES
+    // CLEAN MODULE NAMES
     // =================================================
 
     const oldModuleName =
@@ -2799,10 +2853,13 @@ export const updateModule = async (req, res) => {
         .trim()
         .toLowerCase();
 
+
     const newModuleName =
-      newModule
-        .trim()
-        .toLowerCase();
+      hasNewModule
+        ? newModule
+            .trim()
+            .toLowerCase()
+        : null;
 
 
     // =================================================
@@ -2824,15 +2881,46 @@ export const updateModule = async (req, res) => {
 
     if (!rows.length) {
 
+      // Delete newly uploaded file
+
+      if (req.file) {
+
+        const uploadedFilePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+
+        if (
+          fs.existsSync(
+            uploadedFilePath
+          )
+        ) {
+
+          fs.unlinkSync(
+            uploadedFilePath
+          );
+
+        }
+
+      }
+
+
       return res.status(404).json({
+
         success: false,
-        message: "Master Admin not found",
+
+        message:
+          "Master Admin not found",
+
       });
 
     }
 
 
-    const masterAdmin = rows[0];
+    const masterAdmin =
+      rows[0];
 
 
     // =================================================
@@ -2865,9 +2953,40 @@ export const updateModule = async (req, res) => {
           error
         );
 
+
+        // Delete uploaded file
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
         return res.status(500).json({
+
           success: false,
-          message: "Invalid modules data",
+
+          message:
+            "Invalid modules data",
+
         });
 
       }
@@ -2876,14 +2995,18 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // SAFETY
+    // SAFETY CHECK
     // =================================================
 
     if (!Array.isArray(modules)) {
 
       return res.status(500).json({
+
         success: false,
-        message: "Modules data must be an array",
+
+        message:
+          "Modules data must be an array",
+
       });
 
     }
@@ -2894,20 +3017,57 @@ export const updateModule = async (req, res) => {
     // =================================================
 
     modules =
-      modules.map((item) => {
+      modules.map(
+        (item, index) => {
 
-        if (typeof item === "string") {
+          // -------------------------------------------
+          // OLD STRING FORMAT
+          // -------------------------------------------
+
+          if (
+            typeof item === "string"
+          ) {
+
+            return {
+
+              name:
+                item,
+
+              icon:
+                null,
+
+              sequence:
+                index + 1,
+
+            };
+
+          }
+
+
+          // -------------------------------------------
+          // OBJECT FORMAT
+          // -------------------------------------------
 
           return {
-            name: item,
-            icon: null,
+
+            name:
+              item?.name ||
+              "",
+
+            icon:
+              item?.icon ||
+              null,
+
+            sequence:
+              Number(
+                item?.sequence ??
+                index + 1
+              ),
+
           };
 
         }
-
-        return item;
-
-      });
+      );
 
 
     // =================================================
@@ -2918,13 +3078,11 @@ export const updateModule = async (req, res) => {
       modules.findIndex(
         (item) => {
 
-          const name =
-            typeof item === "string"
-              ? item
-              : item?.name;
-
           return (
-            String(name || "")
+            String(
+              item?.name ||
+              ""
+            )
               .trim()
               .toLowerCase() ===
             oldModuleName
@@ -2938,148 +3096,127 @@ export const updateModule = async (req, res) => {
     // MODULE NOT FOUND
     // =================================================
 
-    if (moduleIndex === -1) {
+    if (
+      moduleIndex === -1
+    ) {
 
-      // Delete uploaded new file
+      // Delete uploaded file
 
-      const uploadedFilePath =
-        path.join(
-          uploadDir,
-          req.file.filename
-        );
+      if (req.file) {
 
-      if (
-        fs.existsSync(
-          uploadedFilePath
-        )
-      ) {
+        const uploadedFilePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
 
-        fs.unlinkSync(
-          uploadedFilePath
-        );
+
+        if (
+          fs.existsSync(
+            uploadedFilePath
+          )
+        ) {
+
+          fs.unlinkSync(
+            uploadedFilePath
+          );
+
+        }
 
       }
 
 
       return res.status(404).json({
+
         success: false,
+
         message:
           `Old module "${oldModule}" not found`,
+
       });
 
     }
 
 
     // =================================================
-    // DUPLICATE NEW MODULE CHECK
+    // CURRENT MODULE
     // =================================================
 
-    const duplicateModule =
-      modules.some(
-        (item, index) => {
-
-          if (
-            index === moduleIndex
-          ) {
-
-            return false;
-
-          }
-
-
-          const name =
-            typeof item === "string"
-              ? item
-              : item?.name;
-
-
-          return (
-            String(name || "")
-              .trim()
-              .toLowerCase() ===
-            newModuleName
-          );
-
-        }
-      );
-
-
-    // =================================================
-    // DUPLICATE MODULE
-    // =================================================
-
-    if (duplicateModule) {
-
-      // Delete newly uploaded file
-
-      const uploadedFilePath =
-        path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-      if (
-        fs.existsSync(
-          uploadedFilePath
-        )
-      ) {
-
-        fs.unlinkSync(
-          uploadedFilePath
-        );
-
-      }
-
-
-      return res.status(409).json({
-        success: false,
-        message:
-          `Module "${newModule}" already exists`,
-      });
-
-    }
-
-
-    // =================================================
-    // OLD MODULE DATA
-    // =================================================
-
-    const oldModuleData =
+    const currentModule =
       modules[moduleIndex];
 
 
     // =================================================
-    // DELETE OLD ICON
+    // DUPLICATE MODULE NAME CHECK
     // =================================================
 
-    if (
-      typeof oldModuleData === "object" &&
-      oldModuleData?.icon
-    ) {
+    if (hasNewModule) {
 
-      const oldIconPath =
-        oldModuleData.icon;
+      const duplicateModule =
+        modules.some(
+          (item, index) => {
+
+            // Current module ignore
+
+            if (
+              index === moduleIndex
+            ) {
+
+              return false;
+
+            }
 
 
-      const oldFilePath =
-        path.join(
-          process.cwd(),
-          oldIconPath.replace(
-            /^\/+/,
-            ""
-          )
+            return (
+              String(
+                item?.name ||
+                ""
+              )
+                .trim()
+                .toLowerCase() ===
+              newModuleName
+            );
+
+          }
         );
 
 
-      if (
-        fs.existsSync(
-          oldFilePath
-        )
-      ) {
+      if (duplicateModule) {
 
-        fs.unlinkSync(
-          oldFilePath
-        );
+        // Delete uploaded file
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
+        return res.status(409).json({
+
+          success: false,
+
+          message:
+            `Module "${newModule}" already exists`,
+
+        });
 
       }
 
@@ -3087,11 +3224,130 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // NEW ICON PATH
+    // DUPLICATE SEQUENCE CHECK
     // =================================================
 
-    const newIconPath =
-      `/uploads/modules/${req.file.filename}`;
+    if (hasNewSequence) {
+
+      const duplicateSequence =
+        modules.some(
+          (item, index) => {
+
+            // Current module ignore
+
+            if (
+              index === moduleIndex
+            ) {
+
+              return false;
+
+            }
+
+
+            return (
+              Number(
+                item?.sequence
+              ) ===
+              sequence
+            );
+
+          }
+        );
+
+
+      if (duplicateSequence) {
+
+        // Delete uploaded file
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
+        return res.status(422).json({
+
+          success: false,
+
+          message:
+            `Sequence ${sequence} is already used`,
+
+        });
+
+      }
+
+    }
+
+
+    // =================================================
+    // OLD VALUES
+    // =================================================
+
+    const oldIcon =
+      currentModule?.icon ||
+      null;
+
+
+    // =================================================
+    // FINAL NAME
+    // =================================================
+
+    const finalName =
+      hasNewModule
+        ? newModuleName
+        : currentModule?.name || "";
+
+
+    // =================================================
+    // FINAL SEQUENCE
+    // =================================================
+
+    const finalSequence =
+      hasNewSequence
+        ? sequence
+        : Number(
+            currentModule?.sequence ||
+            moduleIndex + 1
+          );
+
+
+    // =================================================
+    // FINAL ICON
+    // =================================================
+
+    let finalIcon =
+      currentModule?.icon ||
+      null;
+
+
+    // =================================================
+    // UPDATE ICON ONLY IF NEW ICON PROVIDED
+    // =================================================
+
+    if (hasNewIcon) {
+
+      finalIcon =
+        `/uploads/modules/${req.file.filename}`;
+
+    }
 
 
     // =================================================
@@ -3101,12 +3357,26 @@ export const updateModule = async (req, res) => {
     modules[moduleIndex] = {
 
       name:
-        newModuleName,
+        finalName,
 
       icon:
-        newIconPath,
+        finalIcon,
+
+      sequence:
+        finalSequence,
 
     };
+
+
+    // =================================================
+    // SORT BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) =>
+        Number(a.sequence) -
+        Number(b.sequence)
+    );
 
 
     // =================================================
@@ -3128,6 +3398,54 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
+    // DELETE OLD ICON
+    // ONLY IF NEW ICON WAS UPLOADED
+    // =================================================
+
+    if (
+      hasNewIcon &&
+      oldIcon &&
+      oldIcon !== finalIcon
+    ) {
+
+      try {
+
+        const oldIconPath =
+          path.join(
+            process.cwd(),
+            oldIcon.replace(
+              /^\/+/,
+              ""
+            )
+          );
+
+
+        if (
+          fs.existsSync(
+            oldIconPath
+          )
+        ) {
+
+          fs.unlinkSync(
+            oldIconPath
+          );
+
+        }
+
+      }
+      catch (iconDeleteError) {
+
+        console.error(
+          "OLD ICON DELETE ERROR:",
+          iconDeleteError
+        );
+
+      }
+
+    }
+
+
+    // =================================================
     // SUCCESS
     // =================================================
 
@@ -3144,17 +3462,19 @@ export const updateModule = async (req, res) => {
           oldModuleName,
 
         newModule:
-          newModuleName,
+          finalName,
 
         icon:
-          newIconPath,
+          finalIcon,
+
+        sequence:
+          finalSequence,
 
       },
 
       modules,
 
     });
-
 
   }
   catch (error) {
@@ -3166,7 +3486,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // DELETE UPLOADED FILE ON ERROR
+    // DELETE NEW ICON ON ERROR
     // =================================================
 
     if (req.file) {
@@ -3181,7 +3501,9 @@ export const updateModule = async (req, res) => {
 
 
         if (
-          fs.existsSync(filePath)
+          fs.existsSync(
+            filePath
+          )
         ) {
 
           fs.unlinkSync(
