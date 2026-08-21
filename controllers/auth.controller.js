@@ -2196,14 +2196,22 @@ export const getModules = async (
 
             : masterAdmin.modules;
 
-      } catch (error) {
+      }
+      catch (error) {
 
         console.error(
-          "Modules JSON Parse Error:",
+          "MODULES JSON PARSE ERROR:",
           error
         );
 
-        modules = [];
+        return res.status(500).json({
+
+          success: false,
+
+          message:
+            "Invalid modules data",
+
+        });
 
       }
 
@@ -2211,7 +2219,7 @@ export const getModules = async (
 
 
     // =================================================
-    // SAFETY
+    // SAFETY CHECK
     // =================================================
 
     if (
@@ -2226,19 +2234,16 @@ export const getModules = async (
 
 
     // =================================================
-    // CONVERT OLD MODULE FORMAT
-    // =================================================
-    // Agar purane modules me sequence nahi hai
-    // toh automatically index + 1 assign hoga.
+    // CONVERT / NORMALIZE MODULES
     // =================================================
 
     modules =
       modules.map(
         (item, index) => {
 
-          // -------------------------------------------
+          // ===========================================
           // OLD STRING FORMAT
-          // -------------------------------------------
+          // ===========================================
 
           if (
             typeof item === "string"
@@ -2255,23 +2260,65 @@ export const getModules = async (
               sequence:
                 index + 1,
 
+              // OLD MODULES DEFAULT ACTIVE
+              status:
+                1,
+
             };
 
           }
 
 
-          // -------------------------------------------
+          // ===========================================
           // OBJECT FORMAT
-          // -------------------------------------------
+          // ===========================================
+
+          const sequence =
+            Number(
+              item?.sequence
+            );
+
+
+          const status =
+            Number(
+              item?.status
+            );
+
 
           return {
 
-            ...item,
+            name:
+              item?.name ||
+              "",
+
+            icon:
+              item?.icon ||
+              null,
 
             sequence:
-              Number(
-                item?.sequence
-              ) || index + 1,
+              Number.isInteger(
+                sequence
+              ) &&
+              sequence > 0
+
+                ? sequence
+
+                : index + 1,
+
+            // =========================================
+            // STATUS
+            //
+            // 1 = ACTIVE / SHOW
+            // 0 = INACTIVE / HIDE
+            //
+            // Agar purane record me status nahi hai
+            // toh default 1
+            // =========================================
+
+            status:
+              status === 0
+                ? 0
+                : 1,
 
           };
 
@@ -2280,7 +2327,7 @@ export const getModules = async (
 
 
     // =================================================
-    // SORT MODULES BY SEQUENCE
+    // SORT BY SEQUENCE
     // =================================================
 
     modules.sort(
@@ -2300,6 +2347,28 @@ export const getModules = async (
 
 
     // =================================================
+    // ACTIVE / INACTIVE COUNT
+    // =================================================
+
+    const activeModules =
+      modules.filter(
+        (item) =>
+          Number(
+            item?.status
+          ) === 1
+      );
+
+
+    const inactiveModules =
+      modules.filter(
+        (item) =>
+          Number(
+            item?.status
+          ) === 0
+      );
+
+
+    // =================================================
     // SUCCESS
     // =================================================
 
@@ -2310,19 +2379,26 @@ export const getModules = async (
       count:
         modules.length,
 
+      activeCount:
+        activeModules.length,
+
+      inactiveCount:
+        inactiveModules.length,
+
       modules,
 
     });
 
 
-  } catch (error) {
+  }
+  catch (error) {
 
     // =================================================
     // ERROR
     // =================================================
 
     console.error(
-      "Get Modules Error:",
+      "GET MODULES ERROR:",
       error
     );
 
@@ -2335,7 +2411,7 @@ export const getModules = async (
         "Failed to get modules",
 
       error:
-        error.message,
+        error?.message,
 
     });
 
@@ -2746,11 +2822,12 @@ export const updateModule = async (req, res) => {
       oldModule,
       newModule,
       newSequence,
+      status,
     } = req.body;
 
 
     // =================================================
-    // OLD MODULE IS REQUIRED
+    // OLD MODULE REQUIRED
     // =================================================
 
     if (
@@ -2771,7 +2848,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // CHECK WHAT IS BEING UPDATED
+    // CHECK NEW MODULE
     // =================================================
 
     const hasNewModule =
@@ -2779,11 +2856,29 @@ export const updateModule = async (req, res) => {
       newModule.trim() !== "";
 
 
+    // =================================================
+    // CHECK NEW SEQUENCE
+    // =================================================
+
     const hasNewSequence =
       newSequence !== undefined &&
       newSequence !== null &&
       String(newSequence).trim() !== "";
 
+
+    // =================================================
+    // CHECK NEW STATUS
+    // =================================================
+
+    const hasNewStatus =
+      status !== undefined &&
+      status !== null &&
+      String(status).trim() !== "";
+
+
+    // =================================================
+    // CHECK NEW ICON
+    // =================================================
 
     const hasNewIcon =
       !!req.file;
@@ -2796,6 +2891,7 @@ export const updateModule = async (req, res) => {
     if (
       !hasNewModule &&
       !hasNewSequence &&
+      !hasNewStatus &&
       !hasNewIcon
     ) {
 
@@ -2813,7 +2909,6 @@ export const updateModule = async (req, res) => {
 
     // =================================================
     // VALIDATE SEQUENCE
-    // ONLY IF PROVIDED
     // =================================================
 
     let sequence = null;
@@ -2836,6 +2931,40 @@ export const updateModule = async (req, res) => {
 
           message:
             "Valid sequence number is required",
+
+        });
+
+      }
+
+    }
+
+
+    // =================================================
+    // VALIDATE STATUS
+    // 0 = INACTIVE / HIDE
+    // 1 = ACTIVE / SHOW
+    // =================================================
+
+    let moduleStatus = null;
+
+
+    if (hasNewStatus) {
+
+      moduleStatus =
+        Number(status);
+
+
+      if (
+        moduleStatus !== 0 &&
+        moduleStatus !== 1
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Status must be either 0 or 1",
 
         });
 
@@ -2879,9 +3008,13 @@ export const updateModule = async (req, res) => {
       );
 
 
+    // =================================================
+    // MASTER ADMIN NOT FOUND
+    // =================================================
+
     if (!rows.length) {
 
-      // Delete newly uploaded file
+      // Delete uploaded icon
 
       if (req.file) {
 
@@ -2954,7 +3087,7 @@ export const updateModule = async (req, res) => {
         );
 
 
-        // Delete uploaded file
+        // Delete uploaded icon
 
         if (req.file) {
 
@@ -2995,7 +3128,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // SAFETY CHECK
+    // ARRAY CHECK
     // =================================================
 
     if (!Array.isArray(modules)) {
@@ -3013,7 +3146,21 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // CONVERT OLD FORMAT
+    // CONVERT OLD MODULE FORMAT
+    //
+    // OLD:
+    // {
+    //   name: "cnf",
+    //   icon: null
+    // }
+    //
+    // NEW:
+    // {
+    //   name: "cnf",
+    //   icon: null,
+    //   sequence: 1,
+    //   status: 1
+    // }
     // =================================================
 
     modules =
@@ -3021,7 +3168,7 @@ export const updateModule = async (req, res) => {
         (item, index) => {
 
           // -------------------------------------------
-          // OLD STRING FORMAT
+          // STRING FORMAT
           // -------------------------------------------
 
           if (
@@ -3038,6 +3185,9 @@ export const updateModule = async (req, res) => {
 
               sequence:
                 index + 1,
+
+              status:
+                1,
 
             };
 
@@ -3064,6 +3214,14 @@ export const updateModule = async (req, res) => {
                 index + 1
               ),
 
+            status:
+              Number(
+                item?.status ??
+                1
+              ) === 0
+                ? 0
+                : 1,
+
           };
 
         }
@@ -3071,7 +3229,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // FIND OLD MODULE
+    // FIND MODULE
     // =================================================
 
     const moduleIndex =
@@ -3100,7 +3258,7 @@ export const updateModule = async (req, res) => {
       moduleIndex === -1
     ) {
 
-      // Delete uploaded file
+      // Delete uploaded icon
 
       if (req.file) {
 
@@ -3147,7 +3305,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // DUPLICATE MODULE NAME CHECK
+    // DUPLICATE MODULE NAME
     // =================================================
 
     if (hasNewModule) {
@@ -3155,8 +3313,6 @@ export const updateModule = async (req, res) => {
       const duplicateModule =
         modules.some(
           (item, index) => {
-
-            // Current module ignore
 
             if (
               index === moduleIndex
@@ -3183,7 +3339,7 @@ export const updateModule = async (req, res) => {
 
       if (duplicateModule) {
 
-        // Delete uploaded file
+        // Delete uploaded icon
 
         if (req.file) {
 
@@ -3224,7 +3380,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // DUPLICATE SEQUENCE CHECK
+    // DUPLICATE SEQUENCE
     // =================================================
 
     if (hasNewSequence) {
@@ -3232,8 +3388,6 @@ export const updateModule = async (req, res) => {
       const duplicateSequence =
         modules.some(
           (item, index) => {
-
-            // Current module ignore
 
             if (
               index === moduleIndex
@@ -3257,7 +3411,7 @@ export const updateModule = async (req, res) => {
 
       if (duplicateSequence) {
 
-        // Delete uploaded file
+        // Delete uploaded icon
 
         if (req.file) {
 
@@ -3330,6 +3484,20 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
+    // FINAL STATUS
+    // =================================================
+
+    const finalStatus =
+      hasNewStatus
+        ? moduleStatus
+        : Number(
+            currentModule?.status ?? 1
+          ) === 0
+            ? 0
+            : 1;
+
+
+    // =================================================
     // FINAL ICON
     // =================================================
 
@@ -3339,7 +3507,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // UPDATE ICON ONLY IF NEW ICON PROVIDED
+    // UPDATE ICON ONLY IF PROVIDED
     // =================================================
 
     if (hasNewIcon) {
@@ -3364,6 +3532,9 @@ export const updateModule = async (req, res) => {
 
       sequence:
         finalSequence,
+
+      status:
+        finalStatus,
 
     };
 
@@ -3399,7 +3570,7 @@ export const updateModule = async (req, res) => {
 
     // =================================================
     // DELETE OLD ICON
-    // ONLY IF NEW ICON WAS UPLOADED
+    // ONLY WHEN NEW ICON IS UPLOADED
     // =================================================
 
     if (
@@ -3470,6 +3641,9 @@ export const updateModule = async (req, res) => {
         sequence:
           finalSequence,
 
+        status:
+          finalStatus,
+
       },
 
       modules,
@@ -3501,9 +3675,7 @@ export const updateModule = async (req, res) => {
 
 
         if (
-          fs.existsSync(
-            filePath
-          )
+          fs.existsSync(filePath)
         ) {
 
           fs.unlinkSync(
