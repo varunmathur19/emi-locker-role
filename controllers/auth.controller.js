@@ -1707,15 +1707,23 @@ export const addModule = async (req, res) => {
   try {
 
     // =================================================
-    // ONLY MASTER ADMIN
+    // ALLOWED ROLES
+    // MASTER ADMIN = 0
+    // EMPLOYEE     = 8
     // =================================================
 
-    if (Number(req.user?.role_id) !== 0) {
+    const userRole =
+      Number(req.user?.role_id);
+
+    if (
+      userRole !== 0 &&
+      userRole !== 8
+    ) {
 
       return res.status(403).json({
         success: false,
         message:
-          "Only Master Admin can add modules",
+          "Only Master Admin and Employee can add modules",
       });
 
     }
@@ -1742,14 +1750,17 @@ export const addModule = async (req, res) => {
 
       return res.status(400).json({
         success: false,
-        message: "Module is required",
+        message:
+          "Module is required",
       });
 
     }
 
 
     const moduleName =
-      module.trim().toLowerCase();
+      module
+        .trim()
+        .toLowerCase();
 
 
     if (!moduleName) {
@@ -1808,7 +1819,8 @@ export const addModule = async (req, res) => {
     // =================================================
 
     if (
-      req.file.mimetype !== "image/png"
+      req.file.mimetype !==
+      "image/png"
     ) {
 
       return res.status(400).json({
@@ -1886,7 +1898,8 @@ export const addModule = async (req, res) => {
       try {
 
         modules =
-          typeof masterAdmin.modules === "string"
+          typeof masterAdmin.modules ===
+          "string"
             ? JSON.parse(
                 masterAdmin.modules
               )
@@ -1922,43 +1935,59 @@ export const addModule = async (req, res) => {
     // =================================================
     // CONVERT OLD MODULE FORMAT
     // =================================================
-    // Old modules without sequence
-    // will automatically get index + 1
-    // =================================================
 
     modules =
       modules.map(
         (item, index) => {
 
-          // -------------------------------------------
+          // ===========================================
           // OLD STRING FORMAT
-          // -------------------------------------------
+          // ===========================================
 
           if (
             typeof item === "string"
           ) {
 
             return {
-              name: item,
-              icon: null,
+
+              name:
+                item,
+
+              icon:
+                null,
+
               sequence:
                 index + 1,
+
+              status:
+                1,
+
             };
 
           }
 
 
-          // -------------------------------------------
+          // ===========================================
           // OBJECT FORMAT
-          // -------------------------------------------
+          // ===========================================
 
           return {
+
             ...item,
 
             sequence:
               Number(
                 item?.sequence
-              ) || index + 1,
+              ) ||
+              index + 1,
+
+            status:
+              Number(
+                item?.status
+              ) === 0
+                ? 0
+                : 1,
+
           };
 
         }
@@ -2003,6 +2032,37 @@ export const addModule = async (req, res) => {
 
 
     // =================================================
+    // DUPLICATE SEQUENCE CHECK
+    // =================================================
+
+    const sequenceExists =
+      modules.some(
+        (item) => {
+
+          return (
+            Number(
+              item?.sequence
+            ) ===
+            moduleSequence
+          );
+
+        }
+      );
+
+
+    if (sequenceExists) {
+
+      return res.status(422).json({
+        success: false,
+        message:
+          `Sequence ${moduleSequence} is already used`,
+        modules,
+      });
+
+    }
+
+
+    // =================================================
     // ICON PATH
     // =================================================
 
@@ -2024,6 +2084,11 @@ export const addModule = async (req, res) => {
 
       sequence:
         moduleSequence,
+
+      // 1 = Active
+      // 0 = Inactive
+      status:
+        1,
 
     };
 
@@ -2079,7 +2144,8 @@ export const addModule = async (req, res) => {
 
     return res.status(201).json({
 
-      success: true,
+      success:
+        true,
 
       message:
         "Module added successfully",
@@ -2107,7 +2173,8 @@ export const addModule = async (req, res) => {
 
     return res.status(500).json({
 
-      success: false,
+      success:
+        false,
 
       message:
         "Internal server error",
