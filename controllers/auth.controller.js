@@ -2097,148 +2097,299 @@ export const deleteModule = async (req, res) => {
 
     const { module } = req.body || {};
 
-    if (!module) {
+    // =================================================
+    // VALIDATION
+    // =================================================
+
+    if (!module || typeof module !== "string") {
+
       return res.status(400).json({
         success: false,
         message: "Module name is required",
       });
+
     }
 
     const moduleName =
-      String(module).trim();
+      module.trim().toLowerCase();
 
-    // ==========================================
+
+    if (!moduleName) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Module name cannot be empty",
+      });
+
+    }
+
+
+    // =================================================
     // GET MASTER ADMIN
-    // ==========================================
+    // =================================================
 
     const [rows] = await db.query(
       `
-      SELECT modules
+      SELECT
+        id,
+        modules
       FROM users
       WHERE role_id = 0
       LIMIT 1
       `
     );
 
+
     if (!rows.length) {
+
       return res.status(404).json({
         success: false,
         message: "Master Admin not found",
       });
+
     }
 
-    // ==========================================
-    // GET MODULE ARRAY
-    // ==========================================
+
+    const masterAdmin =
+      rows[0];
+
+
+    // =================================================
+    // GET MODULES
+    // =================================================
 
     let modules = [];
 
-    if (rows[0].modules) {
 
-      modules =
-        typeof rows[0].modules === "string"
-          ? JSON.parse(rows[0].modules)
-          : rows[0].modules;
+    if (masterAdmin.modules) {
+
+      try {
+
+        modules =
+          typeof masterAdmin.modules === "string"
+            ? JSON.parse(masterAdmin.modules)
+            : masterAdmin.modules;
+
+      } catch (error) {
+
+        console.error(
+          "MODULE JSON PARSE ERROR:",
+          error
+        );
+
+        modules = [];
+
+      }
 
     }
+
+
+    // =================================================
+    // SAFETY
+    // =================================================
 
     if (!Array.isArray(modules)) {
+
       modules = [];
+
     }
+
 
     console.log(
       "OLD MODULES:",
       modules
     );
 
-    // ==========================================
+
+    // =================================================
     // FIND MODULE
-    // ==========================================
+    // =================================================
 
     const moduleExists =
-      modules.some(
-        (item) =>
-          String(item)
+      modules.some((item) => {
+
+        // New format:
+        // {
+        //   name: "varunn",
+        //   icon: "/uploads/modules/abc.png"
+        // }
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === moduleName
+          );
+
+        }
+
+
+        // Old format:
+        // "varunn"
+
+        return (
+          String(item || "")
             .trim()
-            .toLowerCase() ===
-          moduleName.toLowerCase()
-      );
+            .toLowerCase() === moduleName
+        );
+
+      });
+
 
     if (!moduleExists) {
 
       return res.status(404).json({
         success: false,
-        message: `Module "${moduleName}" not found`,
+        message: `Module "${module}" not found`,
       });
 
     }
 
-    // ==========================================
+
+    // =================================================
+    // GET MODULE ICON BEFORE DELETE
+    // =================================================
+
+    const deletedModule =
+      modules.find((item) => {
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === moduleName
+          );
+
+        }
+
+        return (
+          String(item || "")
+            .trim()
+            .toLowerCase() === moduleName
+        );
+
+      });
+
+
+    console.log(
+      "DELETED MODULE:",
+      deletedModule
+    );
+
+
+    // =================================================
     // DELETE MODULE
-    // ==========================================
+    // =================================================
 
     const updatedModules =
-      modules.filter(
-        (item) =>
-          String(item)
+      modules.filter((item) => {
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() !== moduleName
+          );
+
+        }
+
+        return (
+          String(item || "")
             .trim()
-            .toLowerCase() !==
-          moduleName.toLowerCase()
-      );
+            .toLowerCase() !== moduleName
+        );
+
+      });
+
 
     console.log(
       "UPDATED MODULES:",
       updatedModules
     );
 
-    // ==========================================
-    // UPDATE DATABASE
-    // ==========================================
 
-    const [result] = await db.query(
-      `
-      UPDATE users
-      SET modules = ?
-      WHERE role_id = 0
-      `,
-      [
-        JSON.stringify(
-          updatedModules
-        ),
-      ]
-    );
+    // =================================================
+    // UPDATE DATABASE
+    // =================================================
+
+    const [result] =
+      await db.query(
+        `
+        UPDATE users
+        SET modules = ?
+        WHERE id = ?
+        AND role_id = 0
+        `,
+        [
+          JSON.stringify(
+            updatedModules
+          ),
+          masterAdmin.id,
+        ]
+      );
+
 
     console.log(
-      "UPDATE RESULT:",
+      "DELETE UPDATE RESULT:",
       result
     );
 
-    // ==========================================
+
+    // =================================================
     // SUCCESS
-    // ==========================================
+    // =================================================
 
     return res.status(200).json({
+
       success: true,
-      message: "Module deleted successfully",
-      modules: updatedModules,
+
+      message:
+        `Module "${module}" deleted successfully`,
+
+      deletedModule:
+        deletedModule,
+
+      modules:
+        updatedModules,
+
     });
+
 
   } catch (error) {
 
     console.error(
-      "Delete Module Error:",
+      "DELETE MODULE ERROR:",
       error
     );
 
+
     return res.status(500).json({
+
       success: false,
-      message: "Failed to delete module",
-      error: error.message,
+
+      message:
+        "Failed to delete module",
+
+      error:
+        error.message,
+
     });
 
   }
-};
 
+};
 
 
 export const updateModule = async (req, res) => {
