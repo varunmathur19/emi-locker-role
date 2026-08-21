@@ -1,5 +1,6 @@
 import express from "express";
 
+
 import {
     createuserrole,
     getUsers,
@@ -9,9 +10,14 @@ import {
     updatedstaffdata,
     getStaffDataById,
     loginAsUser,
+    addModule,
+    getModules,
+    deleteModule,
+    updateModule,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
+import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
 
 const router = express.Router();
@@ -199,5 +205,31 @@ router.get(
 
 //internal login
 router.post("/login-as-user", authMiddleware, loginAsUser);
+
+//Add module
+router.post(
+  "/add-module",
+  authMiddleware,
+  uploadModuleIcon,
+  addModule
+);
+
+router.get(
+  "/modules",
+  authMiddleware,
+  getModules
+);
+
+router.delete(
+  "/delete-module",
+  deleteModule
+);
+
+router.put(
+  "/update-module",
+  authMiddleware,
+  uploadModuleNewIcon,
+  updateModule
+);
 
 export default router;
