@@ -247,54 +247,62 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
     // GET USERS
     // =====================================================
 
-    const sql = `
-      SELECT
-        u.id,
-        u.organization_name,
-        u.name,
-        u.email,
-        u.phone,
-        u.company_address,
-        u.country,
-        u.state,
-        u.city,
-        u.role_id,
-        u.created_by,
-        u.parent_id,
+   const sql = `
+  SELECT
+    u.id,
+    u.organization_name,
+    u.name,
+    u.email,
+    u.phone,
+    u.company_address,
+    u.country,
+    u.state,
+    u.city,
+    u.role_id,
+    u.created_by,
+    u.parent_id,
 
-        -- ================================================
-        -- PARENT DETAILS
-        -- ================================================
+    -- ================================================
+    -- USER STATUS
+    -- 1 = ACTIVE
+    -- 0 = INACTIVE
+    -- ================================================
 
-        p.name AS parent_name,
-        p.organization_name AS parent_organization_name,
+    u.userStatus,
 
-        -- ================================================
-        -- DEVICE PERMISSIONS
-        -- ================================================
+    -- ================================================
+    -- PARENT DETAILS
+    -- ================================================
 
-        u.new_device,
-        u.old_device,
-        u.supreme_device,
-        u.pro_star,
-        u.lite,
-        u.google_tv,
-        u.supreme_lock,
+    p.name AS parent_name,
+    p.organization_name AS parent_organization_name,
 
-        u.created_at,
-        u.updated_at
+    -- ================================================
+    -- DEVICE PERMISSIONS
+    -- ================================================
 
-      FROM users u
+    u.new_device,
+    u.old_device,
+    u.supreme_device,
+    u.pro_star,
+    u.lite,
+    u.google_tv,
+    u.supreme_lock,
 
-      LEFT JOIN users p
-        ON p.id = u.parent_id
+    u.created_at,
+    u.updated_at
 
-      ${whereCondition}
+  FROM users u
 
-      ORDER BY u.id DESC
+  LEFT JOIN users p
+    ON p.id = u.parent_id
 
-      LIMIT ? OFFSET ?
-    `;
+  ${whereCondition}
+
+  ORDER BY u.id DESC
+
+  LIMIT ? OFFSET ?
+`;
 
     queryParams.push(Number(limit));
     queryParams.push(Number(offset));

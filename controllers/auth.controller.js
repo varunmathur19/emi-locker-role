@@ -479,6 +479,7 @@ export const createuserrole = async (req, res) => {
 // =========================
 export const loginUser = async (req, res) => {
   try {
+
     const { email, password } = req.body;
 
     // ==========================================
@@ -494,80 +495,147 @@ export const loginUser = async (req, res) => {
       });
     }
 
+
+    // ==========================================
+    // CHECK USER STATUS
+    // 1 = ACTIVE
+    // 0 = INACTIVE
+    // ==========================================
+
+    if (Number(user.userStatus) === 0) {
+
+      return res.status(403).json({
+        success: false,
+        message: "Your account is inactive",
+      });
+
+    }
+
+
     // ==========================================
     // CHECK PASSWORD
     // ==========================================
 
-    const match = await bcrypt.compare(password, user.password);
+    const match =
+      await bcrypt.compare(
+        password,
+        user.password
+      );
 
     if (!match) {
+
       return res.status(401).json({
         success: false,
         message: "Invalid password",
       });
+
     }
+
 
     // ==========================================
     // JWT TOKEN
-    // Only required information in token
     // ==========================================
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        role_id: user.role_id,
-        email: user.email,
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "7d",
-      }
-    );
+    const token =
+      jwt.sign(
+        {
+          id: user.id,
+          role_id: user.role_id,
+          email: user.email,
+        },
+        process.env.JWT_SECRET,
+        {
+          expiresIn: "7d",
+        }
+      );
+
 
     // ==========================================
     // RESPONSE
-    // Parent IDs are NOT inside JWT.
-    // They are sent separately in user object.
-    // Frontend can store them in localStorage.
     // ==========================================
 
     return res.status(200).json({
+
       success: true,
-      message: "Login Successful",
+
+      message:
+        "Login Successful",
 
       token,
 
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role_id: user.role_id,
+
+        id:
+          user.id,
+
+        name:
+          user.name,
+
+        email:
+          user.email,
+
+        role_id:
+          user.role_id,
+
+        // ======================================
+        // USER STATUS
+        // ======================================
+
+        userStatus:
+          Number(user.userStatus),
 
         // ======================================
         // HIERARCHY DATA
-        // NOT PART OF JWT
         // ======================================
 
-        parent_id: user.parent_id,
-        parent_admin_id: user.parent_admin_id,
-        parent_cnf_id: user.parent_cnf_id,
+        parent_id:
+          user.parent_id,
+
+        parent_admin_id:
+          user.parent_admin_id,
+
+        parent_cnf_id:
+          user.parent_cnf_id,
+
         parent_super_distributor_id:
           user.parent_super_distributor_id,
+
         parent_distributor_id:
           user.parent_distributor_id,
-        parent_fos_id: user.parent_fos_id,
-        parent_retailer_id: user.parent_retailer_id,
-        parent_employee_id: user.parent_employee_id,
-        parent_staff_id: user.parent_staff_id,
+
+        parent_fos_id:
+          user.parent_fos_id,
+
+        parent_retailer_id:
+          user.parent_retailer_id,
+
+        parent_employee_id:
+          user.parent_employee_id,
+
+        parent_staff_id:
+          user.parent_staff_id,
+
       },
+
     });
-  } catch (error) {
-    console.error("Login Error:", error);
+
+  }
+  catch (error) {
+
+    console.error(
+      "Login Error:",
+      error
+    );
 
     return res.status(500).json({
+
       success: false,
-      message: error.message,
+
+      message:
+        error.message,
+
     });
+
   }
 };
 
@@ -2893,4 +2961,159 @@ export const updateModule = async (req, res) => {
 
   }
 
+};
+
+export const updateUserStatus = async (req, res) => {
+  try {
+
+    // =====================================================
+    // GET DATA
+    // =====================================================
+
+    const {
+      user_id,
+      userStatus,
+    } = req.body;
+
+
+    // =====================================================
+    // VALIDATION
+    // =====================================================
+
+    if (!user_id) {
+
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+
+    }
+
+
+    // =====================================================
+    // BOOLEAN VALIDATION
+    // 0 = INACTIVE
+    // 1 = ACTIVE
+    // =====================================================
+
+    if (
+      Number(userStatus) !== 0 &&
+      Number(userStatus) !== 1
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "userStatus must be 0 (Inactive) or 1 (Active)",
+      });
+
+    }
+
+
+    const status =
+      Number(userStatus);
+
+
+    // =====================================================
+    // CHECK USER
+    // =====================================================
+
+    const [users] =
+      await db.query(
+        `
+        SELECT
+          id,
+          name,
+          userStatus
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [user_id]
+      );
+
+
+    if (!users.length) {
+
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+
+    }
+
+
+    // =====================================================
+    // UPDATE STATUS
+    // =====================================================
+
+    await db.query(
+      `
+      UPDATE users
+      SET userStatus = ?
+      WHERE id = ?
+      `,
+      [
+        status,
+        user_id,
+      ]
+    );
+
+
+    // =====================================================
+    // RESPONSE STATUS
+    // =====================================================
+
+    const statusText =
+      status === 1
+        ? "Active"
+        : "Inactive";
+
+
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    return res.status(200).json({
+
+      success: true,
+
+      message:
+        `User status updated to ${statusText}`,
+
+      user: {
+        id: users[0].id,
+
+        name:
+          users[0].name,
+
+        userStatus:
+          status,
+
+        status:
+          statusText,
+      },
+
+    });
+
+  } catch (error) {
+
+    console.error(
+      "UPDATE USER STATUS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+
+      success: false,
+
+      message:
+        "Failed to update user status",
+
+      error:
+        error.message,
+
+    });
+
+  }
 };
