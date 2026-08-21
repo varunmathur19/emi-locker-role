@@ -1711,18 +1711,24 @@ export const addModule = async (req, res) => {
     // =================================================
 
     if (Number(req.user?.role_id) !== 0) {
+
       return res.status(403).json({
         success: false,
-        message: "Only Master Admin can add modules",
+        message:
+          "Only Master Admin can add modules",
       });
+
     }
 
 
     // =================================================
-    // GET MODULE NAME
+    // GET MODULE DATA
     // =================================================
 
-    const { module } = req.body;
+    const {
+      module,
+      sequence,
+    } = req.body;
 
 
     // =================================================
@@ -1733,10 +1739,12 @@ export const addModule = async (req, res) => {
       !module ||
       typeof module !== "string"
     ) {
+
       return res.status(400).json({
         success: false,
         message: "Module is required",
       });
+
     }
 
 
@@ -1745,10 +1753,38 @@ export const addModule = async (req, res) => {
 
 
     if (!moduleName) {
+
       return res.status(400).json({
         success: false,
-        message: "Module name cannot be empty",
+        message:
+          "Module name cannot be empty",
       });
+
+    }
+
+
+    // =================================================
+    // SEQUENCE VALIDATION
+    // =================================================
+
+    const moduleSequence =
+      Number(sequence);
+
+
+    if (
+      sequence === undefined ||
+      sequence === null ||
+      sequence === "" ||
+      !Number.isInteger(moduleSequence) ||
+      moduleSequence < 1
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Valid sequence number is required. Example: 1, 2, 3",
+      });
+
     }
 
 
@@ -1757,10 +1793,52 @@ export const addModule = async (req, res) => {
     // =================================================
 
     if (!req.file) {
+
       return res.status(400).json({
         success: false,
-        message: "PNG module icon is required",
+        message:
+          "PNG module icon is required",
       });
+
+    }
+
+
+    // =================================================
+    // PNG VALIDATION
+    // =================================================
+
+    if (
+      req.file.mimetype !== "image/png"
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Only PNG module icons are allowed",
+      });
+
+    }
+
+
+    // =================================================
+    // 20 KB ICON SIZE VALIDATION
+    // =================================================
+
+    const maxIconSize =
+      20 * 1024;
+
+
+    if (
+      req.file.size >
+      maxIconSize
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "PNG module icon must not exceed 20 KB",
+      });
+
     }
 
 
@@ -1768,27 +1846,32 @@ export const addModule = async (req, res) => {
     // GET MASTER ADMIN
     // =================================================
 
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-      `
-    );
+    const [rows] =
+      await db.query(
+        `
+        SELECT
+          id,
+          modules
+        FROM users
+        WHERE role_id = 0
+        LIMIT 1
+        `
+      );
 
 
     if (!rows.length) {
+
       return res.status(404).json({
         success: false,
-        message: "Master Admin not found",
+        message:
+          "Master Admin not found",
       });
+
     }
 
 
-    const masterAdmin = rows[0];
+    const masterAdmin =
+      rows[0];
 
 
     // =================================================
@@ -1804,7 +1887,9 @@ export const addModule = async (req, res) => {
 
         modules =
           typeof masterAdmin.modules === "string"
-            ? JSON.parse(masterAdmin.modules)
+            ? JSON.parse(
+                masterAdmin.modules
+              )
             : masterAdmin.modules;
 
       } catch (error) {
@@ -1815,7 +1900,9 @@ export const addModule = async (req, res) => {
         );
 
         modules = [];
+
       }
+
     }
 
 
@@ -1823,43 +1910,80 @@ export const addModule = async (req, res) => {
     // SAFETY
     // =================================================
 
-    if (!Array.isArray(modules)) {
+    if (
+      !Array.isArray(modules)
+    ) {
+
       modules = [];
+
     }
 
 
     // =================================================
-    // CONVERT OLD STRING FORMAT
+    // CONVERT OLD MODULE FORMAT
+    // =================================================
+    // Old modules without sequence
+    // will automatically get index + 1
     // =================================================
 
-    modules = modules.map((item) => {
+    modules =
+      modules.map(
+        (item, index) => {
 
-      if (typeof item === "string") {
-        return {
-          name: item,
-          icon: null,
-        };
-      }
+          // -------------------------------------------
+          // OLD STRING FORMAT
+          // -------------------------------------------
 
-      return item;
+          if (
+            typeof item === "string"
+          ) {
 
-    });
+            return {
+              name: item,
+              icon: null,
+              sequence:
+                index + 1,
+            };
+
+          }
+
+
+          // -------------------------------------------
+          // OBJECT FORMAT
+          // -------------------------------------------
+
+          return {
+            ...item,
+
+            sequence:
+              Number(
+                item?.sequence
+              ) || index + 1,
+          };
+
+        }
+      );
 
 
     // =================================================
-    // DUPLICATE CHECK
+    // DUPLICATE MODULE CHECK
     // =================================================
 
     const alreadyExists =
-      modules.some((item) => {
+      modules.some(
+        (item) => {
 
-        return (
-          String(item?.name || "")
-            .trim()
-            .toLowerCase() === moduleName
-        );
+          return (
+            String(
+              item?.name || ""
+            )
+              .trim()
+              .toLowerCase() ===
+            moduleName
+          );
 
-      });
+        }
+      );
 
 
     // =================================================
@@ -1870,9 +1994,11 @@ export const addModule = async (req, res) => {
 
       return res.status(409).json({
         success: false,
-        message: "Module already exists",
+        message:
+          "Module already exists",
         modules,
       });
+
     }
 
 
@@ -1889,8 +2015,16 @@ export const addModule = async (req, res) => {
     // =================================================
 
     const newModule = {
-      name: moduleName,
-      icon: iconPath,
+
+      name:
+        moduleName,
+
+      icon:
+        iconPath,
+
+      sequence:
+        moduleSequence,
+
     };
 
 
@@ -1898,7 +2032,24 @@ export const addModule = async (req, res) => {
     // ADD MODULE
     // =================================================
 
-    modules.push(newModule);
+    modules.push(
+      newModule
+    );
+
+
+    // =================================================
+    // SORT MODULES BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) =>
+        Number(
+          a?.sequence ?? 999999
+        ) -
+        Number(
+          b?.sequence ?? 999999
+        )
+    );
 
 
     // =================================================
@@ -1913,7 +2064,10 @@ export const addModule = async (req, res) => {
       AND role_id = 0
       `,
       [
-        JSON.stringify(modules),
+        JSON.stringify(
+          modules
+        ),
+
         masterAdmin.id,
       ]
     );
@@ -1924,14 +2078,26 @@ export const addModule = async (req, res) => {
     // =================================================
 
     return res.status(201).json({
+
       success: true,
-      message: "Module added successfully",
-      module: newModule,
-      modules,
+
+      message:
+        "Module added successfully",
+
+      module:
+        newModule,
+
+      modules:
+        modules,
+
     });
 
 
   } catch (error) {
+
+    // =================================================
+    // ERROR
+    // =================================================
 
     console.error(
       "Add Module Error:",
@@ -1940,14 +2106,19 @@ export const addModule = async (req, res) => {
 
 
     return res.status(500).json({
+
       success: false,
-      message: "Internal server error",
-      error: error.message,
+
+      message:
+        "Internal server error",
+
+      error:
+        error.message,
+
     });
 
   }
 };
-
 
 // =====================================================
 // GET MODULES
@@ -1977,6 +2148,10 @@ export const getModules = async (
       `
     );
 
+
+    // =================================================
+    // MASTER ADMIN NOT FOUND
+    // =================================================
 
     if (
       !rows.length
@@ -2051,6 +2226,80 @@ export const getModules = async (
 
 
     // =================================================
+    // CONVERT OLD MODULE FORMAT
+    // =================================================
+    // Agar purane modules me sequence nahi hai
+    // toh automatically index + 1 assign hoga.
+    // =================================================
+
+    modules =
+      modules.map(
+        (item, index) => {
+
+          // -------------------------------------------
+          // OLD STRING FORMAT
+          // -------------------------------------------
+
+          if (
+            typeof item === "string"
+          ) {
+
+            return {
+
+              name:
+                item,
+
+              icon:
+                null,
+
+              sequence:
+                index + 1,
+
+            };
+
+          }
+
+
+          // -------------------------------------------
+          // OBJECT FORMAT
+          // -------------------------------------------
+
+          return {
+
+            ...item,
+
+            sequence:
+              Number(
+                item?.sequence
+              ) || index + 1,
+
+          };
+
+        }
+      );
+
+
+    // =================================================
+    // SORT MODULES BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) => {
+
+        return (
+          Number(
+            a?.sequence ?? 999999
+          ) -
+          Number(
+            b?.sequence ?? 999999
+          )
+        );
+
+      }
+    );
+
+
+    // =================================================
     // SUCCESS
     // =================================================
 
@@ -2065,7 +2314,12 @@ export const getModules = async (
 
     });
 
+
   } catch (error) {
+
+    // =================================================
+    // ERROR
+    // =================================================
 
     console.error(
       "Get Modules Error:",
