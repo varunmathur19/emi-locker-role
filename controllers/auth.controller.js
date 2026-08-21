@@ -11,20 +11,15 @@ import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
 import jwt from "jsonwebtoken";
 import { ROLES } from "../constants/roles.js";
+import fs from "fs";
+import path from "path";
 
 
 
 
-// import {
-//   findUserByEmail,
-//   findUserById,
-//   createUser as createUserModel,
-// } from "../models/userModel.js";
 
-// import {
-//   ROLES,
-//   isValidRole,
-// } from "../constants/roles.js";
+
+
 
 
 export const createuserrole = async (req, res) => {
@@ -1637,13 +1632,15 @@ export const loginAsUser = async (req, res) => {
 
 
 // =====================================================
-// SIDEMENU MODULE
+// ADD MODULE
 // =====================================================
+
 export const addModule = async (req, res) => {
   try {
-    // ==========================================
+
+    // =================================================
     // ONLY MASTER ADMIN
-    // ==========================================
+    // =================================================
 
     if (Number(req.user?.role_id) !== 0) {
       return res.status(403).json({
@@ -1652,33 +1649,68 @@ export const addModule = async (req, res) => {
       });
     }
 
+
+    // =================================================
+    // GET MODULE NAME
+    // =================================================
+
     const { module } = req.body;
 
-    // ==========================================
-    // VALIDATION
-    // ==========================================
 
-    if (!module || typeof module !== "string") {
+    // =================================================
+    // MODULE VALIDATION
+    // =================================================
+
+    if (
+      !module ||
+      typeof module !== "string"
+    ) {
       return res.status(400).json({
         success: false,
         message: "Module is required",
       });
     }
 
-    const moduleName = module.trim().toLowerCase();
 
-    // ==========================================
+    const moduleName =
+      module.trim().toLowerCase();
+
+
+    if (!moduleName) {
+      return res.status(400).json({
+        success: false,
+        message: "Module name cannot be empty",
+      });
+    }
+
+
+    // =================================================
+    // ICON VALIDATION
+    // =================================================
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: "PNG module icon is required",
+      });
+    }
+
+
+    // =================================================
     // GET MASTER ADMIN
-    // ==========================================
+    // =================================================
 
     const [rows] = await db.query(
       `
-      SELECT id, modules
+      SELECT
+        id,
+        modules
       FROM users
       WHERE role_id = 0
       LIMIT 1
       `
     );
+
 
     if (!rows.length) {
       return res.status(404).json({
@@ -1687,31 +1719,87 @@ export const addModule = async (req, res) => {
       });
     }
 
+
     const masterAdmin = rows[0];
 
-    // ==========================================
+
+    // =================================================
     // GET EXISTING MODULES
-    // ==========================================
+    // =================================================
 
     let modules = [];
 
+
     if (masterAdmin.modules) {
-      modules =
-        typeof masterAdmin.modules === "string"
-          ? JSON.parse(masterAdmin.modules)
-          : masterAdmin.modules;
+
+      try {
+
+        modules =
+          typeof masterAdmin.modules === "string"
+            ? JSON.parse(masterAdmin.modules)
+            : masterAdmin.modules;
+
+      } catch (error) {
+
+        console.error(
+          "Modules JSON Parse Error:",
+          error
+        );
+
+        modules = [];
+      }
     }
 
-    // Safety check
+
+    // =================================================
+    // SAFETY
+    // =================================================
+
     if (!Array.isArray(modules)) {
       modules = [];
     }
 
-    // ==========================================
-    // DUPLICATE CHECK
-    // ==========================================
 
-    if (modules.includes(moduleName)) {
+    // =================================================
+    // CONVERT OLD STRING FORMAT
+    // =================================================
+
+    modules = modules.map((item) => {
+
+      if (typeof item === "string") {
+        return {
+          name: item,
+          icon: null,
+        };
+      }
+
+      return item;
+
+    });
+
+
+    // =================================================
+    // DUPLICATE CHECK
+    // =================================================
+
+    const alreadyExists =
+      modules.some((item) => {
+
+        return (
+          String(item?.name || "")
+            .trim()
+            .toLowerCase() === moduleName
+        );
+
+      });
+
+
+    // =================================================
+    // DUPLICATE MODULE
+    // =================================================
+
+    if (alreadyExists) {
+
       return res.status(409).json({
         success: false,
         message: "Module already exists",
@@ -1719,21 +1807,42 @@ export const addModule = async (req, res) => {
       });
     }
 
-    // ==========================================
+
+    // =================================================
+    // ICON PATH
+    // =================================================
+
+    const iconPath =
+      `/uploads/modules/${req.file.filename}`;
+
+
+    // =================================================
+    // NEW MODULE
+    // =================================================
+
+    const newModule = {
+      name: moduleName,
+      icon: iconPath,
+    };
+
+
+    // =================================================
     // ADD MODULE
-    // ==========================================
+    // =================================================
 
-    modules.push(moduleName);
+    modules.push(newModule);
 
-    // ==========================================
+
+    // =================================================
     // UPDATE MASTER ADMIN
-    // ==========================================
+    // =================================================
 
     await db.query(
       `
       UPDATE users
       SET modules = ?
       WHERE id = ?
+      AND role_id = 0
       `,
       [
         JSON.stringify(modules),
@@ -1741,92 +1850,242 @@ export const addModule = async (req, res) => {
       ]
     );
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
+
+    // =================================================
+    // SUCCESS RESPONSE
+    // =================================================
 
     return res.status(201).json({
       success: true,
       message: "Module added successfully",
+      module: newModule,
       modules,
     });
 
+
   } catch (error) {
-    console.error("Add Module Error:", error);
+
+    console.error(
+      "Add Module Error:",
+      error
+    );
+
 
     return res.status(500).json({
       success: false,
       message: "Internal server error",
       error: error.message,
     });
+
   }
 };
 
-export const getModules = async (req, res) => {
-  try {
-    // ==========================================
-    // GET MASTER ADMIN MODULES
-    // ==========================================
 
-    const [rows] = await db.query(
+// =====================================================
+// GET MODULES
+// =====================================================
+
+export const getModules = async (
+  req,
+  res
+) => {
+
+  try {
+
+    // =================================================
+    // GET MASTER ADMIN
+    // =================================================
+
+    const [
+      rows,
+    ] = await db.query(
       `
-      SELECT modules
+      SELECT
+        id,
+        modules
       FROM users
       WHERE role_id = 0
       LIMIT 1
       `
     );
 
-    // ==========================================
-    // MASTER ADMIN NOT FOUND
-    // ==========================================
 
-    if (!rows.length) {
-      return res.json({
-        success: true,
-        modules: [],
+    if (
+      !rows.length
+    ) {
+
+      return res.status(404).json({
+
+        success: false,
+
+        message:
+          "Master Admin not found",
+
       });
+
     }
 
-    // ==========================================
-    // GET MODULES
-    // ==========================================
+
+    const masterAdmin =
+      rows[0];
+
+
+    // =================================================
+    // PARSE MODULES
+    // =================================================
 
     let modules = [];
 
-    if (rows[0].modules) {
-      modules =
-        typeof rows[0].modules === "string"
-          ? JSON.parse(rows[0].modules)
-          : rows[0].modules;
+
+    if (
+      masterAdmin.modules
+    ) {
+
+      try {
+
+        modules =
+          typeof masterAdmin.modules ===
+          "string"
+
+            ? JSON.parse(
+                masterAdmin.modules
+              )
+
+            : masterAdmin.modules;
+
+      } catch (error) {
+
+        console.error(
+          "Modules JSON Parse Error:",
+          error
+        );
+
+        modules = [];
+
+      }
+
     }
 
-    // ==========================================
-    // SAFETY CHECK
-    // ==========================================
 
-    if (!Array.isArray(modules)) {
+    // =================================================
+    // SAFETY
+    // =================================================
+
+    if (
+      !Array.isArray(
+        modules
+      )
+    ) {
+
       modules = [];
+
     }
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
 
-    return res.json({
+    // =================================================
+    // SUCCESS
+    // =================================================
+
+    return res.status(200).json({
+
       success: true,
+
+      count:
+        modules.length,
+
       modules,
+
     });
 
   } catch (error) {
-    console.error("Get Modules Error:", error);
+
+    console.error(
+      "Get Modules Error:",
+      error
+    );
+
 
     return res.status(500).json({
+
       success: false,
-      message: "Internal server error",
+
+      message:
+        "Failed to get modules",
+
+      error:
+        error.message,
+
     });
+
   }
+
 };
+
+// export const getModules = async (req, res) => {
+//   try {
+//     // ==========================================
+//     // GET MASTER ADMIN MODULES
+//     // ==========================================
+
+//     const [rows] = await db.query(
+//       `
+//       SELECT modules
+//       FROM users
+//       WHERE role_id = 0
+//       LIMIT 1
+//       `
+//     );
+
+//     // ==========================================
+//     // MASTER ADMIN NOT FOUND
+//     // ==========================================
+
+//     if (!rows.length) {
+//       return res.json({
+//         success: true,
+//         modules: [],
+//       });
+//     }
+
+//     // ==========================================
+//     // GET MODULES
+//     // ==========================================
+
+//     let modules = [];
+
+//     if (rows[0].modules) {
+//       modules =
+//         typeof rows[0].modules === "string"
+//           ? JSON.parse(rows[0].modules)
+//           : rows[0].modules;
+//     }
+
+//     // ==========================================
+//     // SAFETY CHECK
+//     // ==========================================
+
+//     if (!Array.isArray(modules)) {
+//       modules = [];
+//     }
+
+//     // ==========================================
+//     // RESPONSE
+//     // ==========================================
+
+//     return res.json({
+//       success: true,
+//       modules,
+//     });
+
+//   } catch (error) {
+//     console.error("Get Modules Error:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Internal server error",
+//     });
+//   }
+// };
 
 export const deleteModule = async (req, res) => {
   try {
@@ -1981,7 +2240,9 @@ export const deleteModule = async (req, res) => {
 };
 
 
+
 export const updateModule = async (req, res) => {
+
   try {
 
     // =================================================
@@ -1998,14 +2259,16 @@ export const updateModule = async (req, res) => {
 
     }
 
+
     // =================================================
-    // GET DATA
+    // GET FORM DATA
     // =================================================
 
     const {
       oldModule,
       newModule,
     } = req.body;
+
 
     // =================================================
     // VALIDATION
@@ -2024,6 +2287,7 @@ export const updateModule = async (req, res) => {
 
     }
 
+
     if (
       typeof newModule !== "string" ||
       !newModule.trim()
@@ -2037,24 +2301,53 @@ export const updateModule = async (req, res) => {
 
     }
 
-    const oldName =
-      oldModule.trim();
-
-    const newName =
-      newModule.trim();
 
     // =================================================
-    // GET MASTER ADMIN MODULES
+    // FILE VALIDATION
     // =================================================
 
-    const [rows] = await db.query(
-      `
-      SELECT modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-      `
-    );
+    if (!req.file) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "New icon image is required",
+      });
+
+    }
+
+
+    // =================================================
+    // CLEAN MODULE NAMES
+    // =================================================
+
+    const oldModuleName =
+      oldModule
+        .trim()
+        .toLowerCase();
+
+    const newModuleName =
+      newModule
+        .trim()
+        .toLowerCase();
+
+
+    // =================================================
+    // GET MASTER ADMIN
+    // =================================================
+
+    const [rows] =
+      await db.query(
+        `
+        SELECT
+          id,
+          modules
+        FROM users
+        WHERE role_id = 0
+        LIMIT 1
+        `
+      );
+
 
     if (!rows.length) {
 
@@ -2066,6 +2359,7 @@ export const updateModule = async (req, res) => {
 
     }
 
+
     // =================================================
     // PARSE MODULES
     // =================================================
@@ -2073,11 +2367,13 @@ export const updateModule = async (req, res) => {
     let modules =
       rows[0].modules;
 
+
     if (!modules) {
 
       modules = [];
 
-    } else if (
+    }
+    else if (
       typeof modules === "string"
     ) {
 
@@ -2086,19 +2382,39 @@ export const updateModule = async (req, res) => {
         modules =
           JSON.parse(modules);
 
-      } catch (error) {
+      }
+      catch (error) {
 
-        modules = [];
+        console.error(
+          "MODULE JSON PARSE ERROR:",
+          error
+        );
+
+        return res.status(500).json({
+          success: false,
+          message:
+            "Invalid modules data",
+        });
 
       }
 
     }
 
+
+    // =================================================
+    // SAFETY
+    // =================================================
+
     if (!Array.isArray(modules)) {
 
-      modules = [];
+      return res.status(500).json({
+        success: false,
+        message:
+          "Modules data must be an array",
+      });
 
     }
+
 
     // =================================================
     // FIND OLD MODULE
@@ -2106,53 +2422,179 @@ export const updateModule = async (req, res) => {
 
     const moduleIndex =
       modules.findIndex(
-        (item) =>
-          String(item)
-            .trim()
-            .toLowerCase() ===
-          oldName.toLowerCase()
+        (item) => {
+
+          const name =
+            typeof item === "string"
+              ? item
+              : item?.name;
+
+          return (
+            String(name || "")
+              .trim()
+              .toLowerCase() ===
+            oldModuleName
+          );
+
+        }
       );
 
+
+    // =================================================
+    // OLD MODULE NOT FOUND
+    // =================================================
+
     if (moduleIndex === -1) {
+
+      // Uploaded new icon delete
+      if (req.file) {
+
+        const filePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+        if (
+          fs.existsSync(filePath)
+        ) {
+
+          fs.unlinkSync(filePath);
+
+        }
+
+      }
 
       return res.status(404).json({
         success: false,
         message:
-          "Module not found",
+          `Old module "${oldModule}" not found`,
       });
 
     }
+
 
     // =================================================
     // DUPLICATE NEW MODULE CHECK
     // =================================================
 
-    const duplicate =
+    const duplicateModule =
       modules.some(
-        (item, index) =>
-          index !== moduleIndex &&
-          String(item)
-            .trim()
-            .toLowerCase() ===
-          newName.toLowerCase()
+        (item, index) => {
+
+          if (
+            index === moduleIndex
+          ) {
+            return false;
+          }
+
+          const name =
+            typeof item === "string"
+              ? item
+              : item?.name;
+
+          return (
+            String(name || "")
+              .trim()
+              .toLowerCase() ===
+            newModuleName
+          );
+
+        }
       );
 
-    if (duplicate) {
+
+    if (duplicateModule) {
+
+      // Delete uploaded icon
+      if (req.file) {
+
+        const filePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+        if (
+          fs.existsSync(filePath)
+        ) {
+
+          fs.unlinkSync(filePath);
+
+        }
+
+      }
 
       return res.status(409).json({
         success: false,
         message:
-          "Module already exists",
+          `Module "${newModule}" already exists`,
       });
 
     }
+
+
+    // =================================================
+    // OLD ICON DELETE
+    // =================================================
+
+    const oldModuleData =
+      modules[moduleIndex];
+
+
+    if (
+      typeof oldModuleData === "object" &&
+      oldModuleData?.icon
+    ) {
+
+      const oldIconPath =
+        oldModuleData.icon;
+
+      const oldFilePath =
+        path.join(
+          process.cwd(),
+          oldIconPath.replace(
+            /^\/+/,
+            ""
+          )
+        );
+
+
+      if (
+        fs.existsSync(oldFilePath)
+      ) {
+
+        fs.unlinkSync(
+          oldFilePath
+        );
+
+      }
+
+    }
+
+
+    // =================================================
+    // NEW ICON PATH
+    // =================================================
+
+    const newIconPath =
+      `/uploads/modules/${req.file.filename}`;
+
 
     // =================================================
     // UPDATE MODULE
     // =================================================
 
-    modules[moduleIndex] =
-      newName;
+    modules[moduleIndex] = {
+
+      name:
+        newModuleName,
+
+      icon:
+        newIconPath,
+
+    };
+
 
     // =================================================
     // UPDATE DATABASE
@@ -2162,36 +2604,90 @@ export const updateModule = async (req, res) => {
       `
       UPDATE users
       SET modules = ?
-      WHERE role_id = 0
+      WHERE id = ?
+      AND role_id = 0
       `,
       [
-        JSON.stringify(modules)
+        JSON.stringify(
+          modules
+        ),
+
+        rows[0].id,
       ]
     );
 
+
     // =================================================
-    // RESPONSE
+    // SUCCESS
     // =================================================
 
     return res.status(200).json({
+
       success: true,
+
       message:
         "Module updated successfully",
+
+      module: {
+        oldModule:
+          oldModuleName,
+
+        newModule:
+          newModuleName,
+
+        icon:
+          newIconPath,
+      },
+
       modules,
+
     });
 
-  } catch (error) {
+
+  }
+  catch (error) {
 
     console.error(
       "UPDATE MODULE ERROR:",
       error
     );
 
+
+    // =================================================
+    // DELETE NEW FILE IF ERROR
+    // =================================================
+
+    if (req.file) {
+
+      const filePath =
+        path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+      if (
+        fs.existsSync(filePath)
+      ) {
+
+        fs.unlinkSync(
+          filePath
+        );
+
+      }
+
+    }
+
+
     return res.status(500).json({
+
       success: false,
+
       message:
+        error?.message ||
         "Failed to update module",
+
     });
 
   }
+
 };

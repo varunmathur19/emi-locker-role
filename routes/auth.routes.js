@@ -1,5 +1,6 @@
 import express from "express";
 
+
 import {
     createuserrole,
     getUsers,
@@ -16,6 +17,7 @@ import {
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
+import { uploadModuleIcon } from "../middleware/upload.js";
 
 
 const router = express.Router();
@@ -208,6 +210,7 @@ router.post("/login-as-user", authMiddleware, loginAsUser);
 router.post(
   "/add-module",
   authMiddleware,
+  uploadModuleIcon,
   addModule
 );
 
@@ -225,6 +228,7 @@ router.delete(
 router.put(
   "/update-module",
   authMiddleware,
+  uploadModuleIcon,
   updateModule
 );
 
