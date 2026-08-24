@@ -479,6 +479,7 @@ export const createuserrole = async (req, res) => {
 // =========================
 export const loginUser = async (req, res) => {
   try {
+
     const { email, password } = req.body;
 
     // ==========================================
@@ -494,80 +495,147 @@ export const loginUser = async (req, res) => {
       });
     }
 
+
+    // ==========================================
+    // CHECK USER STATUS
+    // 1 = ACTIVE
+    // 0 = INACTIVE
+    // ==========================================
+
+    if (Number(user.userStatus) === 0) {
+
+      return res.status(403).json({
+        success: false,
+        message: "Your account is inactive",
+      });
+
+    }
+
+
     // ==========================================
     // CHECK PASSWORD
     // ==========================================
 
-    const match = await bcrypt.compare(password, user.password);
+    const match =
+      await bcrypt.compare(
+        password,
+        user.password
+      );
 
     if (!match) {
+
       return res.status(401).json({
         success: false,
         message: "Invalid password",
       });
+
     }
+
 
     // ==========================================
     // JWT TOKEN
-    // Only required information in token
     // ==========================================
 
-    const token = jwt.sign(
-      {
-        id: user.id,
-        role_id: user.role_id,
-        email: user.email,
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "7d",
-      }
-    );
+    const token =
+      jwt.sign(
+        {
+          id: user.id,
+          role_id: user.role_id,
+          email: user.email,
+        },
+        process.env.JWT_SECRET,
+        {
+          expiresIn: "7d",
+        }
+      );
+
 
     // ==========================================
     // RESPONSE
-    // Parent IDs are NOT inside JWT.
-    // They are sent separately in user object.
-    // Frontend can store them in localStorage.
     // ==========================================
 
     return res.status(200).json({
+
       success: true,
-      message: "Login Successful",
+
+      message:
+        "Login Successful",
 
       token,
 
       user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role_id: user.role_id,
+
+        id:
+          user.id,
+
+        name:
+          user.name,
+
+        email:
+          user.email,
+
+        role_id:
+          user.role_id,
+
+        // ======================================
+        // USER STATUS
+        // ======================================
+
+        userStatus:
+          Number(user.userStatus),
 
         // ======================================
         // HIERARCHY DATA
-        // NOT PART OF JWT
         // ======================================
 
-        parent_id: user.parent_id,
-        parent_admin_id: user.parent_admin_id,
-        parent_cnf_id: user.parent_cnf_id,
+        parent_id:
+          user.parent_id,
+
+        parent_admin_id:
+          user.parent_admin_id,
+
+        parent_cnf_id:
+          user.parent_cnf_id,
+
         parent_super_distributor_id:
           user.parent_super_distributor_id,
+
         parent_distributor_id:
           user.parent_distributor_id,
-        parent_fos_id: user.parent_fos_id,
-        parent_retailer_id: user.parent_retailer_id,
-        parent_employee_id: user.parent_employee_id,
-        parent_staff_id: user.parent_staff_id,
+
+        parent_fos_id:
+          user.parent_fos_id,
+
+        parent_retailer_id:
+          user.parent_retailer_id,
+
+        parent_employee_id:
+          user.parent_employee_id,
+
+        parent_staff_id:
+          user.parent_staff_id,
+
       },
+
     });
-  } catch (error) {
-    console.error("Login Error:", error);
+
+  }
+  catch (error) {
+
+    console.error(
+      "Login Error:",
+      error
+    );
 
     return res.status(500).json({
+
       success: false,
-      message: error.message,
+
+      message:
+        error.message,
+
     });
+
   }
 };
 
@@ -703,22 +771,33 @@ export const getUsers = async (req, res) => {
 // =========================
 export const getDropdownUsers = async (req, res) => {
   try {
-    const { role_id, parent_id } = req.query;
+    const {
+      role_id,
+      parent_id,
+      search,
+    } = req.query;
 
     // =====================================================
     // VALIDATE ROLE ID
     // =====================================================
 
-    if (!role_id) {
+    if (
+      role_id === undefined ||
+      role_id === null ||
+      role_id === ""
+    ) {
       return res.status(400).json({
         success: false,
         message: "role_id is required",
       });
     }
 
-    const createRoleId = Number(role_id);
+    const requestedRoleId = Number(role_id);
 
-    if (Number.isNaN(createRoleId)) {
+    if (
+      Number.isNaN(requestedRoleId) ||
+      !Number.isInteger(requestedRoleId)
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid role_id",
@@ -726,40 +805,46 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
-    // ROLE HIERARCHY
-    //
-    // 1 = Admin
-    // 2 = CNF
-    // 3 = Super Distributor
-    // 4 = Distributor
-    // 5 = FOS
-    // 6 = Retailer
-    // 7 = Sub Retailer
-    // 8 = Employee
-    // 9 = Staff
+    // SUPPORTED ROLES
     // =====================================================
 
-    const hierarchy = {
-      2: [1, 2],
-      3: [2, 3],
-      4: [2, 3, 4],
-      5: [2, 3, 4, 5],
-      6: [2, 3, 4, 5, 6],
-      7: [2, 3, 4, 5, 6, 7],
-      8: [2, 3, 4, 5, 6, 7, 8],
-      9: [2, 3, 4, 5, 6, 7, 8, 9],
-    };
+    const validRoles = [
+      1, // Admin
+      2, // CNF
+      3, // Super Distributor
+      4, // Distributor
+      5, // FOS
+      6, // Retailer
+      7, // Sub Retailer
+      8, // Employee
+      9, // Staff
+    ];
 
-    // =====================================================
-    // CHECK ROLE
-    // =====================================================
-
-    if (!hierarchy[createRoleId]) {
+    if (!validRoles.includes(requestedRoleId)) {
       return res.status(400).json({
         success: false,
         message: "Invalid or unsupported role_id",
       });
     }
+
+    // =====================================================
+    // DISABLED FIELD MAP
+    // =====================================================
+
+    const disabledFieldMap = {
+      1: "parent_admin_disabled",
+      2: "parent_cnf_disabled",
+      3: "parent_super_distributor_disabled",
+      4: "parent_distributor_disabled",
+      5: "parent_fos_disabled",
+      6: "parent_retailer_disabled",
+      7: "parent_sub_retailer_disabled",
+      8: "parent_employee_disabled",
+      9: "parent_staff_disabled",
+    };
+
+    const disabledField =
+      disabledFieldMap[requestedRoleId];
 
     // =====================================================
     // VALIDATE PARENT ID
@@ -774,7 +859,11 @@ export const getDropdownUsers = async (req, res) => {
     ) {
       selectedParentId = Number(parent_id);
 
-      if (Number.isNaN(selectedParentId)) {
+      if (
+        Number.isNaN(selectedParentId) ||
+        !Number.isInteger(selectedParentId) ||
+        selectedParentId <= 0
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid parent_id",
@@ -783,104 +872,174 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // SEARCH
+    // =====================================================
+
+    const searchTerm =
+      typeof search === "string"
+        ? search.trim()
+        : "";
+
+    // =====================================================
     // CASE 1
-    //
-    // NO PARENT
+    // NO PARENT SELECTED
     //
     // Example:
+    // role_id=2
     //
-    // role_id = 4
+    // Returns all CNF users.
     //
-    // Return first parent = CNF
+    // With search:
+    // role_id=2&search=rahul
+    //
+    // Returns only matching CNF users.
     // =====================================================
 
     if (selectedParentId === null) {
-      const firstParentRole =
-        hierarchy[createRoleId][0];
+      let whereClause = `
+        WHERE role_id = ?
+      `;
+
+      const queryParams = [
+        requestedRoleId,
+      ];
+
+      // ===================================================
+      // ADD SEARCH CONDITION
+      // ===================================================
+
+      if (searchTerm) {
+        whereClause += `
+          AND (
+            name LIKE ?
+            OR email LIKE ?
+            OR phone LIKE ?
+            OR organization_name LIKE ?
+          )
+        `;
+
+        const searchValue =
+          `%${searchTerm}%`;
+
+        queryParams.push(
+          searchValue,
+          searchValue,
+          searchValue,
+          searchValue
+        );
+      }
+
+      // ===================================================
+      // FETCH USERS
+      // ===================================================
 
       const [rows] = await db.query(
         `
-          SELECT
-            id,
-            name,
-            email,
-            phone,
-            role_id,
-            parent_id,
-            created_by
-          FROM users
-          WHERE role_id = ?
-          ORDER BY name ASC
+        SELECT
+          id,
+          organization_name,
+          name,
+          email,
+          phone,
+          role_id,
+          parent_id,
+          created_by,
+
+          parent_admin_disabled,
+          parent_cnf_disabled,
+          parent_super_distributor_disabled,
+          parent_distributor_disabled,
+          parent_fos_disabled,
+          parent_retailer_disabled,
+          parent_sub_retailer_disabled,
+          parent_employee_disabled,
+          parent_staff_disabled
+
+        FROM users
+
+        ${whereClause}
+
+        ORDER BY name ASC
         `,
-        [firstParentRole]
+        queryParams
       );
 
-      console.log(
-        "=========================================="
-      );
+      // ===================================================
+      // REMOVE DISABLED USERS
+      // ===================================================
 
-      console.log(
-        "HIERARCHY DROPDOWN - FIRST LEVEL"
-      );
+      const filteredRows = rows.filter((user) => {
+        if (!disabledField) {
+          return true;
+        }
 
-      console.log(
-        "Create Role:",
-        createRoleId
-      );
+        return Number(
+          user[disabledField] ?? 0
+        ) !== 1;
+      });
 
-      console.log(
-        "Fetch Role:",
-        firstParentRole
-      );
-
-      console.log(
-        "Total:",
-        rows.length
-      );
-
-      console.log(
-        "=========================================="
-      );
+      // ===================================================
+      // RESPONSE
+      // ===================================================
 
       return res.status(200).json({
         success: true,
 
         create_role_id:
-          createRoleId,
+          requestedRoleId,
 
         parent_id:
           null,
 
         current_role_id:
-          firstParentRole,
+          requestedRoleId,
 
         current_role_name:
-          getRoleName(firstParentRole),
+          getRoleName(requestedRoleId),
+
+        search:
+          searchTerm,
 
         total:
-          rows.length,
+          filteredRows.length,
 
         data:
-          rows,
+          filteredRows,
       });
     }
 
     // =====================================================
     // CASE 2
-    //
     // PARENT SELECTED
     // =====================================================
 
     const [parentRows] = await db.query(
       `
-        SELECT
-          id,
-          name,
-          role_id,
-          parent_id
-        FROM users
-        WHERE id = ?
-        LIMIT 1
+      SELECT
+        id,
+        organization_name,
+        name,
+        email,
+        phone,
+        role_id,
+        parent_id,
+        created_by,
+
+        parent_admin_disabled,
+        parent_cnf_disabled,
+        parent_super_distributor_disabled,
+        parent_distributor_disabled,
+        parent_fos_disabled,
+        parent_retailer_disabled,
+        parent_sub_retailer_disabled,
+        parent_employee_disabled,
+        parent_staff_disabled
+
+      FROM users
+
+      WHERE id = ?
+
+      LIMIT 1
       `,
       [selectedParentId]
     );
@@ -896,73 +1055,62 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
+    const selectedParent =
+      parentRows[0];
+
     const parentRoleId =
-      Number(parentRows[0].role_id);
+      Number(selectedParent.role_id);
 
     // =====================================================
-    // CREATE ROLE HIERARCHY
+    // CHECK WHETHER SELECTED PARENT CAN BE PARENT
     // =====================================================
 
-    const levels =
-      hierarchy[createRoleId];
-
-    const parentIndex =
-      levels.indexOf(parentRoleId);
-
-    // =====================================================
-    // INVALID PARENT
-    // =====================================================
-
-    if (parentIndex === -1) {
+    if (
+      requestedRoleId <= parentRoleId
+    ) {
       return res.status(400).json({
         success: false,
-
         message:
-          "Selected parent is not valid for this role hierarchy",
-
-        create_role_id:
-          createRoleId,
-
-        selected_parent_id:
-          selectedParentId,
-
-        selected_parent_role_id:
-          parentRoleId,
-
-        allowed_parent_roles:
-          levels,
+          "Selected parent must be a higher level role",
       });
     }
 
     // =====================================================
-    // NEXT ROLE
+    // CHECK PARENT DISABLED THIS ROLE
     // =====================================================
 
-    const nextRoleIndex =
-      parentIndex + 1;
+    const parentDisabledField =
+      disabledFieldMap[requestedRoleId];
 
-    // =====================================================
-    // NO NEXT ROLE
-    // =====================================================
+    const isDisabledByParent =
+      parentDisabledField &&
+      Number(
+        selectedParent[
+          parentDisabledField
+        ] ?? 0
+      ) === 1;
 
-    if (
-      nextRoleIndex >=
-      levels.length
-    ) {
+    if (isDisabledByParent) {
       return res.status(200).json({
         success: true,
 
         create_role_id:
-          createRoleId,
+          requestedRoleId,
 
         parent_id:
           selectedParentId,
 
+        parent_role_id:
+          parentRoleId,
+
         current_role_id:
-          null,
+          requestedRoleId,
 
         current_role_name:
-          null,
+          getRoleName(requestedRoleId),
+
+        search:
+          searchTerm,
 
         total:
           0,
@@ -970,83 +1118,101 @@ export const getDropdownUsers = async (req, res) => {
         data: [],
 
         message:
-          "Hierarchy completed",
+          `${getRoleName(
+            parentRoleId
+          )} has disabled ${getRoleName(
+            requestedRoleId
+          )}`,
       });
     }
 
-    const fetchRoleId =
-      levels[nextRoleIndex];
+    // =====================================================
+    // FETCH REQUESTED ROLE UNDER SELECTED PARENT
+    // =====================================================
+
+    let whereClause = `
+      WHERE role_id = ?
+      AND parent_id = ?
+    `;
+
+    const queryParams = [
+      requestedRoleId,
+      selectedParentId,
+    ];
 
     // =====================================================
-    // FETCH CHILD USERS
+    // ADD SEARCH CONDITION
+    // =====================================================
+
+    if (searchTerm) {
+      whereClause += `
+        AND (
+          name LIKE ?
+          OR email LIKE ?
+          OR phone LIKE ?
+          OR organization_name LIKE ?
+        )
+      `;
+
+      const searchValue =
+        `%${searchTerm}%`;
+
+      queryParams.push(
+        searchValue,
+        searchValue,
+        searchValue,
+        searchValue
+      );
+    }
+
+    // =====================================================
+    // FETCH USERS
     // =====================================================
 
     const [rows] = await db.query(
       `
-        SELECT
-          id,
-          name,
-          email,
-          phone,
-          role_id,
-          parent_id,
-          created_by
-        FROM users
-        WHERE role_id = ?
-        AND parent_id = ?
-        ORDER BY name ASC
+      SELECT
+        id,
+        organization_name,
+        name,
+        email,
+        phone,
+        role_id,
+        parent_id,
+        created_by,
+
+        parent_admin_disabled,
+        parent_cnf_disabled,
+        parent_super_distributor_disabled,
+        parent_distributor_disabled,
+        parent_fos_disabled,
+        parent_retailer_disabled,
+        parent_sub_retailer_disabled,
+        parent_employee_disabled,
+        parent_staff_disabled
+
+      FROM users
+
+      ${whereClause}
+
+      ORDER BY name ASC
       `,
-      [
-        fetchRoleId,
-        selectedParentId,
-      ]
+      queryParams
     );
 
     // =====================================================
-    // DEBUG
+    // REMOVE DISABLED USERS
     // =====================================================
 
-    console.log(
-      "=========================================="
-    );
+    const filteredRows = rows.filter((user) => {
+      if (!disabledField) {
+        return true;
+      }
 
-    console.log(
-      "HIERARCHY DROPDOWN"
-    );
-
-    console.log(
-      "Create Role:",
-      createRoleId
-    );
-
-    console.log(
-      "Hierarchy:",
-      levels
-    );
-
-    console.log(
-      "Selected Parent:",
-      selectedParentId
-    );
-
-    console.log(
-      "Parent Role:",
-      parentRoleId
-    );
-
-    console.log(
-      "Next Role:",
-      fetchRoleId
-    );
-
-    console.log(
-      "Total:",
-      rows.length
-    );
-
-    console.log(
-      "=========================================="
-    );
+      return Number(
+        user[disabledField] ?? 0
+      ) !== 1;
+    });
 
     // =====================================================
     // RESPONSE
@@ -1056,7 +1222,7 @@ export const getDropdownUsers = async (req, res) => {
       success: true,
 
       create_role_id:
-        createRoleId,
+        requestedRoleId,
 
       parent_id:
         selectedParentId,
@@ -1065,16 +1231,19 @@ export const getDropdownUsers = async (req, res) => {
         parentRoleId,
 
       current_role_id:
-        fetchRoleId,
+        requestedRoleId,
 
       current_role_name:
-        getRoleName(fetchRoleId),
+        getRoleName(requestedRoleId),
+
+      search:
+        searchTerm,
 
       total:
-        rows.length,
+        filteredRows.length,
 
       data:
-        rows,
+        filteredRows,
     });
 
   } catch (error) {
@@ -1095,7 +1264,6 @@ export const getDropdownUsers = async (req, res) => {
     });
   }
 };
-
 
 // =====================================================
 // ROLE NAME
@@ -1135,13 +1303,14 @@ export const updatedstaffdata = async (req, res) => {
       state,
       city,
 
-      parent_admin_id,
-      parent_cnf_id,
-      parent_super_distributor_id,
-      parent_distributor_id,
-      parent_fos_id,
-      parent_retailer_id,
+      // =========================================
+      // ONLY ONE PARENT ID
+      // =========================================
+      parent_id,
 
+      // =========================================
+      // DEVICE PERMISSIONS
+      // =========================================
       new_device,
       old_device,
       supreme_device,
@@ -1149,8 +1318,16 @@ export const updatedstaffdata = async (req, res) => {
       lite,
       google_tv,
       supreme_lock,
+
+      // =========================================
+      // PASSWORD
+      // =========================================
+      password,
     } = req.body;
 
+    // =========================================
+    // VALIDATE USER ID
+    // =========================================
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -1158,22 +1335,50 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Check user exists
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    // =========================================
+    // CHECK USER EXISTS
+    // =========================================
     const [existingUser] = await db.query(
-      "SELECT id FROM users WHERE id = ?",
-      [id]
+      `
+      SELECT id, role_id
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
     );
 
-    if (existingUser.length === 0) {
+    if (!existingUser || existingUser.length === 0) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    // Update according to ID
-    const [result] = await db.query(
-      `
+    // =========================================
+    // NORMALIZE PARENT ID
+    // =========================================
+    const normalizedParentId =
+      parent_id !== null &&
+      parent_id !== undefined &&
+      parent_id !== ""
+        ? Number(parent_id)
+        : null;
+
+    // =========================================
+    // BUILD UPDATE QUERY
+    // =========================================
+
+    let updateQuery = `
       UPDATE users
       SET
         organization_name = ?,
@@ -1184,13 +1389,7 @@ export const updatedstaffdata = async (req, res) => {
         country = ?,
         state = ?,
         city = ?,
-
-        parent_admin_id = ?,
-        parent_cnf_id = ?,
-        parent_super_distributor_id = ?,
-        parent_distributor_id = ?,
-        parent_fos_id = ?,
-        parent_retailer_id = ?,
+        parent_id = ?,
 
         new_device = ?,
         old_device = ?,
@@ -1199,38 +1398,64 @@ export const updatedstaffdata = async (req, res) => {
         lite = ?,
         google_tv = ?,
         supreme_lock = ?
+    `;
 
+    const updateValues = [
+      organization_name || "",
+      name || "",
+      email || "",
+      phone || "",
+      company_address || "",
+      country || "",
+      state || "",
+      city || "",
+
+      normalizedParentId,
+
+      Number(new_device ?? 0),
+      Number(old_device ?? 0),
+      Number(supreme_device ?? 0),
+      Number(pro_star ?? 0),
+      Number(lite ?? 0),
+      Number(google_tv ?? 0),
+      Number(supreme_lock ?? 0),
+    ];
+
+    // =========================================
+    // PASSWORD ONLY IF PROVIDED
+    // =========================================
+    if (
+      password !== undefined &&
+      password !== null &&
+      password !== ""
+    ) {
+      updateQuery += `
+        , password = ?
+      `;
+
+      updateValues.push(password);
+    }
+
+    // =========================================
+    // WHERE
+    // =========================================
+    updateQuery += `
       WHERE id = ?
-      `,
-      [
-        organization_name,
-        name,
-        email,
-        phone,
-        company_address,
-        country,
-        state,
-        city,
+    `;
 
-        parent_admin_id || null,
-        parent_cnf_id || null,
-        parent_super_distributor_id || null,
-        parent_distributor_id || null,
-        parent_fos_id || null,
-        parent_retailer_id || null,
+    updateValues.push(userId);
 
-        new_device ?? 0,
-        old_device ?? 0,
-        supreme_device ?? 0,
-        pro_star ?? 0,
-        lite ?? 0,
-        google_tv ?? 0,
-        supreme_lock ?? 0,
-
-        id,
-      ]
+    // =========================================
+    // UPDATE USER
+    // =========================================
+    const [result] = await db.query(
+      updateQuery,
+      updateValues
     );
 
+    // =========================================
+    // CHECK UPDATE
+    // =========================================
     if (result.affectedRows === 0) {
       return res.status(400).json({
         success: false,
@@ -1238,12 +1463,17 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Get updated user data
+    // =========================================
+    // GET UPDATED USER
+    // IMPORTANT:
+    // PASSWORD SELECT NAHI KARNA
+    // =========================================
     const [updatedUser] = await db.query(
       `
       SELECT
         id,
         organization_name,
+        role_id,
         name,
         email,
         phone,
@@ -1251,86 +1481,7 @@ export const updatedstaffdata = async (req, res) => {
         country,
         state,
         city,
-        role_id,
-
-        parent_admin_id,
-        parent_cnf_id,
-        parent_super_distributor_id,
-        parent_distributor_id,
-        parent_fos_id,
-        parent_retailer_id,
-
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock
-      FROM users
-      WHERE id = ?
-      `,
-      [id]
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Staff data updated successfully",
-      data: updatedUser[0],
-    });
-  } catch (error) {
-    console.error("UPDATE STAFF ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update staff data",
-      error: error.message,
-    });
-  }
-};
-
-export const getStaffDataById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const userId = Number(id);
-
-    if (!Number.isInteger(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        role_id,
-        name,
-        email,
-        phone,
-        password,
-        company_address,
-        country,
-        state,
-        city,
-
-        parent_admin_id,
-        parent_cnf_id,
-        parent_super_distributor_id,
-        parent_distributor_id,
-        parent_fos_id,
-        parent_retailer_id,
-        parent_staff_id,
+        parent_id,
 
         new_device,
         old_device,
@@ -1347,15 +1498,104 @@ export const getStaffDataById = async (req, res) => {
       [userId]
     );
 
-    if (!rows.length) {
+    // =========================================
+    // SUCCESS
+    // =========================================
+    return res.status(200).json({
+      success: true,
+      message: "Staff data updated successfully",
+      data: updatedUser[0],
+    });
+
+  } catch (error) {
+    console.error(
+      "UPDATE STAFF ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update staff data",
+      error: error.message,
+    });
+  }
+};
+
+export const getStaffDataById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // =========================================
+    // VALIDATE ID
+    // =========================================
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    // =========================================
+    // GET USER DATA
+    // IMPORTANT:
+    // password SELECT nahi kiya gaya
+    // =========================================
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        organization_name,
+        role_id,
+        name,
+        email,
+        phone,
+        company_address,
+        country,
+        state,
+        city,
+
+        parent_id,
+
+        new_device,
+        old_device,
+        supreme_device,
+        pro_star,
+        lite,
+        google_tv,
+        supreme_lock
+
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    // =========================================
+    // USER NOT FOUND
+    // =========================================
+    if (!rows || rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
+    // =========================================
+    // SUCCESS RESPONSE
+    // =========================================
     return res.status(200).json({
       success: true,
+      message: "Staff data fetched successfully",
       data: rows[0],
     });
 
@@ -1639,22 +1879,36 @@ export const addModule = async (req, res) => {
   try {
 
     // =================================================
-    // ONLY MASTER ADMIN
+    // ALLOWED ROLES
+    // MASTER ADMIN = 0
+    // EMPLOYEE     = 8
     // =================================================
 
-    if (Number(req.user?.role_id) !== 0) {
+    const userRole =
+      Number(req.user?.role_id);
+
+    if (
+      userRole !== 0 &&
+      userRole !== 8
+    ) {
+
       return res.status(403).json({
         success: false,
-        message: "Only Master Admin can add modules",
+        message:
+          "Only Master Admin and Employee can add modules",
       });
+
     }
 
 
     // =================================================
-    // GET MODULE NAME
+    // GET MODULE DATA
     // =================================================
 
-    const { module } = req.body;
+    const {
+      module,
+      sequence,
+    } = req.body;
 
 
     // =================================================
@@ -1665,22 +1919,55 @@ export const addModule = async (req, res) => {
       !module ||
       typeof module !== "string"
     ) {
+
       return res.status(400).json({
         success: false,
-        message: "Module is required",
+        message:
+          "Module is required",
       });
+
     }
 
 
     const moduleName =
-      module.trim().toLowerCase();
+      module
+        .trim()
+        .toLowerCase();
 
 
     if (!moduleName) {
+
       return res.status(400).json({
         success: false,
-        message: "Module name cannot be empty",
+        message:
+          "Module name cannot be empty",
       });
+
+    }
+
+
+    // =================================================
+    // SEQUENCE VALIDATION
+    // =================================================
+
+    const moduleSequence =
+      Number(sequence);
+
+
+    if (
+      sequence === undefined ||
+      sequence === null ||
+      sequence === "" ||
+      !Number.isInteger(moduleSequence) ||
+      moduleSequence < 1
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Valid sequence number is required. Example: 1, 2, 3",
+      });
+
     }
 
 
@@ -1689,10 +1976,53 @@ export const addModule = async (req, res) => {
     // =================================================
 
     if (!req.file) {
+
       return res.status(400).json({
         success: false,
-        message: "PNG module icon is required",
+        message:
+          "PNG module icon is required",
       });
+
+    }
+
+
+    // =================================================
+    // PNG VALIDATION
+    // =================================================
+
+    if (
+      req.file.mimetype !==
+      "image/png"
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Only PNG module icons are allowed",
+      });
+
+    }
+
+
+    // =================================================
+    // 20 KB ICON SIZE VALIDATION
+    // =================================================
+
+    const maxIconSize =
+      20 * 1024;
+
+
+    if (
+      req.file.size >
+      maxIconSize
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "PNG module icon must not exceed 20 KB",
+      });
+
     }
 
 
@@ -1700,27 +2030,32 @@ export const addModule = async (req, res) => {
     // GET MASTER ADMIN
     // =================================================
 
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-      `
-    );
+    const [rows] =
+      await db.query(
+        `
+        SELECT
+          id,
+          modules
+        FROM users
+        WHERE role_id = 0
+        LIMIT 1
+        `
+      );
 
 
     if (!rows.length) {
+
       return res.status(404).json({
         success: false,
-        message: "Master Admin not found",
+        message:
+          "Master Admin not found",
       });
+
     }
 
 
-    const masterAdmin = rows[0];
+    const masterAdmin =
+      rows[0];
 
 
     // =================================================
@@ -1735,8 +2070,11 @@ export const addModule = async (req, res) => {
       try {
 
         modules =
-          typeof masterAdmin.modules === "string"
-            ? JSON.parse(masterAdmin.modules)
+          typeof masterAdmin.modules ===
+          "string"
+            ? JSON.parse(
+                masterAdmin.modules
+              )
             : masterAdmin.modules;
 
       } catch (error) {
@@ -1747,7 +2085,9 @@ export const addModule = async (req, res) => {
         );
 
         modules = [];
+
       }
+
     }
 
 
@@ -1755,43 +2095,96 @@ export const addModule = async (req, res) => {
     // SAFETY
     // =================================================
 
-    if (!Array.isArray(modules)) {
+    if (
+      !Array.isArray(modules)
+    ) {
+
       modules = [];
+
     }
 
 
     // =================================================
-    // CONVERT OLD STRING FORMAT
+    // CONVERT OLD MODULE FORMAT
     // =================================================
 
-    modules = modules.map((item) => {
+    modules =
+      modules.map(
+        (item, index) => {
 
-      if (typeof item === "string") {
-        return {
-          name: item,
-          icon: null,
-        };
-      }
+          // ===========================================
+          // OLD STRING FORMAT
+          // ===========================================
 
-      return item;
+          if (
+            typeof item === "string"
+          ) {
 
-    });
+            return {
+
+              name:
+                item,
+
+              icon:
+                null,
+
+              sequence:
+                index + 1,
+
+              status:
+                1,
+
+            };
+
+          }
+
+
+          // ===========================================
+          // OBJECT FORMAT
+          // ===========================================
+
+          return {
+
+            ...item,
+
+            sequence:
+              Number(
+                item?.sequence
+              ) ||
+              index + 1,
+
+            status:
+              Number(
+                item?.status
+              ) === 0
+                ? 0
+                : 1,
+
+          };
+
+        }
+      );
 
 
     // =================================================
-    // DUPLICATE CHECK
+    // DUPLICATE MODULE CHECK
     // =================================================
 
     const alreadyExists =
-      modules.some((item) => {
+      modules.some(
+        (item) => {
 
-        return (
-          String(item?.name || "")
-            .trim()
-            .toLowerCase() === moduleName
-        );
+          return (
+            String(
+              item?.name || ""
+            )
+              .trim()
+              .toLowerCase() ===
+            moduleName
+          );
 
-      });
+        }
+      );
 
 
     // =================================================
@@ -1802,9 +2195,42 @@ export const addModule = async (req, res) => {
 
       return res.status(409).json({
         success: false,
-        message: "Module already exists",
+        message:
+          "Module already exists",
         modules,
       });
+
+    }
+
+
+    // =================================================
+    // DUPLICATE SEQUENCE CHECK
+    // =================================================
+
+    const sequenceExists =
+      modules.some(
+        (item) => {
+
+          return (
+            Number(
+              item?.sequence
+            ) ===
+            moduleSequence
+          );
+
+        }
+      );
+
+
+    if (sequenceExists) {
+
+      return res.status(422).json({
+        success: false,
+        message:
+          `Sequence ${moduleSequence} is already used`,
+        modules,
+      });
+
     }
 
 
@@ -1821,8 +2247,21 @@ export const addModule = async (req, res) => {
     // =================================================
 
     const newModule = {
-      name: moduleName,
-      icon: iconPath,
+
+      name:
+        moduleName,
+
+      icon:
+        iconPath,
+
+      sequence:
+        moduleSequence,
+
+      // 1 = Active
+      // 0 = Inactive
+      status:
+        1,
+
     };
 
 
@@ -1830,7 +2269,24 @@ export const addModule = async (req, res) => {
     // ADD MODULE
     // =================================================
 
-    modules.push(newModule);
+    modules.push(
+      newModule
+    );
+
+
+    // =================================================
+    // SORT MODULES BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) =>
+        Number(
+          a?.sequence ?? 999999
+        ) -
+        Number(
+          b?.sequence ?? 999999
+        )
+    );
 
 
     // =================================================
@@ -1845,7 +2301,10 @@ export const addModule = async (req, res) => {
       AND role_id = 0
       `,
       [
-        JSON.stringify(modules),
+        JSON.stringify(
+          modules
+        ),
+
         masterAdmin.id,
       ]
     );
@@ -1856,14 +2315,27 @@ export const addModule = async (req, res) => {
     // =================================================
 
     return res.status(201).json({
-      success: true,
-      message: "Module added successfully",
-      module: newModule,
-      modules,
+
+      success:
+        true,
+
+      message:
+        "Module added successfully",
+
+      module:
+        newModule,
+
+      modules:
+        modules,
+
     });
 
 
   } catch (error) {
+
+    // =================================================
+    // ERROR
+    // =================================================
 
     console.error(
       "Add Module Error:",
@@ -1872,14 +2344,20 @@ export const addModule = async (req, res) => {
 
 
     return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      error: error.message,
+
+      success:
+        false,
+
+      message:
+        "Internal server error",
+
+      error:
+        error.message,
+
     });
 
   }
 };
-
 
 // =====================================================
 // GET MODULES
@@ -1909,6 +2387,10 @@ export const getModules = async (
       `
     );
 
+
+    // =================================================
+    // MASTER ADMIN NOT FOUND
+    // =================================================
 
     if (
       !rows.length
@@ -1953,14 +2435,22 @@ export const getModules = async (
 
             : masterAdmin.modules;
 
-      } catch (error) {
+      }
+      catch (error) {
 
         console.error(
-          "Modules JSON Parse Error:",
+          "MODULES JSON PARSE ERROR:",
           error
         );
 
-        modules = [];
+        return res.status(500).json({
+
+          success: false,
+
+          message:
+            "Invalid modules data",
+
+        });
 
       }
 
@@ -1968,7 +2458,7 @@ export const getModules = async (
 
 
     // =================================================
-    // SAFETY
+    // SAFETY CHECK
     // =================================================
 
     if (
@@ -1983,6 +2473,141 @@ export const getModules = async (
 
 
     // =================================================
+    // CONVERT / NORMALIZE MODULES
+    // =================================================
+
+    modules =
+      modules.map(
+        (item, index) => {
+
+          // ===========================================
+          // OLD STRING FORMAT
+          // ===========================================
+
+          if (
+            typeof item === "string"
+          ) {
+
+            return {
+
+              name:
+                item,
+
+              icon:
+                null,
+
+              sequence:
+                index + 1,
+
+              // OLD MODULES DEFAULT ACTIVE
+              status:
+                1,
+
+            };
+
+          }
+
+
+          // ===========================================
+          // OBJECT FORMAT
+          // ===========================================
+
+          const sequence =
+            Number(
+              item?.sequence
+            );
+
+
+          const status =
+            Number(
+              item?.status
+            );
+
+
+          return {
+
+            name:
+              item?.name ||
+              "",
+
+            icon:
+              item?.icon ||
+              null,
+
+            sequence:
+              Number.isInteger(
+                sequence
+              ) &&
+              sequence > 0
+
+                ? sequence
+
+                : index + 1,
+
+            // =========================================
+            // STATUS
+            //
+            // 1 = ACTIVE / SHOW
+            // 0 = INACTIVE / HIDE
+            //
+            // Agar purane record me status nahi hai
+            // toh default 1
+            // =========================================
+
+            status:
+              status === 0
+                ? 0
+                : 1,
+
+          };
+
+        }
+      );
+
+
+    // =================================================
+    // SORT BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) => {
+
+        return (
+          Number(
+            a?.sequence ?? 999999
+          ) -
+          Number(
+            b?.sequence ?? 999999
+          )
+        );
+
+      }
+    );
+
+
+    // =================================================
+    // ACTIVE / INACTIVE COUNT
+    // =================================================
+
+    const activeModules =
+      modules.filter(
+        (item) =>
+          Number(
+            item?.status
+          ) === 1
+      );
+
+
+    const inactiveModules =
+      modules.filter(
+        (item) =>
+          Number(
+            item?.status
+          ) === 0
+      );
+
+
+    // =================================================
     // SUCCESS
     // =================================================
 
@@ -1993,14 +2618,26 @@ export const getModules = async (
       count:
         modules.length,
 
+      activeCount:
+        activeModules.length,
+
+      inactiveCount:
+        inactiveModules.length,
+
       modules,
 
     });
 
-  } catch (error) {
+
+  }
+  catch (error) {
+
+    // =================================================
+    // ERROR
+    // =================================================
 
     console.error(
-      "Get Modules Error:",
+      "GET MODULES ERROR:",
       error
     );
 
@@ -2013,7 +2650,7 @@ export const getModules = async (
         "Failed to get modules",
 
       error:
-        error.message,
+        error?.message,
 
     });
 
@@ -2097,148 +2734,299 @@ export const deleteModule = async (req, res) => {
 
     const { module } = req.body || {};
 
-    if (!module) {
+    // =================================================
+    // VALIDATION
+    // =================================================
+
+    if (!module || typeof module !== "string") {
+
       return res.status(400).json({
         success: false,
         message: "Module name is required",
       });
+
     }
 
     const moduleName =
-      String(module).trim();
+      module.trim().toLowerCase();
 
-    // ==========================================
+
+    if (!moduleName) {
+
+      return res.status(400).json({
+        success: false,
+        message: "Module name cannot be empty",
+      });
+
+    }
+
+
+    // =================================================
     // GET MASTER ADMIN
-    // ==========================================
+    // =================================================
 
     const [rows] = await db.query(
       `
-      SELECT modules
+      SELECT
+        id,
+        modules
       FROM users
       WHERE role_id = 0
       LIMIT 1
       `
     );
 
+
     if (!rows.length) {
+
       return res.status(404).json({
         success: false,
         message: "Master Admin not found",
       });
+
     }
 
-    // ==========================================
-    // GET MODULE ARRAY
-    // ==========================================
+
+    const masterAdmin =
+      rows[0];
+
+
+    // =================================================
+    // GET MODULES
+    // =================================================
 
     let modules = [];
 
-    if (rows[0].modules) {
 
-      modules =
-        typeof rows[0].modules === "string"
-          ? JSON.parse(rows[0].modules)
-          : rows[0].modules;
+    if (masterAdmin.modules) {
+
+      try {
+
+        modules =
+          typeof masterAdmin.modules === "string"
+            ? JSON.parse(masterAdmin.modules)
+            : masterAdmin.modules;
+
+      } catch (error) {
+
+        console.error(
+          "MODULE JSON PARSE ERROR:",
+          error
+        );
+
+        modules = [];
+
+      }
 
     }
+
+
+    // =================================================
+    // SAFETY
+    // =================================================
 
     if (!Array.isArray(modules)) {
+
       modules = [];
+
     }
+
 
     console.log(
       "OLD MODULES:",
       modules
     );
 
-    // ==========================================
+
+    // =================================================
     // FIND MODULE
-    // ==========================================
+    // =================================================
 
     const moduleExists =
-      modules.some(
-        (item) =>
-          String(item)
+      modules.some((item) => {
+
+        // New format:
+        // {
+        //   name: "varunn",
+        //   icon: "/uploads/modules/abc.png"
+        // }
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === moduleName
+          );
+
+        }
+
+
+        // Old format:
+        // "varunn"
+
+        return (
+          String(item || "")
             .trim()
-            .toLowerCase() ===
-          moduleName.toLowerCase()
-      );
+            .toLowerCase() === moduleName
+        );
+
+      });
+
 
     if (!moduleExists) {
 
       return res.status(404).json({
         success: false,
-        message: `Module "${moduleName}" not found`,
+        message: `Module "${module}" not found`,
       });
 
     }
 
-    // ==========================================
+
+    // =================================================
+    // GET MODULE ICON BEFORE DELETE
+    // =================================================
+
+    const deletedModule =
+      modules.find((item) => {
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === moduleName
+          );
+
+        }
+
+        return (
+          String(item || "")
+            .trim()
+            .toLowerCase() === moduleName
+        );
+
+      });
+
+
+    console.log(
+      "DELETED MODULE:",
+      deletedModule
+    );
+
+
+    // =================================================
     // DELETE MODULE
-    // ==========================================
+    // =================================================
 
     const updatedModules =
-      modules.filter(
-        (item) =>
-          String(item)
+      modules.filter((item) => {
+
+        if (
+          typeof item === "object" &&
+          item !== null
+        ) {
+
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() !== moduleName
+          );
+
+        }
+
+        return (
+          String(item || "")
             .trim()
-            .toLowerCase() !==
-          moduleName.toLowerCase()
-      );
+            .toLowerCase() !== moduleName
+        );
+
+      });
+
 
     console.log(
       "UPDATED MODULES:",
       updatedModules
     );
 
-    // ==========================================
-    // UPDATE DATABASE
-    // ==========================================
 
-    const [result] = await db.query(
-      `
-      UPDATE users
-      SET modules = ?
-      WHERE role_id = 0
-      `,
-      [
-        JSON.stringify(
-          updatedModules
-        ),
-      ]
-    );
+    // =================================================
+    // UPDATE DATABASE
+    // =================================================
+
+    const [result] =
+      await db.query(
+        `
+        UPDATE users
+        SET modules = ?
+        WHERE id = ?
+        AND role_id = 0
+        `,
+        [
+          JSON.stringify(
+            updatedModules
+          ),
+          masterAdmin.id,
+        ]
+      );
+
 
     console.log(
-      "UPDATE RESULT:",
+      "DELETE UPDATE RESULT:",
       result
     );
 
-    // ==========================================
+
+    // =================================================
     // SUCCESS
-    // ==========================================
+    // =================================================
 
     return res.status(200).json({
+
       success: true,
-      message: "Module deleted successfully",
-      modules: updatedModules,
+
+      message:
+        `Module "${module}" deleted successfully`,
+
+      deletedModule:
+        deletedModule,
+
+      modules:
+        updatedModules,
+
     });
+
 
   } catch (error) {
 
     console.error(
-      "Delete Module Error:",
+      "DELETE MODULE ERROR:",
       error
     );
 
+
     return res.status(500).json({
+
       success: false,
-      message: "Failed to delete module",
-      error: error.message,
+
+      message:
+        "Failed to delete module",
+
+      error:
+        error.message,
+
     });
 
   }
-};
 
+};
 
 
 export const updateModule = async (req, res) => {
@@ -2249,11 +3037,17 @@ export const updateModule = async (req, res) => {
     // ROLE CHECK
     // =================================================
 
-    if (Number(req.user?.role_id) !== 0) {
+    if (
+      Number(req.user?.role_id) !== 0
+    ) {
 
       return res.status(403).json({
+
         success: false,
-        message: "Only Master Admin can update module",
+
+        message:
+          "Only Master Admin can update module",
+
       });
 
     }
@@ -2266,11 +3060,13 @@ export const updateModule = async (req, res) => {
     const {
       oldModule,
       newModule,
+      newSequence,
+      status,
     } = req.body;
 
 
     // =================================================
-    // VALIDATE OLD MODULE
+    // OLD MODULE REQUIRED
     // =================================================
 
     if (
@@ -2279,46 +3075,145 @@ export const updateModule = async (req, res) => {
     ) {
 
       return res.status(400).json({
+
         success: false,
-        message: "Old module name is required",
+
+        message:
+          "Old module name is required",
+
       });
 
     }
 
 
     // =================================================
-    // VALIDATE NEW MODULE
+    // CHECK NEW MODULE
+    // =================================================
+
+    const hasNewModule =
+      typeof newModule === "string" &&
+      newModule.trim() !== "";
+
+
+    // =================================================
+    // CHECK NEW SEQUENCE
+    // =================================================
+
+    const hasNewSequence =
+      newSequence !== undefined &&
+      newSequence !== null &&
+      String(newSequence).trim() !== "";
+
+
+    // =================================================
+    // CHECK NEW STATUS
+    // =================================================
+
+    const hasNewStatus =
+      status !== undefined &&
+      status !== null &&
+      String(status).trim() !== "";
+
+
+    // =================================================
+    // CHECK NEW ICON
+    // =================================================
+
+    const hasNewIcon =
+      !!req.file;
+
+
+    // =================================================
+    // AT LEAST ONE FIELD REQUIRED
     // =================================================
 
     if (
-      typeof newModule !== "string" ||
-      !newModule.trim()
+      !hasNewModule &&
+      !hasNewSequence &&
+      !hasNewStatus &&
+      !hasNewIcon
     ) {
 
       return res.status(400).json({
+
         success: false,
-        message: "New module name is required",
+
+        message:
+          "At least one field is required to update",
+
       });
 
     }
 
 
     // =================================================
-    // VALIDATE NEW ICON
+    // VALIDATE SEQUENCE
     // =================================================
 
-    if (!req.file) {
+    let sequence = null;
 
-      return res.status(400).json({
-        success: false,
-        message: "New icon image is required",
-      });
+
+    if (hasNewSequence) {
+
+      sequence =
+        Number(newSequence);
+
+
+      if (
+        !Number.isInteger(sequence) ||
+        sequence < 1
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Valid sequence number is required",
+
+        });
+
+      }
 
     }
 
 
     // =================================================
-    // CLEAN NAMES
+    // VALIDATE STATUS
+    // 0 = INACTIVE / HIDE
+    // 1 = ACTIVE / SHOW
+    // =================================================
+
+    let moduleStatus = null;
+
+
+    if (hasNewStatus) {
+
+      moduleStatus =
+        Number(status);
+
+
+      if (
+        moduleStatus !== 0 &&
+        moduleStatus !== 1
+      ) {
+
+        return res.status(400).json({
+
+          success: false,
+
+          message:
+            "Status must be either 0 or 1",
+
+        });
+
+      }
+
+    }
+
+
+    // =================================================
+    // CLEAN MODULE NAMES
     // =================================================
 
     const oldModuleName =
@@ -2326,10 +3221,13 @@ export const updateModule = async (req, res) => {
         .trim()
         .toLowerCase();
 
+
     const newModuleName =
-      newModule
-        .trim()
-        .toLowerCase();
+      hasNewModule
+        ? newModule
+            .trim()
+            .toLowerCase()
+        : null;
 
 
     // =================================================
@@ -2349,17 +3247,52 @@ export const updateModule = async (req, res) => {
       );
 
 
+    // =================================================
+    // MASTER ADMIN NOT FOUND
+    // =================================================
+
     if (!rows.length) {
 
+      // Delete uploaded icon
+
+      if (req.file) {
+
+        const uploadedFilePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+
+        if (
+          fs.existsSync(
+            uploadedFilePath
+          )
+        ) {
+
+          fs.unlinkSync(
+            uploadedFilePath
+          );
+
+        }
+
+      }
+
+
       return res.status(404).json({
+
         success: false,
-        message: "Master Admin not found",
+
+        message:
+          "Master Admin not found",
+
       });
 
     }
 
 
-    const masterAdmin = rows[0];
+    const masterAdmin =
+      rows[0];
 
 
     // =================================================
@@ -2392,9 +3325,40 @@ export const updateModule = async (req, res) => {
           error
         );
 
+
+        // Delete uploaded icon
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
         return res.status(500).json({
+
           success: false,
-          message: "Invalid modules data",
+
+          message:
+            "Invalid modules data",
+
         });
 
       }
@@ -2403,55 +3367,119 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // SAFETY
+    // ARRAY CHECK
     // =================================================
 
     if (!Array.isArray(modules)) {
 
       return res.status(500).json({
+
         success: false,
-        message: "Modules data must be an array",
+
+        message:
+          "Modules data must be an array",
+
       });
 
     }
 
 
     // =================================================
-    // CONVERT OLD FORMAT
+    // CONVERT OLD MODULE FORMAT
+    //
+    // OLD:
+    // {
+    //   name: "cnf",
+    //   icon: null
+    // }
+    //
+    // NEW:
+    // {
+    //   name: "cnf",
+    //   icon: null,
+    //   sequence: 1,
+    //   status: 1
+    // }
     // =================================================
 
     modules =
-      modules.map((item) => {
+      modules.map(
+        (item, index) => {
 
-        if (typeof item === "string") {
+          // -------------------------------------------
+          // STRING FORMAT
+          // -------------------------------------------
+
+          if (
+            typeof item === "string"
+          ) {
+
+            return {
+
+              name:
+                item,
+
+              icon:
+                null,
+
+              sequence:
+                index + 1,
+
+              status:
+                1,
+
+            };
+
+          }
+
+
+          // -------------------------------------------
+          // OBJECT FORMAT
+          // -------------------------------------------
 
           return {
-            name: item,
-            icon: null,
+
+            name:
+              item?.name ||
+              "",
+
+            icon:
+              item?.icon ||
+              null,
+
+            sequence:
+              Number(
+                item?.sequence ??
+                index + 1
+              ),
+
+            status:
+              Number(
+                item?.status ??
+                1
+              ) === 0
+                ? 0
+                : 1,
+
           };
 
         }
-
-        return item;
-
-      });
+      );
 
 
     // =================================================
-    // FIND OLD MODULE
+    // FIND MODULE
     // =================================================
 
     const moduleIndex =
       modules.findIndex(
         (item) => {
 
-          const name =
-            typeof item === "string"
-              ? item
-              : item?.name;
-
           return (
-            String(name || "")
+            String(
+              item?.name ||
+              ""
+            )
               .trim()
               .toLowerCase() ===
             oldModuleName
@@ -2465,148 +3493,125 @@ export const updateModule = async (req, res) => {
     // MODULE NOT FOUND
     // =================================================
 
-    if (moduleIndex === -1) {
+    if (
+      moduleIndex === -1
+    ) {
 
-      // Delete uploaded new file
+      // Delete uploaded icon
 
-      const uploadedFilePath =
-        path.join(
-          uploadDir,
-          req.file.filename
-        );
+      if (req.file) {
 
-      if (
-        fs.existsSync(
-          uploadedFilePath
-        )
-      ) {
+        const uploadedFilePath =
+          path.join(
+            uploadDir,
+            req.file.filename
+          );
 
-        fs.unlinkSync(
-          uploadedFilePath
-        );
+
+        if (
+          fs.existsSync(
+            uploadedFilePath
+          )
+        ) {
+
+          fs.unlinkSync(
+            uploadedFilePath
+          );
+
+        }
 
       }
 
 
       return res.status(404).json({
+
         success: false,
+
         message:
           `Old module "${oldModule}" not found`,
+
       });
 
     }
 
 
     // =================================================
-    // DUPLICATE NEW MODULE CHECK
+    // CURRENT MODULE
     // =================================================
 
-    const duplicateModule =
-      modules.some(
-        (item, index) => {
-
-          if (
-            index === moduleIndex
-          ) {
-
-            return false;
-
-          }
-
-
-          const name =
-            typeof item === "string"
-              ? item
-              : item?.name;
-
-
-          return (
-            String(name || "")
-              .trim()
-              .toLowerCase() ===
-            newModuleName
-          );
-
-        }
-      );
-
-
-    // =================================================
-    // DUPLICATE MODULE
-    // =================================================
-
-    if (duplicateModule) {
-
-      // Delete newly uploaded file
-
-      const uploadedFilePath =
-        path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-      if (
-        fs.existsSync(
-          uploadedFilePath
-        )
-      ) {
-
-        fs.unlinkSync(
-          uploadedFilePath
-        );
-
-      }
-
-
-      return res.status(409).json({
-        success: false,
-        message:
-          `Module "${newModule}" already exists`,
-      });
-
-    }
-
-
-    // =================================================
-    // OLD MODULE DATA
-    // =================================================
-
-    const oldModuleData =
+    const currentModule =
       modules[moduleIndex];
 
 
     // =================================================
-    // DELETE OLD ICON
+    // DUPLICATE MODULE NAME
     // =================================================
 
-    if (
-      typeof oldModuleData === "object" &&
-      oldModuleData?.icon
-    ) {
+    if (hasNewModule) {
 
-      const oldIconPath =
-        oldModuleData.icon;
+      const duplicateModule =
+        modules.some(
+          (item, index) => {
+
+            if (
+              index === moduleIndex
+            ) {
+
+              return false;
+
+            }
 
 
-      const oldFilePath =
-        path.join(
-          process.cwd(),
-          oldIconPath.replace(
-            /^\/+/,
-            ""
-          )
+            return (
+              String(
+                item?.name ||
+                ""
+              )
+                .trim()
+                .toLowerCase() ===
+              newModuleName
+            );
+
+          }
         );
 
 
-      if (
-        fs.existsSync(
-          oldFilePath
-        )
-      ) {
+      if (duplicateModule) {
 
-        fs.unlinkSync(
-          oldFilePath
-        );
+        // Delete uploaded icon
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
+        return res.status(409).json({
+
+          success: false,
+
+          message:
+            `Module "${newModule}" already exists`,
+
+        });
 
       }
 
@@ -2614,11 +3619,142 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // NEW ICON PATH
+    // DUPLICATE SEQUENCE
     // =================================================
 
-    const newIconPath =
-      `/uploads/modules/${req.file.filename}`;
+    if (hasNewSequence) {
+
+      const duplicateSequence =
+        modules.some(
+          (item, index) => {
+
+            if (
+              index === moduleIndex
+            ) {
+
+              return false;
+
+            }
+
+
+            return (
+              Number(
+                item?.sequence
+              ) ===
+              sequence
+            );
+
+          }
+        );
+
+
+      if (duplicateSequence) {
+
+        // Delete uploaded icon
+
+        if (req.file) {
+
+          const uploadedFilePath =
+            path.join(
+              uploadDir,
+              req.file.filename
+            );
+
+
+          if (
+            fs.existsSync(
+              uploadedFilePath
+            )
+          ) {
+
+            fs.unlinkSync(
+              uploadedFilePath
+            );
+
+          }
+
+        }
+
+
+        return res.status(422).json({
+
+          success: false,
+
+          message:
+            `Sequence ${sequence} is already used`,
+
+        });
+
+      }
+
+    }
+
+
+    // =================================================
+    // OLD VALUES
+    // =================================================
+
+    const oldIcon =
+      currentModule?.icon ||
+      null;
+
+
+    // =================================================
+    // FINAL NAME
+    // =================================================
+
+    const finalName =
+      hasNewModule
+        ? newModuleName
+        : currentModule?.name || "";
+
+
+    // =================================================
+    // FINAL SEQUENCE
+    // =================================================
+
+    const finalSequence =
+      hasNewSequence
+        ? sequence
+        : Number(
+            currentModule?.sequence ||
+            moduleIndex + 1
+          );
+
+
+    // =================================================
+    // FINAL STATUS
+    // =================================================
+
+    const finalStatus =
+      hasNewStatus
+        ? moduleStatus
+        : Number(
+            currentModule?.status ?? 1
+          ) === 0
+            ? 0
+            : 1;
+
+
+    // =================================================
+    // FINAL ICON
+    // =================================================
+
+    let finalIcon =
+      currentModule?.icon ||
+      null;
+
+
+    // =================================================
+    // UPDATE ICON ONLY IF PROVIDED
+    // =================================================
+
+    if (hasNewIcon) {
+
+      finalIcon =
+        `/uploads/modules/${req.file.filename}`;
+
+    }
 
 
     // =================================================
@@ -2628,12 +3764,29 @@ export const updateModule = async (req, res) => {
     modules[moduleIndex] = {
 
       name:
-        newModuleName,
+        finalName,
 
       icon:
-        newIconPath,
+        finalIcon,
+
+      sequence:
+        finalSequence,
+
+      status:
+        finalStatus,
 
     };
+
+
+    // =================================================
+    // SORT BY SEQUENCE
+    // =================================================
+
+    modules.sort(
+      (a, b) =>
+        Number(a.sequence) -
+        Number(b.sequence)
+    );
 
 
     // =================================================
@@ -2655,6 +3808,54 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
+    // DELETE OLD ICON
+    // ONLY WHEN NEW ICON IS UPLOADED
+    // =================================================
+
+    if (
+      hasNewIcon &&
+      oldIcon &&
+      oldIcon !== finalIcon
+    ) {
+
+      try {
+
+        const oldIconPath =
+          path.join(
+            process.cwd(),
+            oldIcon.replace(
+              /^\/+/,
+              ""
+            )
+          );
+
+
+        if (
+          fs.existsSync(
+            oldIconPath
+          )
+        ) {
+
+          fs.unlinkSync(
+            oldIconPath
+          );
+
+        }
+
+      }
+      catch (iconDeleteError) {
+
+        console.error(
+          "OLD ICON DELETE ERROR:",
+          iconDeleteError
+        );
+
+      }
+
+    }
+
+
+    // =================================================
     // SUCCESS
     // =================================================
 
@@ -2671,17 +3872,22 @@ export const updateModule = async (req, res) => {
           oldModuleName,
 
         newModule:
-          newModuleName,
+          finalName,
 
         icon:
-          newIconPath,
+          finalIcon,
+
+        sequence:
+          finalSequence,
+
+        status:
+          finalStatus,
 
       },
 
       modules,
 
     });
-
 
   }
   catch (error) {
@@ -2693,7 +3899,7 @@ export const updateModule = async (req, res) => {
 
 
     // =================================================
-    // DELETE UPLOADED FILE ON ERROR
+    // DELETE NEW ICON ON ERROR
     // =================================================
 
     if (req.file) {
@@ -2742,4 +3948,159 @@ export const updateModule = async (req, res) => {
 
   }
 
+};
+
+export const updateUserStatus = async (req, res) => {
+  try {
+
+    // =====================================================
+    // GET DATA
+    // =====================================================
+
+    const {
+      user_id,
+      userStatus,
+    } = req.body;
+
+
+    // =====================================================
+    // VALIDATION
+    // =====================================================
+
+    if (!user_id) {
+
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+
+    }
+
+
+    // =====================================================
+    // BOOLEAN VALIDATION
+    // 0 = INACTIVE
+    // 1 = ACTIVE
+    // =====================================================
+
+    if (
+      Number(userStatus) !== 0 &&
+      Number(userStatus) !== 1
+    ) {
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "userStatus must be 0 (Inactive) or 1 (Active)",
+      });
+
+    }
+
+
+    const status =
+      Number(userStatus);
+
+
+    // =====================================================
+    // CHECK USER
+    // =====================================================
+
+    const [users] =
+      await db.query(
+        `
+        SELECT
+          id,
+          name,
+          userStatus
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [user_id]
+      );
+
+
+    if (!users.length) {
+
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+
+    }
+
+
+    // =====================================================
+    // UPDATE STATUS
+    // =====================================================
+
+    await db.query(
+      `
+      UPDATE users
+      SET userStatus = ?
+      WHERE id = ?
+      `,
+      [
+        status,
+        user_id,
+      ]
+    );
+
+
+    // =====================================================
+    // RESPONSE STATUS
+    // =====================================================
+
+    const statusText =
+      status === 1
+        ? "Active"
+        : "Inactive";
+
+
+    // =====================================================
+    // SUCCESS
+    // =====================================================
+
+    return res.status(200).json({
+
+      success: true,
+
+      message:
+        `User status updated to ${statusText}`,
+
+      user: {
+        id: users[0].id,
+
+        name:
+          users[0].name,
+
+        userStatus:
+          status,
+
+        status:
+          statusText,
+      },
+
+    });
+
+  } catch (error) {
+
+    console.error(
+      "UPDATE USER STATUS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+
+      success: false,
+
+      message:
+        "Failed to update user status",
+
+      error:
+        error.message,
+
+    });
+
+  }
 };

@@ -14,6 +14,7 @@ import {
     getModules,
     deleteModule,
     updateModule,
+    updateUserStatus,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -230,6 +231,12 @@ router.put(
   authMiddleware,
   uploadModuleNewIcon,
   updateModule
+);
+
+router.patch(
+  "/user-status",
+  authMiddleware,
+  updateUserStatus
 );
 
 export default router;
