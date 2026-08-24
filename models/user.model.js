@@ -362,6 +362,28 @@ export const getAllHierarchyUsers = async () => {
             created_by,
             created_at,
 
+            parent_id,
+
+            parent_admin_id,
+            parent_cnf_id,
+            parent_super_distributor_id,
+            parent_distributor_id,
+            parent_fos_id,
+            parent_retailer_id,
+            parent_sub_retailer_id,
+            parent_employee_id,
+            parent_staff_id,
+
+            parent_admin_disabled,
+            parent_cnf_disabled,
+            parent_super_distributor_disabled,
+            parent_distributor_disabled,
+            parent_fos_disabled,
+            parent_retailer_disabled,
+            parent_sub_retailer_disabled,
+            parent_employee_disabled,
+            parent_staff_disabled,
+
             new_device,
             old_device,
             supreme_device,
@@ -371,11 +393,11 @@ export const getAllHierarchyUsers = async () => {
             supreme_lock
 
         FROM users
+
         ORDER BY id ASC
     `);
 
     return rows;
-
 };
 
 
