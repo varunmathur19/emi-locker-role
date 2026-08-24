@@ -1269,24 +1269,24 @@ export const getDropdownUsers = async (req, res) => {
 // ROLE NAME
 // =====================================================
 
-// const getRoleName = (roleId) => {
+const getRoleName = (roleId) => {
 
-//   const roles = {
-//     1: "Admin",
-//     2: "CNF",
-//     3: "Super Distributor",
-//     4: "Distributor",
-//     5: "FOS",
-//     6: "Retailer",
-//     7: "Employee",
-//     8: "Staff",
-//   };
+  const roles = {
+    1: "Admin",
+    2: "CNF",
+    3: "Super Distributor",
+    4: "Distributor",
+    5: "FOS",
+    6: "Retailer",
+    7: "Employee",
+    8: "Staff",
+  };
 
-//   return (
-//     roles[roleId] ||
-//     "User"
-//   );
-// };
+  return (
+    roles[roleId] ||
+    "User"
+  );
+};
 
 
 export const updatedstaffdata = async (req, res) => {
