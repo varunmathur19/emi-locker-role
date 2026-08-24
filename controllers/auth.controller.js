@@ -771,7 +771,11 @@ export const getUsers = async (req, res) => {
 // =========================
 export const getDropdownUsers = async (req, res) => {
   try {
-    const { role_id, parent_id } = req.query;
+    const {
+      role_id,
+      parent_id,
+      search,
+    } = req.query;
 
     // =====================================================
     // VALIDATE ROLE ID
@@ -868,18 +872,67 @@ export const getDropdownUsers = async (req, res) => {
     }
 
     // =====================================================
+    // SEARCH
+    // =====================================================
+
+    const searchTerm =
+      typeof search === "string"
+        ? search.trim()
+        : "";
+
+    // =====================================================
     // CASE 1
     // NO PARENT SELECTED
     //
-    // IMPORTANT:
-    // Directly requested role ka data fetch hoga.
+    // Example:
+    // role_id=2
     //
-    // role_id=2 → CNF
-    // role_id=3 → Super Distributor
-    // role_id=4 → Distributor
+    // Returns all CNF users.
+    //
+    // With search:
+    // role_id=2&search=rahul
+    //
+    // Returns only matching CNF users.
     // =====================================================
 
     if (selectedParentId === null) {
+      let whereClause = `
+        WHERE role_id = ?
+      `;
+
+      const queryParams = [
+        requestedRoleId,
+      ];
+
+      // ===================================================
+      // ADD SEARCH CONDITION
+      // ===================================================
+
+      if (searchTerm) {
+        whereClause += `
+          AND (
+            name LIKE ?
+            OR email LIKE ?
+            OR phone LIKE ?
+            OR organization_name LIKE ?
+          )
+        `;
+
+        const searchValue =
+          `%${searchTerm}%`;
+
+        queryParams.push(
+          searchValue,
+          searchValue,
+          searchValue,
+          searchValue
+        );
+      }
+
+      // ===================================================
+      // FETCH USERS
+      // ===================================================
+
       const [rows] = await db.query(
         `
         SELECT
@@ -904,16 +957,16 @@ export const getDropdownUsers = async (req, res) => {
 
         FROM users
 
-        WHERE role_id = ?
+        ${whereClause}
 
         ORDER BY name ASC
         `,
-        [requestedRoleId]
+        queryParams
       );
 
-      // =====================================================
+      // ===================================================
       // REMOVE DISABLED USERS
-      // =====================================================
+      // ===================================================
 
       const filteredRows = rows.filter((user) => {
         if (!disabledField) {
@@ -925,25 +978,33 @@ export const getDropdownUsers = async (req, res) => {
         ) !== 1;
       });
 
-      // =====================================================
+      // ===================================================
       // RESPONSE
-      // =====================================================
+      // ===================================================
 
       return res.status(200).json({
         success: true,
 
-        create_role_id: requestedRoleId,
+        create_role_id:
+          requestedRoleId,
 
-        parent_id: null,
+        parent_id:
+          null,
 
-        current_role_id: requestedRoleId,
+        current_role_id:
+          requestedRoleId,
 
         current_role_name:
           getRoleName(requestedRoleId),
 
-        total: filteredRows.length,
+        search:
+          searchTerm,
 
-        data: filteredRows,
+        total:
+          filteredRows.length,
+
+        data:
+          filteredRows,
       });
     }
 
@@ -994,7 +1055,8 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    const selectedParent = parentRows[0];
+    const selectedParent =
+      parentRows[0];
 
     const parentRoleId =
       Number(selectedParent.role_id);
@@ -1003,7 +1065,9 @@ export const getDropdownUsers = async (req, res) => {
     // CHECK WHETHER SELECTED PARENT CAN BE PARENT
     // =====================================================
 
-    if (requestedRoleId <= parentRoleId) {
+    if (
+      requestedRoleId <= parentRoleId
+    ) {
       return res.status(400).json({
         success: false,
         message:
@@ -1021,7 +1085,9 @@ export const getDropdownUsers = async (req, res) => {
     const isDisabledByParent =
       parentDisabledField &&
       Number(
-        selectedParent[parentDisabledField] ?? 0
+        selectedParent[
+          parentDisabledField
+        ] ?? 0
       ) === 1;
 
     if (isDisabledByParent) {
@@ -1043,17 +1109,64 @@ export const getDropdownUsers = async (req, res) => {
         current_role_name:
           getRoleName(requestedRoleId),
 
-        total: 0,
+        search:
+          searchTerm,
+
+        total:
+          0,
 
         data: [],
 
         message:
-          `${getRoleName(parentRoleId)} has disabled ${getRoleName(requestedRoleId)}`,
+          `${getRoleName(
+            parentRoleId
+          )} has disabled ${getRoleName(
+            requestedRoleId
+          )}`,
       });
     }
 
     // =====================================================
     // FETCH REQUESTED ROLE UNDER SELECTED PARENT
+    // =====================================================
+
+    let whereClause = `
+      WHERE role_id = ?
+      AND parent_id = ?
+    `;
+
+    const queryParams = [
+      requestedRoleId,
+      selectedParentId,
+    ];
+
+    // =====================================================
+    // ADD SEARCH CONDITION
+    // =====================================================
+
+    if (searchTerm) {
+      whereClause += `
+        AND (
+          name LIKE ?
+          OR email LIKE ?
+          OR phone LIKE ?
+          OR organization_name LIKE ?
+        )
+      `;
+
+      const searchValue =
+        `%${searchTerm}%`;
+
+      queryParams.push(
+        searchValue,
+        searchValue,
+        searchValue,
+        searchValue
+      );
+    }
+
+    // =====================================================
+    // FETCH USERS
     // =====================================================
 
     const [rows] = await db.query(
@@ -1080,16 +1193,11 @@ export const getDropdownUsers = async (req, res) => {
 
       FROM users
 
-      WHERE role_id = ?
-
-      AND parent_id = ?
+      ${whereClause}
 
       ORDER BY name ASC
       `,
-      [
-        requestedRoleId,
-        selectedParentId,
-      ]
+      queryParams
     );
 
     // =====================================================
@@ -1127,6 +1235,9 @@ export const getDropdownUsers = async (req, res) => {
 
       current_role_name:
         getRoleName(requestedRoleId),
+
+      search:
+        searchTerm,
 
       total:
         filteredRows.length,
