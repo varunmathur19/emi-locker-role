@@ -1269,24 +1269,24 @@ export const getDropdownUsers = async (req, res) => {
 // ROLE NAME
 // =====================================================
 
-const getRoleName = (roleId) => {
+// const getRoleName = (roleId) => {
 
-  const roles = {
-    1: "Admin",
-    2: "CNF",
-    3: "Super Distributor",
-    4: "Distributor",
-    5: "FOS",
-    6: "Retailer",
-    7: "Employee",
-    8: "Staff",
-  };
+//   const roles = {
+//     1: "Admin",
+//     2: "CNF",
+//     3: "Super Distributor",
+//     4: "Distributor",
+//     5: "FOS",
+//     6: "Retailer",
+//     7: "Employee",
+//     8: "Staff",
+//   };
 
-  return (
-    roles[roleId] ||
-    "User"
-  );
-};
+//   return (
+//     roles[roleId] ||
+//     "User"
+//   );
+// };
 
 
 export const updatedstaffdata = async (req, res) => {
@@ -1303,13 +1303,14 @@ export const updatedstaffdata = async (req, res) => {
       state,
       city,
 
-      parent_admin_id,
-      parent_cnf_id,
-      parent_super_distributor_id,
-      parent_distributor_id,
-      parent_fos_id,
-      parent_retailer_id,
+      // =========================================
+      // ONLY ONE PARENT ID
+      // =========================================
+      parent_id,
 
+      // =========================================
+      // DEVICE PERMISSIONS
+      // =========================================
       new_device,
       old_device,
       supreme_device,
@@ -1317,8 +1318,16 @@ export const updatedstaffdata = async (req, res) => {
       lite,
       google_tv,
       supreme_lock,
+
+      // =========================================
+      // PASSWORD
+      // =========================================
+      password,
     } = req.body;
 
+    // =========================================
+    // VALIDATE USER ID
+    // =========================================
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -1326,22 +1335,50 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Check user exists
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    // =========================================
+    // CHECK USER EXISTS
+    // =========================================
     const [existingUser] = await db.query(
-      "SELECT id FROM users WHERE id = ?",
-      [id]
+      `
+      SELECT id, role_id
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
     );
 
-    if (existingUser.length === 0) {
+    if (!existingUser || existingUser.length === 0) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    // Update according to ID
-    const [result] = await db.query(
-      `
+    // =========================================
+    // NORMALIZE PARENT ID
+    // =========================================
+    const normalizedParentId =
+      parent_id !== null &&
+      parent_id !== undefined &&
+      parent_id !== ""
+        ? Number(parent_id)
+        : null;
+
+    // =========================================
+    // BUILD UPDATE QUERY
+    // =========================================
+
+    let updateQuery = `
       UPDATE users
       SET
         organization_name = ?,
@@ -1352,13 +1389,7 @@ export const updatedstaffdata = async (req, res) => {
         country = ?,
         state = ?,
         city = ?,
-
-        parent_admin_id = ?,
-        parent_cnf_id = ?,
-        parent_super_distributor_id = ?,
-        parent_distributor_id = ?,
-        parent_fos_id = ?,
-        parent_retailer_id = ?,
+        parent_id = ?,
 
         new_device = ?,
         old_device = ?,
@@ -1367,38 +1398,64 @@ export const updatedstaffdata = async (req, res) => {
         lite = ?,
         google_tv = ?,
         supreme_lock = ?
+    `;
 
+    const updateValues = [
+      organization_name || "",
+      name || "",
+      email || "",
+      phone || "",
+      company_address || "",
+      country || "",
+      state || "",
+      city || "",
+
+      normalizedParentId,
+
+      Number(new_device ?? 0),
+      Number(old_device ?? 0),
+      Number(supreme_device ?? 0),
+      Number(pro_star ?? 0),
+      Number(lite ?? 0),
+      Number(google_tv ?? 0),
+      Number(supreme_lock ?? 0),
+    ];
+
+    // =========================================
+    // PASSWORD ONLY IF PROVIDED
+    // =========================================
+    if (
+      password !== undefined &&
+      password !== null &&
+      password !== ""
+    ) {
+      updateQuery += `
+        , password = ?
+      `;
+
+      updateValues.push(password);
+    }
+
+    // =========================================
+    // WHERE
+    // =========================================
+    updateQuery += `
       WHERE id = ?
-      `,
-      [
-        organization_name,
-        name,
-        email,
-        phone,
-        company_address,
-        country,
-        state,
-        city,
+    `;
 
-        parent_admin_id || null,
-        parent_cnf_id || null,
-        parent_super_distributor_id || null,
-        parent_distributor_id || null,
-        parent_fos_id || null,
-        parent_retailer_id || null,
+    updateValues.push(userId);
 
-        new_device ?? 0,
-        old_device ?? 0,
-        supreme_device ?? 0,
-        pro_star ?? 0,
-        lite ?? 0,
-        google_tv ?? 0,
-        supreme_lock ?? 0,
-
-        id,
-      ]
+    // =========================================
+    // UPDATE USER
+    // =========================================
+    const [result] = await db.query(
+      updateQuery,
+      updateValues
     );
 
+    // =========================================
+    // CHECK UPDATE
+    // =========================================
     if (result.affectedRows === 0) {
       return res.status(400).json({
         success: false,
@@ -1406,12 +1463,17 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Get updated user data
+    // =========================================
+    // GET UPDATED USER
+    // IMPORTANT:
+    // PASSWORD SELECT NAHI KARNA
+    // =========================================
     const [updatedUser] = await db.query(
       `
       SELECT
         id,
         organization_name,
+        role_id,
         name,
         email,
         phone,
@@ -1419,86 +1481,7 @@ export const updatedstaffdata = async (req, res) => {
         country,
         state,
         city,
-        role_id,
-
-        parent_admin_id,
-        parent_cnf_id,
-        parent_super_distributor_id,
-        parent_distributor_id,
-        parent_fos_id,
-        parent_retailer_id,
-
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock
-      FROM users
-      WHERE id = ?
-      `,
-      [id]
-    );
-
-    return res.status(200).json({
-      success: true,
-      message: "Staff data updated successfully",
-      data: updatedUser[0],
-    });
-  } catch (error) {
-    console.error("UPDATE STAFF ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to update staff data",
-      error: error.message,
-    });
-  }
-};
-
-export const getStaffDataById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const userId = Number(id);
-
-    if (!Number.isInteger(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        role_id,
-        name,
-        email,
-        phone,
-        password,
-        company_address,
-        country,
-        state,
-        city,
-
-        parent_admin_id,
-        parent_cnf_id,
-        parent_super_distributor_id,
-        parent_distributor_id,
-        parent_fos_id,
-        parent_retailer_id,
-        parent_staff_id,
+        parent_id,
 
         new_device,
         old_device,
@@ -1515,15 +1498,104 @@ export const getStaffDataById = async (req, res) => {
       [userId]
     );
 
-    if (!rows.length) {
+    // =========================================
+    // SUCCESS
+    // =========================================
+    return res.status(200).json({
+      success: true,
+      message: "Staff data updated successfully",
+      data: updatedUser[0],
+    });
+
+  } catch (error) {
+    console.error(
+      "UPDATE STAFF ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update staff data",
+      error: error.message,
+    });
+  }
+};
+
+export const getStaffDataById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // =========================================
+    // VALIDATE ID
+    // =========================================
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    // =========================================
+    // GET USER DATA
+    // IMPORTANT:
+    // password SELECT nahi kiya gaya
+    // =========================================
+    const [rows] = await db.query(
+      `
+      SELECT
+        id,
+        organization_name,
+        role_id,
+        name,
+        email,
+        phone,
+        company_address,
+        country,
+        state,
+        city,
+
+        parent_id,
+
+        new_device,
+        old_device,
+        supreme_device,
+        pro_star,
+        lite,
+        google_tv,
+        supreme_lock
+
+      FROM users
+      WHERE id = ?
+      LIMIT 1
+      `,
+      [userId]
+    );
+
+    // =========================================
+    // USER NOT FOUND
+    // =========================================
+    if (!rows || rows.length === 0) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
+    // =========================================
+    // SUCCESS RESPONSE
+    // =========================================
     return res.status(200).json({
       success: true,
+      message: "Staff data fetched successfully",
       data: rows[0],
     });
 
