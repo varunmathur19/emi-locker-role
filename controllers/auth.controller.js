@@ -14,14 +14,6 @@ import { ROLES } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
 
-
-
-
-
-
-
-
-
 export const createuserrole = async (req, res) => {
   try {
     // =====================================================
@@ -44,7 +36,10 @@ export const createuserrole = async (req, res) => {
       state,
       city,
 
+      // ===================================================
       // DEVICE PERMISSIONS
+      // ===================================================
+
       new_device,
       old_device,
       supreme_device,
@@ -58,14 +53,14 @@ export const createuserrole = async (req, res) => {
     // BASIC VALIDATION
     // =====================================================
 
-    if (!name || !name.trim()) {
+    if (!name || !String(name).trim()) {
       return res.status(400).json({
         success: false,
         message: "Name is required",
       });
     }
 
-    if (!email || !email.trim()) {
+    if (!email || !String(email).trim()) {
       return res.status(400).json({
         success: false,
         message: "Email is required",
@@ -90,8 +85,11 @@ export const createuserrole = async (req, res) => {
     // CLEAN DATA
     // =====================================================
 
-    const cleanName = name.trim();
-    const cleanEmail = email.trim().toLowerCase();
+    const cleanName =
+      String(name).trim();
+
+    const cleanEmail =
+      String(email).trim().toLowerCase();
 
     // =====================================================
     // PASSWORD MATCH
@@ -100,15 +98,23 @@ export const createuserrole = async (req, res) => {
     if (password !== confirm_password) {
       return res.status(400).json({
         success: false,
-        message: "Password and Confirm Password not match",
+        message:
+          "Password and Confirm Password not match",
       });
     }
 
     // =====================================================
-    // ROLE
+    // ROLE VALIDATION
     // =====================================================
 
     const role = Number(role_id);
+
+    if (!Number.isInteger(role)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role_id",
+      });
+    }
 
     if (!isValidRole(role)) {
       return res.status(400).json({
@@ -124,7 +130,8 @@ export const createuserrole = async (req, res) => {
     if (role === ROLES.MASTER_ADMIN) {
       return res.status(403).json({
         success: false,
-        message: "Master Admin cannot be created",
+        message:
+          "Master Admin cannot be created",
       });
     }
 
@@ -139,13 +146,25 @@ export const createuserrole = async (req, res) => {
       });
     }
 
-    const created_by = Number(req.user.id);
+    const created_by =
+      Number(req.user.id);
+
+    if (
+      !Number.isInteger(created_by) ||
+      created_by <= 0
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid logged-in user",
+      });
+    }
 
     // =====================================================
     // FIND CREATOR
     // =====================================================
 
-    const creator = await findUserById(created_by);
+    const creator =
+      await findUserById(created_by);
 
     if (!creator) {
       return res.status(404).json({
@@ -154,7 +173,8 @@ export const createuserrole = async (req, res) => {
       });
     }
 
-    const creatorRole = Number(creator.role_id);
+    const creatorRole =
+      Number(creator.role_id);
 
     // =====================================================
     // NORMALIZE PARENT ID
@@ -165,9 +185,10 @@ export const createuserrole = async (req, res) => {
     if (
       parent_id !== undefined &&
       parent_id !== null &&
-      parent_id !== ""
+      String(parent_id).trim() !== ""
     ) {
-      selectedParentId = Number(parent_id);
+      selectedParentId =
+        Number(parent_id);
 
       if (
         !Number.isInteger(selectedParentId) ||
@@ -184,24 +205,21 @@ export const createuserrole = async (req, res) => {
     // ALLOWED PARENT ROLES
     // =====================================================
     //
-    // Hierarchy:
-    //
     // Admin
-    //   ↓
+    //    ↓
     // CNF
-    //   ↓
+    //    ↓
     // Super Distributor
-    //   ↓
+    //    ↓
     // Distributor
-    //   ↓
+    //    ↓
     // FOS
-    //   ↓
+    //    ↓
     // Retailer
-    //   ↓
+    //    ↓
     // Sub Retailer
     //
-    // Employee can be created according to your
-    // existing permission rules.
+    // Employee can have the configured hierarchy parents.
     //
     // =====================================================
 
@@ -257,32 +275,87 @@ export const createuserrole = async (req, res) => {
     };
 
     // =====================================================
+    // PARENT DISABLED FIELD MAP
+    // =====================================================
+
+    const disabledFieldMap = {
+      [ROLES.ADMIN]:
+        "parent_admin_disabled",
+
+      [ROLES.CNF]:
+        "parent_cnf_disabled",
+
+      [ROLES.SUPER_DISTRIBUTOR]:
+        "parent_super_distributor_disabled",
+
+      [ROLES.DISTRIBUTOR]:
+        "parent_distributor_disabled",
+
+      [ROLES.FOS]:
+        "parent_fos_disabled",
+
+      [ROLES.RETAILER]:
+        "parent_retailer_disabled",
+
+      [ROLES.SUB_RETAILER]:
+        "parent_sub_retailer_disabled",
+
+      [ROLES.EMPLOYEE]:
+        "parent_employee_disabled",
+
+      [ROLES.STAFF]:
+        "parent_staff_disabled",
+    };
+
+    // =====================================================
     // STAFF
     // =====================================================
 
     if (role === ROLES.STAFF) {
+
+      // ---------------------------------------------------
+      // ONLY ADMIN CAN CREATE STAFF
+      // ---------------------------------------------------
+
       if (creatorRole !== ROLES.ADMIN) {
         return res.status(403).json({
           success: false,
-          message: "Only Admin can create Staff",
+          message:
+            "Only Admin can create Staff",
         });
       }
 
-      // Staff ka parent Admin hoga
+      // ---------------------------------------------------
+      // STAFF PARENT
+      // ---------------------------------------------------
+      //
+      // If Admin explicitly selects parent,
+      // parent must be Admin.
+      //
+      // Otherwise logged-in Admin becomes parent.
+      //
+      // ---------------------------------------------------
+
       if (selectedParentId !== null) {
+
         const selectedParent =
-          await findUserById(selectedParentId);
+          await findUserById(
+            selectedParentId
+          );
 
         if (!selectedParent) {
           return res.status(404).json({
             success: false,
-            message: "Selected parent user not found",
+            message:
+              "Selected parent user not found",
           });
         }
 
+        const parentRole =
+          Number(selectedParent.role_id);
+
         if (
-          Number(selectedParent.role_id) !==
-          ROLES.ADMIN
+          parentRole !== ROLES.ADMIN
         ) {
           return res.status(403).json({
             success: false,
@@ -290,9 +363,40 @@ export const createuserrole = async (req, res) => {
               "Staff parent must be an Admin",
           });
         }
+
+        // -------------------------------------------------
+        // CHECK ADMIN DISABLED STAFF
+        // -------------------------------------------------
+
+        const disabledField =
+          disabledFieldMap[
+            ROLES.STAFF
+          ];
+
+        if (
+          disabledField &&
+          Number(
+            selectedParent[
+              disabledField
+            ] ?? 0
+          ) === 1
+        ) {
+          return res.status(403).json({
+            success: false,
+            message:
+              `${getRoleName(parentRole)} has disabled ${getRoleName(role)}`,
+          });
+        }
+
       } else {
-        // Admin creates Staff directly
-        selectedParentId = created_by;
+
+        // -------------------------------------------------
+        // NO PARENT SELECTED
+        // LOGGED-IN ADMIN BECOMES PARENT
+        // -------------------------------------------------
+
+        selectedParentId =
+          created_by;
       }
     }
 
@@ -301,9 +405,10 @@ export const createuserrole = async (req, res) => {
     // =====================================================
 
     else {
-      // ---------------------------------------------------
+
+      // ===================================================
       // EMPLOYEE / STAFF CANNOT CREATE USERS
-      // ---------------------------------------------------
+      // ===================================================
 
       if (
         creatorRole === ROLES.EMPLOYEE ||
@@ -316,21 +421,21 @@ export const createuserrole = async (req, res) => {
         });
       }
 
-      // ---------------------------------------------------
-      // MASTER ADMIN
-      // ---------------------------------------------------
+      // ===================================================
+      // CREATOR ROLE PERMISSION
+      // ===================================================
+      //
+      // Master Admin:
+      // Can create any valid role.
+      //
+      // Other users:
+      // Cannot create same or higher role.
+      //
+      // ===================================================
 
-      if (creatorRole === ROLES.MASTER_ADMIN) {
-        // Master Admin can create any valid role.
-      }
-
-      // ---------------------------------------------------
-      // NORMAL CREATOR
-      // ---------------------------------------------------
-
-      else {
-        // Creator cannot create same or higher role
-        // according to your existing permission rule.
+      if (
+        creatorRole !== ROLES.MASTER_ADMIN
+      ) {
 
         if (role <= creatorRole) {
           return res.status(403).json({
@@ -346,8 +451,11 @@ export const createuserrole = async (req, res) => {
       // ===================================================
 
       if (selectedParentId !== null) {
+
         const selectedParent =
-          await findUserById(selectedParentId);
+          await findUserById(
+            selectedParentId
+          );
 
         // -------------------------------------------------
         // PARENT NOT FOUND
@@ -356,7 +464,8 @@ export const createuserrole = async (req, res) => {
         if (!selectedParent) {
           return res.status(404).json({
             success: false,
-            message: "Selected parent user not found",
+            message:
+              "Selected parent user not found",
           });
         }
 
@@ -364,28 +473,25 @@ export const createuserrole = async (req, res) => {
           Number(selectedParent.role_id);
 
         // -------------------------------------------------
-        // PARENT CANNOT BE SAME USER
+        // IMPORTANT:
+        // DO NOT CHECK:
+        //
+        // selectedParentId === created_by
+        //
+        // Creator itself can be the parent.
         // -------------------------------------------------
 
-        if (
-          selectedParentId === created_by
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "User cannot be their own parent",
-          });
-        }
-
-        // -------------------------------------------------
+        // =================================================
         // CHECK ALLOWED PARENT ROLE
-        // -------------------------------------------------
+        // =================================================
 
         const allowedParents =
           allowedParentRoles[role] || [];
 
         if (
-          !allowedParents.includes(parentRole)
+          !allowedParents.includes(
+            parentRole
+          )
         ) {
           return res.status(403).json({
             success: false,
@@ -394,38 +500,9 @@ export const createuserrole = async (req, res) => {
           });
         }
 
-        // -------------------------------------------------
+        // =================================================
         // CHECK PARENT DISABLED THIS ROLE
-        // -------------------------------------------------
-
-        const disabledFieldMap = {
-          [ROLES.ADMIN]:
-            "parent_admin_disabled",
-
-          [ROLES.CNF]:
-            "parent_cnf_disabled",
-
-          [ROLES.SUPER_DISTRIBUTOR]:
-            "parent_super_distributor_disabled",
-
-          [ROLES.DISTRIBUTOR]:
-            "parent_distributor_disabled",
-
-          [ROLES.FOS]:
-            "parent_fos_disabled",
-
-          [ROLES.RETAILER]:
-            "parent_retailer_disabled",
-
-          [ROLES.SUB_RETAILER]:
-            "parent_sub_retailer_disabled",
-
-          [ROLES.EMPLOYEE]:
-            "parent_employee_disabled",
-
-          [ROLES.STAFF]:
-            "parent_staff_disabled",
-        };
+        // =================================================
 
         const disabledField =
           disabledFieldMap[role];
@@ -433,7 +510,9 @@ export const createuserrole = async (req, res) => {
         if (
           disabledField &&
           Number(
-            selectedParent[disabledField] ?? 0
+            selectedParent[
+              disabledField
+            ] ?? 0
           ) === 1
         ) {
           return res.status(403).json({
@@ -445,14 +524,14 @@ export const createuserrole = async (req, res) => {
       }
 
       // ===================================================
-      // IF PARENT NOT SELECTED
+      // PARENT NOT SELECTED
       // ===================================================
       //
-      // Agar Master Admin create kar raha hai,
-      // selected parent optional rakha ja sakta hai.
+      // Master Admin:
+      // parent can remain NULL.
       //
-      // Baaki users ke liye creator ko parent bana do
-      // ONLY when selected hierarchy parent nahi diya gaya.
+      // Other creators:
+      // creator automatically becomes parent.
       //
       // ===================================================
 
@@ -460,7 +539,8 @@ export const createuserrole = async (req, res) => {
         selectedParentId === null &&
         creatorRole !== ROLES.MASTER_ADMIN
       ) {
-        selectedParentId = created_by;
+        selectedParentId =
+          created_by;
       }
     }
 
@@ -469,17 +549,20 @@ export const createuserrole = async (req, res) => {
     // =====================================================
 
     const existingUser =
-      await findUserByEmail(cleanEmail);
+      await findUserByEmail(
+        cleanEmail
+      );
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: "Email already exists",
+        message:
+          "Email already exists",
       });
     }
 
     // =====================================================
-    // DEVICE PERMISSIONS
+    // DEVICE PERMISSIONS DEFAULT
     // =====================================================
 
     let retailerDevices = {
@@ -497,6 +580,7 @@ export const createuserrole = async (req, res) => {
     // =====================================================
 
     if (role === ROLES.RETAILER) {
+
       const deviceFields = {
         new_device,
         old_device,
@@ -507,10 +591,14 @@ export const createuserrole = async (req, res) => {
         supreme_lock,
       };
 
-      for (const [
-        field,
-        value,
-      ] of Object.entries(deviceFields)) {
+      for (
+        const [field, value]
+        of Object.entries(deviceFields)
+      ) {
+
+        // -----------------------------------------------
+        // Missing value = 0
+        // -----------------------------------------------
 
         if (
           value === undefined ||
@@ -524,7 +612,15 @@ export const createuserrole = async (req, res) => {
         const numericValue =
           Number(value);
 
-        if (![0, 1].includes(numericValue)) {
+        // -----------------------------------------------
+        // Only 0 / 1 allowed
+        // -----------------------------------------------
+
+        if (
+          ![0, 1].includes(
+            numericValue
+          )
+        ) {
           return res.status(400).json({
             success: false,
             message:
@@ -542,7 +638,10 @@ export const createuserrole = async (req, res) => {
     // =====================================================
 
     const hashPassword =
-      await bcrypt.hash(password, 10);
+      await bcrypt.hash(
+        password,
+        10
+      );
 
     // =====================================================
     // CREATE USER
@@ -557,13 +656,16 @@ export const createuserrole = async (req, res) => {
 
         organization_name,
 
-        name: cleanName,
+        name:
+          cleanName,
 
-        email: cleanEmail,
+        email:
+          cleanEmail,
 
         phone,
 
-        password: hashPassword,
+        password:
+          hashPassword,
 
         company_address,
 
@@ -577,7 +679,8 @@ export const createuserrole = async (req, res) => {
         // ROLE
         // =================================================
 
-        role_id: role,
+        role_id:
+          role,
 
         // =================================================
         // CREATOR
@@ -589,7 +692,8 @@ export const createuserrole = async (req, res) => {
         // HIERARCHY PARENT
         // =================================================
 
-        parent_id: selectedParentId,
+        parent_id:
+          selectedParentId,
 
         // =================================================
         // DEVICE PERMISSIONS
@@ -633,17 +737,21 @@ export const createuserrole = async (req, res) => {
         // USER
         // =================================================
 
-        id: userId,
+        id:
+          userId,
 
         organization_name,
 
-        name: cleanName,
+        name:
+          cleanName,
 
-        email: cleanEmail,
+        email:
+          cleanEmail,
 
         phone,
 
-        role_id: role,
+        role_id:
+          role,
 
         company_address,
 
@@ -694,6 +802,11 @@ export const createuserrole = async (req, res) => {
     });
 
   } catch (error) {
+
+    // =====================================================
+    // ERROR
+    // =====================================================
+
     console.error(
       "Create User Error:",
       error
@@ -701,7 +814,9 @@ export const createuserrole = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message:
+        error.message ||
+        "Internal server error",
     });
   }
 };

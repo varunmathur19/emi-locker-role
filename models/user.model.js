@@ -247,62 +247,89 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
     // GET USERS
     // =====================================================
 
-   const sql = `
-  SELECT
-    u.id,
-    u.organization_name,
-    u.name,
-    u.email,
-    u.phone,
-    u.company_address,
-    u.country,
-    u.state,
-    u.city,
-    u.role_id,
-    u.created_by,
-    u.parent_id,
+    const sql = `
+      SELECT
+        u.id,
+        u.organization_name,
+        u.name,
+        u.email,
+        u.phone,
+        u.company_address,
+        u.country,
+        u.state,
+        u.city,
+        u.role_id,
+        u.created_by,
+        u.parent_id,
 
-    -- ================================================
-    -- USER STATUS
-    -- 1 = ACTIVE
-    -- 0 = INACTIVE
-    -- ================================================
+        -- ================================================
+        -- USER STATUS
+        -- 1 = ACTIVE
+        -- 0 = INACTIVE
+        -- ================================================
 
-    u.userStatus,
+        u.userStatus,
 
-    -- ================================================
-    -- PARENT DETAILS
-    -- ================================================
+        -- ================================================
+        -- PARENT DETAILS
+        -- ================================================
+        -- Admin:
+        -- created_by user ko parent maana jayega
+        --
+        -- Baaki roles:
+        -- parent_id wala user parent hoga
+        -- ================================================
 
-    p.name AS parent_name,
-    p.organization_name AS parent_organization_name,
+        CASE
+          WHEN u.role_id = 1
+            THEN creator.name
+          ELSE parent.name
+        END AS parent_name,
 
-    -- ================================================
-    -- DEVICE PERMISSIONS
-    -- ================================================
+        CASE
+          WHEN u.role_id = 1
+            THEN creator.organization_name
+          ELSE parent.organization_name
+        END AS parent_organization_name,
 
-    u.new_device,
-    u.old_device,
-    u.supreme_device,
-    u.pro_star,
-    u.lite,
-    u.google_tv,
-    u.supreme_lock,
+        -- ================================================
+        -- DEVICE PERMISSIONS
+        -- ================================================
 
-    u.created_at,
-    u.updated_at
+        u.new_device,
+        u.old_device,
+        u.supreme_device,
+        u.pro_star,
+        u.lite,
+        u.google_tv,
+        u.supreme_lock,
 
-  FROM users u
+        u.created_at,
+        u.updated_at
 
-  LEFT JOIN users p
-    ON p.id = u.parent_id
+      FROM users u
 
-  ${whereCondition}
+      -- ================================================
+      -- NORMAL PARENT
+      -- ================================================
 
-  ORDER BY u.id DESC
+      LEFT JOIN users parent
+        ON parent.id = u.parent_id
 
-  LIMIT ? OFFSET ?
-`;
+      -- ================================================
+      -- CREATED BY USER
+      -- Admin ke liye ye parent hoga
+      -- ================================================
+
+      LEFT JOIN users creator
+        ON creator.id = u.created_by
+
+      ${whereCondition}
+
+      ORDER BY u.id DESC
+
+      LIMIT ? OFFSET ?
+    `;
 
     queryParams.push(Number(limit));
     queryParams.push(Number(offset));
@@ -329,12 +356,19 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
         : []
     );
 
+    // =====================================================
+    // RETURN
+    // =====================================================
+
     return {
       users,
-      total: Number(countResult[0].total),
+      total: Number(
+        countResult[0].total
+      ),
     };
 
   } catch (error) {
+
     console.error(
       "Get All Users Model Error:",
       error
