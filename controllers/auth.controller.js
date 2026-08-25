@@ -31,11 +31,14 @@ export const createuserrole = async (req, res) => {
     const {
       organization_name,
       role_id,
+      parent_id,
+
       name,
       email,
       phone,
       password,
       confirm_password,
+
       company_address,
       country,
       state,
@@ -154,49 +157,109 @@ export const createuserrole = async (req, res) => {
     const creatorRole = Number(creator.role_id);
 
     // =====================================================
-    // ROLE CREATION PERMISSION
+    // NORMALIZE PARENT ID
+    // =====================================================
+
+    let selectedParentId = null;
+
+    if (
+      parent_id !== undefined &&
+      parent_id !== null &&
+      parent_id !== ""
+    ) {
+      selectedParentId = Number(parent_id);
+
+      if (
+        !Number.isInteger(selectedParentId) ||
+        selectedParentId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid parent_id",
+        });
+      }
+    }
+
+    // =====================================================
+    // ALLOWED PARENT ROLES
     // =====================================================
     //
-    // Higher role can create ANY lower role.
+    // Hierarchy:
     //
-    // Example:
+    // Admin
+    //   ↓
+    // CNF
+    //   ↓
+    // Super Distributor
+    //   ↓
+    // Distributor
+    //   ↓
+    // FOS
+    //   ↓
+    // Retailer
+    //   ↓
+    // Sub Retailer
     //
-    // Admin 1
-    //   -> CNF 2
-    //   -> Super Distributor 3
-    //   -> Distributor 4
-    //   -> FOS 5
-    //   -> Retailer 6
-    //   -> Sub Retailer 7
-    //   -> Employee 8
-    //   -> Staff 9 ONLY
-    //
-    // CNF 2
-    //   -> Super Distributor 3
-    //   -> Distributor 4
-    //   -> FOS 5
-    //   -> Retailer 6
-    //   -> Sub Retailer 7
-    //   -> Employee 8
-    //
-    // Distributor 4
-    //   -> FOS 5
-    //   -> Retailer 6
-    //   -> Sub Retailer 7
-    //   -> Employee 8
-    //
-    // Retailer 6
-    //   -> Sub Retailer 7
-    //   -> Employee 8
+    // Employee can be created according to your
+    // existing permission rules.
     //
     // =====================================================
 
-    // -----------------------------------------------------
+    const allowedParentRoles = {
+      [ROLES.CNF]: [
+        ROLES.ADMIN,
+      ],
+
+      [ROLES.SUPER_DISTRIBUTOR]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+      ],
+
+      [ROLES.DISTRIBUTOR]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+        ROLES.SUPER_DISTRIBUTOR,
+      ],
+
+      [ROLES.FOS]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+        ROLES.SUPER_DISTRIBUTOR,
+        ROLES.DISTRIBUTOR,
+      ],
+
+      [ROLES.RETAILER]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+        ROLES.SUPER_DISTRIBUTOR,
+        ROLES.DISTRIBUTOR,
+        ROLES.FOS,
+      ],
+
+      [ROLES.SUB_RETAILER]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+        ROLES.SUPER_DISTRIBUTOR,
+        ROLES.DISTRIBUTOR,
+        ROLES.FOS,
+        ROLES.RETAILER,
+      ],
+
+      [ROLES.EMPLOYEE]: [
+        ROLES.ADMIN,
+        ROLES.CNF,
+        ROLES.SUPER_DISTRIBUTOR,
+        ROLES.DISTRIBUTOR,
+        ROLES.FOS,
+        ROLES.RETAILER,
+        ROLES.SUB_RETAILER,
+      ],
+    };
+
+    // =====================================================
     // STAFF
-    // -----------------------------------------------------
-    //
-    // Staff sirf Admin create kar sakta hai.
-    //
+    // =====================================================
+
     if (role === ROLES.STAFF) {
       if (creatorRole !== ROLES.ADMIN) {
         return res.status(403).json({
@@ -204,35 +267,200 @@ export const createuserrole = async (req, res) => {
           message: "Only Admin can create Staff",
         });
       }
+
+      // Staff ka parent Admin hoga
+      if (selectedParentId !== null) {
+        const selectedParent =
+          await findUserById(selectedParentId);
+
+        if (!selectedParent) {
+          return res.status(404).json({
+            success: false,
+            message: "Selected parent user not found",
+          });
+        }
+
+        if (
+          Number(selectedParent.role_id) !==
+          ROLES.ADMIN
+        ) {
+          return res.status(403).json({
+            success: false,
+            message:
+              "Staff parent must be an Admin",
+          });
+        }
+      } else {
+        // Admin creates Staff directly
+        selectedParentId = created_by;
+      }
     }
 
-    // -----------------------------------------------------
+    // =====================================================
     // NORMAL ROLES
-    // -----------------------------------------------------
+    // =====================================================
+
     else {
-      // Employee aur Staff se koi normal role create nahi hoga
+      // ---------------------------------------------------
+      // EMPLOYEE / STAFF CANNOT CREATE USERS
+      // ---------------------------------------------------
+
       if (
         creatorRole === ROLES.EMPLOYEE ||
         creatorRole === ROLES.STAFF
       ) {
         return res.status(403).json({
           success: false,
-          message: "You do not have permission to create users",
-        });
-      }
-
-      // Master Admin can create any normal role
-      if (creatorRole === ROLES.MASTER_ADMIN) {
-        // Allowed
-      }
-
-      // Higher role can create any lower role
-      else if (role <= creatorRole) {
-        return res.status(403).json({
-          success: false,
           message:
-            `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
+            "You do not have permission to create users",
         });
+      }
+
+      // ---------------------------------------------------
+      // MASTER ADMIN
+      // ---------------------------------------------------
+
+      if (creatorRole === ROLES.MASTER_ADMIN) {
+        // Master Admin can create any valid role.
+      }
+
+      // ---------------------------------------------------
+      // NORMAL CREATOR
+      // ---------------------------------------------------
+
+      else {
+        // Creator cannot create same or higher role
+        // according to your existing permission rule.
+
+        if (role <= creatorRole) {
+          return res.status(403).json({
+            success: false,
+            message:
+              `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
+          });
+        }
+      }
+
+      // ===================================================
+      // SELECTED PARENT VALIDATION
+      // ===================================================
+
+      if (selectedParentId !== null) {
+        const selectedParent =
+          await findUserById(selectedParentId);
+
+        // -------------------------------------------------
+        // PARENT NOT FOUND
+        // -------------------------------------------------
+
+        if (!selectedParent) {
+          return res.status(404).json({
+            success: false,
+            message: "Selected parent user not found",
+          });
+        }
+
+        const parentRole =
+          Number(selectedParent.role_id);
+
+        // -------------------------------------------------
+        // PARENT CANNOT BE SAME USER
+        // -------------------------------------------------
+
+        if (
+          selectedParentId === created_by
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "User cannot be their own parent",
+          });
+        }
+
+        // -------------------------------------------------
+        // CHECK ALLOWED PARENT ROLE
+        // -------------------------------------------------
+
+        const allowedParents =
+          allowedParentRoles[role] || [];
+
+        if (
+          !allowedParents.includes(parentRole)
+        ) {
+          return res.status(403).json({
+            success: false,
+            message:
+              `${getRoleName(parentRole)} cannot be parent of ${getRoleName(role)}`,
+          });
+        }
+
+        // -------------------------------------------------
+        // CHECK PARENT DISABLED THIS ROLE
+        // -------------------------------------------------
+
+        const disabledFieldMap = {
+          [ROLES.ADMIN]:
+            "parent_admin_disabled",
+
+          [ROLES.CNF]:
+            "parent_cnf_disabled",
+
+          [ROLES.SUPER_DISTRIBUTOR]:
+            "parent_super_distributor_disabled",
+
+          [ROLES.DISTRIBUTOR]:
+            "parent_distributor_disabled",
+
+          [ROLES.FOS]:
+            "parent_fos_disabled",
+
+          [ROLES.RETAILER]:
+            "parent_retailer_disabled",
+
+          [ROLES.SUB_RETAILER]:
+            "parent_sub_retailer_disabled",
+
+          [ROLES.EMPLOYEE]:
+            "parent_employee_disabled",
+
+          [ROLES.STAFF]:
+            "parent_staff_disabled",
+        };
+
+        const disabledField =
+          disabledFieldMap[role];
+
+        if (
+          disabledField &&
+          Number(
+            selectedParent[disabledField] ?? 0
+          ) === 1
+        ) {
+          return res.status(403).json({
+            success: false,
+            message:
+              `${getRoleName(parentRole)} has disabled ${getRoleName(role)}`,
+          });
+        }
+      }
+
+      // ===================================================
+      // IF PARENT NOT SELECTED
+      // ===================================================
+      //
+      // Agar Master Admin create kar raha hai,
+      // selected parent optional rakha ja sakta hai.
+      //
+      // Baaki users ke liye creator ko parent bana do
+      // ONLY when selected hierarchy parent nahi diya gaya.
+      //
+      // ===================================================
+
+      if (
+        selectedParentId === null &&
+        creatorRole !== ROLES.MASTER_ADMIN
+      ) {
+        selectedParentId = created_by;
       }
     }
 
@@ -240,7 +468,8 @@ export const createuserrole = async (req, res) => {
     // EMAIL CHECK
     // =====================================================
 
-    const existingUser = await findUserByEmail(cleanEmail);
+    const existingUser =
+      await findUserByEmail(cleanEmail);
 
     if (existingUser) {
       return res.status(400).json({
@@ -251,18 +480,6 @@ export const createuserrole = async (req, res) => {
 
     // =====================================================
     // DEVICE PERMISSIONS
-    // =====================================================
-    //
-    // IMPORTANT:
-    //
-    // Device permissions ONLY Retailer ke liye hain.
-    //
-    // Retailer:
-    // role_id = 6
-    //
-    // Baaki roles:
-    // device values automatically 0 save hongi.
-    //
     // =====================================================
 
     let retailerDevices = {
@@ -290,9 +507,10 @@ export const createuserrole = async (req, res) => {
         supreme_lock,
       };
 
-      for (const [field, value] of Object.entries(deviceFields)) {
-        // Agar value nahi bheji gayi
-        // toh 0 save hoga
+      for (const [
+        field,
+        value,
+      ] of Object.entries(deviceFields)) {
 
         if (
           value === undefined ||
@@ -303,17 +521,19 @@ export const createuserrole = async (req, res) => {
           continue;
         }
 
-        const numericValue = Number(value);
+        const numericValue =
+          Number(value);
 
-        // Only 0 or 1
         if (![0, 1].includes(numericValue)) {
           return res.status(400).json({
             success: false,
-            message: `${field} must be either 0 or 1`,
+            message:
+              `${field} must be either 0 or 1`,
           });
         }
 
-        retailerDevices[field] = numericValue;
+        retailerDevices[field] =
+          numericValue;
       }
     }
 
@@ -321,83 +541,81 @@ export const createuserrole = async (req, res) => {
     // HASH PASSWORD
     // =====================================================
 
-    const hashPassword = await bcrypt.hash(password, 10);
-
-    // =====================================================
-    // PARENT ID
-    // =====================================================
-
-    // Jis user ne create kiya
-    // uski ID parent_id hogi.
-
-    const parent_id = created_by;
+    const hashPassword =
+      await bcrypt.hash(password, 10);
 
     // =====================================================
     // CREATE USER
     // =====================================================
 
-    const userId = await createUserModel({
-      // ===================================================
-      // BASIC DETAILS
-      // ===================================================
+    const userId =
+      await createUserModel({
 
-      organization_name,
+        // =================================================
+        // BASIC DETAILS
+        // =================================================
 
-      name: cleanName,
+        organization_name,
 
-      email: cleanEmail,
+        name: cleanName,
 
-      phone,
+        email: cleanEmail,
 
-      password: hashPassword,
+        phone,
 
-      company_address,
+        password: hashPassword,
 
-      country,
+        company_address,
 
-      state,
+        country,
 
-      city,
+        state,
 
-      // ===================================================
-      // ROLE
-      // ===================================================
+        city,
 
-      role_id: role,
+        // =================================================
+        // ROLE
+        // =================================================
 
-      // ===================================================
-      // CREATOR
-      // ===================================================
+        role_id: role,
 
-      created_by,
+        // =================================================
+        // CREATOR
+        // =================================================
 
-      // ===================================================
-      // PARENT
-      // ===================================================
+        created_by,
 
-      parent_id,
+        // =================================================
+        // HIERARCHY PARENT
+        // =================================================
 
-      // ===================================================
-      // DEVICE PERMISSIONS
-      //
-      // Sirf Retailer ke liye actual values.
-      // Baaki sab ke liye 0.
-      // ===================================================
+        parent_id: selectedParentId,
 
-      new_device: retailerDevices.new_device,
+        // =================================================
+        // DEVICE PERMISSIONS
+        // =================================================
 
-      old_device: retailerDevices.old_device,
+        new_device:
+          retailerDevices.new_device,
 
-      supreme_device: retailerDevices.supreme_device,
+        old_device:
+          retailerDevices.old_device,
 
-      pro_star: retailerDevices.pro_star,
+        supreme_device:
+          retailerDevices.supreme_device,
 
-      lite: retailerDevices.lite,
+        pro_star:
+          retailerDevices.pro_star,
 
-      google_tv: retailerDevices.google_tv,
+        lite:
+          retailerDevices.lite,
 
-      supreme_lock: retailerDevices.supreme_lock,
-    });
+        google_tv:
+          retailerDevices.google_tv,
+
+        supreme_lock:
+          retailerDevices.supreme_lock,
+      });
 
     // =====================================================
     // SUCCESS RESPONSE
@@ -406,9 +624,11 @@ export const createuserrole = async (req, res) => {
     return res.status(201).json({
       success: true,
 
-      message: "User Registered Successfully",
+      message:
+        "User Registered Successfully",
 
       data: {
+
         // =================================================
         // USER
         // =================================================
@@ -443,30 +663,41 @@ export const createuserrole = async (req, res) => {
         // PARENT
         // =================================================
 
-        parent_id,
+        parent_id:
+          selectedParentId,
 
         // =================================================
         // DEVICE PERMISSIONS
         // =================================================
 
-        new_device: retailerDevices.new_device,
+        new_device:
+          retailerDevices.new_device,
 
-        old_device: retailerDevices.old_device,
+        old_device:
+          retailerDevices.old_device,
 
-        supreme_device: retailerDevices.supreme_device,
+        supreme_device:
+          retailerDevices.supreme_device,
 
-        pro_star: retailerDevices.pro_star,
+        pro_star:
+          retailerDevices.pro_star,
 
-        lite: retailerDevices.lite,
+        lite:
+          retailerDevices.lite,
 
-        google_tv: retailerDevices.google_tv,
+        google_tv:
+          retailerDevices.google_tv,
 
-        supreme_lock: retailerDevices.supreme_lock,
+        supreme_lock:
+          retailerDevices.supreme_lock,
       },
     });
 
   } catch (error) {
-    console.error("Create User Error:", error);
+    console.error(
+      "Create User Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
