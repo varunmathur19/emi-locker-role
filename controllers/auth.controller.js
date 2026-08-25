@@ -1891,9 +1891,7 @@ export const getStaffDataById = async (req, res) => {
     }
 
     // =========================================
-    // GET USER DATA
-    // IMPORTANT:
-    // password SELECT nahi kiya gaya
+    // GET CURRENT USER
     // =========================================
     const [rows] = await db.query(
       `
@@ -1936,13 +1934,103 @@ export const getStaffDataById = async (req, res) => {
       });
     }
 
+    const user = rows[0];
+
+    // =========================================
+    // GET PARENT CHAIN
+    // =========================================
+    const parentChain = [];
+
+    let currentParentId = user.parent_id;
+
+    // Safety limit - infinite loop se bachne ke liye
+    let level = 0;
+    const MAX_LEVEL = 20;
+
+    while (
+      currentParentId !== null &&
+      currentParentId !== undefined &&
+      Number(currentParentId) > 0 &&
+      level < MAX_LEVEL
+    ) {
+      const [parentRows] = await db.query(
+        `
+        SELECT
+          id,
+          organization_name,
+          role_id,
+          name,
+          email,
+          phone,
+          parent_id,
+          company_address,
+          country,
+          state,
+          city
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [Number(currentParentId)]
+      );
+
+      // Parent nahi mila
+      if (!parentRows || parentRows.length === 0) {
+        break;
+      }
+
+      const parent = parentRows[0];
+
+      // =========================================
+      // ADD PARENT TO CHAIN
+      // =========================================
+      parentChain.push({
+        id: parent.id,
+        organization_name: parent.organization_name,
+        role_id: parent.role_id,
+        name: parent.name,
+        email: parent.email,
+        phone: parent.phone,
+        parent_id: parent.parent_id,
+        company_address: parent.company_address,
+        country: parent.country,
+        state: parent.state,
+        city: parent.city,
+      });
+
+      // =========================================
+      // MOVE TO NEXT PARENT
+      // =========================================
+      currentParentId = parent.parent_id;
+
+      level++;
+    }
+
+    // =========================================
+    // OPTIONAL:
+    // HIGHEST PARENT FIRST
+    // =========================================
+    parentChain.reverse();
+
     // =========================================
     // SUCCESS RESPONSE
     // =========================================
     return res.status(200).json({
       success: true,
       message: "Staff data fetched successfully",
-      data: rows[0],
+
+      data: {
+        ...user,
+
+        // Direct parent
+        direct_parent:
+          parentChain.length > 0
+            ? parentChain[parentChain.length - 1]
+            : null,
+
+        // Complete hierarchy
+        parent_chain: parentChain,
+      },
     });
 
   } catch (error) {
