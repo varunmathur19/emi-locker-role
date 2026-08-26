@@ -201,27 +201,6 @@ export const createuserrole = async (req, res) => {
       }
     }
 
-    // =====================================================
-    // ALLOWED PARENT ROLES
-    // =====================================================
-    //
-    // Admin
-    //    ↓
-    // CNF
-    //    ↓
-    // Super Distributor
-    //    ↓
-    // Distributor
-    //    ↓
-    // FOS
-    //    ↓
-    // Retailer
-    //    ↓
-    // Sub Retailer
-    //
-    // Employee can have the configured hierarchy parents.
-    //
-    // =====================================================
 
     const allowedParentRoles = {
       [ROLES.CNF]: [
@@ -1164,15 +1143,7 @@ export const getUsers = async (req, res) => {
 // =========================
 export const getDropdownUsers = async (req, res) => {
   try {
-    const {
-      role_id,
-      parent_id,
-      search,
-    } = req.query;
-
-    // =====================================================
-    // VALIDATE ROLE ID
-    // =====================================================
+    const { role_id, parent_id, search } = req.query;
 
     if (
       role_id === undefined ||
@@ -1188,8 +1159,8 @@ export const getDropdownUsers = async (req, res) => {
     const requestedRoleId = Number(role_id);
 
     if (
-      Number.isNaN(requestedRoleId) ||
-      !Number.isInteger(requestedRoleId)
+      !Number.isInteger(requestedRoleId) ||
+      requestedRoleId < 1
     ) {
       return res.status(400).json({
         success: false,
@@ -1197,21 +1168,7 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // SUPPORTED ROLES
-    // =====================================================
-
-    const validRoles = [
-      1, // Admin
-      2, // CNF
-      3, // Super Distributor
-      4, // Distributor
-      5, // FOS
-      6, // Retailer
-      7, // Sub Retailer
-      8, // Employee
-      9, // Staff
-    ];
+    const validRoles = [1, 2, 3, 4, 5, 6, 7, 8, 9];
 
     if (!validRoles.includes(requestedRoleId)) {
       return res.status(400).json({
@@ -1219,29 +1176,6 @@ export const getDropdownUsers = async (req, res) => {
         message: "Invalid or unsupported role_id",
       });
     }
-
-    // =====================================================
-    // DISABLED FIELD MAP
-    // =====================================================
-
-    const disabledFieldMap = {
-      1: "parent_admin_disabled",
-      2: "parent_cnf_disabled",
-      3: "parent_super_distributor_disabled",
-      4: "parent_distributor_disabled",
-      5: "parent_fos_disabled",
-      6: "parent_retailer_disabled",
-      7: "parent_sub_retailer_disabled",
-      8: "parent_employee_disabled",
-      9: "parent_staff_disabled",
-    };
-
-    const disabledField =
-      disabledFieldMap[requestedRoleId];
-
-    // =====================================================
-    // VALIDATE PARENT ID
-    // =====================================================
 
     let selectedParentId = null;
 
@@ -1253,7 +1187,6 @@ export const getDropdownUsers = async (req, res) => {
       selectedParentId = Number(parent_id);
 
       if (
-        Number.isNaN(selectedParentId) ||
         !Number.isInteger(selectedParentId) ||
         selectedParentId <= 0
       ) {
@@ -1264,42 +1197,17 @@ export const getDropdownUsers = async (req, res) => {
       }
     }
 
-    // =====================================================
-    // SEARCH
-    // =====================================================
-
     const searchTerm =
       typeof search === "string"
         ? search.trim()
         : "";
-
-    // =====================================================
-    // CASE 1
-    // NO PARENT SELECTED
-    //
-    // Example:
-    // role_id=2
-    //
-    // Returns all CNF users.
-    //
-    // With search:
-    // role_id=2&search=rahul
-    //
-    // Returns only matching CNF users.
-    // =====================================================
 
     if (selectedParentId === null) {
       let whereClause = `
         WHERE role_id = ?
       `;
 
-      const queryParams = [
-        requestedRoleId,
-      ];
-
-      // ===================================================
-      // ADD SEARCH CONDITION
-      // ===================================================
+      const queryParams = [requestedRoleId];
 
       if (searchTerm) {
         whereClause += `
@@ -1307,139 +1215,63 @@ export const getDropdownUsers = async (req, res) => {
             name LIKE ?
             OR email LIKE ?
             OR phone LIKE ?
-            OR organization_name LIKE ?
           )
         `;
 
-        const searchValue =
-          `%${searchTerm}%`;
+        const searchValue = `%${searchTerm}%`;
 
         queryParams.push(
-          searchValue,
           searchValue,
           searchValue,
           searchValue
         );
       }
 
-      // ===================================================
-      // FETCH USERS
-      // ===================================================
-
       const [rows] = await db.query(
         `
         SELECT
           id,
-          organization_name,
           name,
           email,
           phone,
           role_id,
           parent_id,
-          created_by,
-
-          parent_admin_disabled,
-          parent_cnf_disabled,
-          parent_super_distributor_disabled,
-          parent_distributor_disabled,
-          parent_fos_disabled,
-          parent_retailer_disabled,
-          parent_sub_retailer_disabled,
-          parent_employee_disabled,
-          parent_staff_disabled
-
+          created_by
         FROM users
-
         ${whereClause}
-
         ORDER BY name ASC
         `,
         queryParams
       );
 
-      // ===================================================
-      // REMOVE DISABLED USERS
-      // ===================================================
-
-      const filteredRows = rows.filter((user) => {
-        if (!disabledField) {
-          return true;
-        }
-
-        return Number(
-          user[disabledField] ?? 0
-        ) !== 1;
-      });
-
-      // ===================================================
-      // RESPONSE
-      // ===================================================
-
       return res.status(200).json({
         success: true,
-
-        create_role_id:
-          requestedRoleId,
-
-        parent_id:
-          null,
-
-        current_role_id:
-          requestedRoleId,
-
-        current_role_name:
-          getRoleName(requestedRoleId),
-
-        search:
-          searchTerm,
-
-        total:
-          filteredRows.length,
-
-        data:
-          filteredRows,
+        create_role_id: requestedRoleId,
+        parent_id: null,
+        current_role_id: requestedRoleId,
+        current_role_name: getRoleName(requestedRoleId),
+        search: searchTerm,
+        total: rows.length,
+        data: rows,
       });
     }
-
-    // =====================================================
-    // CASE 2
-    // PARENT SELECTED
-    // =====================================================
 
     const [parentRows] = await db.query(
       `
       SELECT
         id,
-        organization_name,
         name,
         email,
         phone,
         role_id,
         parent_id,
-        created_by,
-
-        parent_admin_disabled,
-        parent_cnf_disabled,
-        parent_super_distributor_disabled,
-        parent_distributor_disabled,
-        parent_fos_disabled,
-        parent_retailer_disabled,
-        parent_sub_retailer_disabled,
-        parent_employee_disabled,
-        parent_staff_disabled
-
+        created_by
       FROM users
-
       WHERE id = ?
-
       LIMIT 1
       `,
       [selectedParentId]
     );
-
-    // =====================================================
-    // PARENT NOT FOUND
-    // =====================================================
 
     if (!parentRows.length) {
       return res.status(404).json({
@@ -1448,80 +1280,16 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    const selectedParent =
-      parentRows[0];
+    const selectedParent = parentRows[0];
+    const parentRoleId = Number(selectedParent.role_id);
 
-    const parentRoleId =
-      Number(selectedParent.role_id);
-
-    // =====================================================
-    // CHECK WHETHER SELECTED PARENT CAN BE PARENT
-    // =====================================================
-
-    if (
-      requestedRoleId <= parentRoleId
-    ) {
+    if (requestedRoleId <= parentRoleId) {
       return res.status(400).json({
         success: false,
         message:
           "Selected parent must be a higher level role",
       });
     }
-
-    // =====================================================
-    // CHECK PARENT DISABLED THIS ROLE
-    // =====================================================
-
-    const parentDisabledField =
-      disabledFieldMap[requestedRoleId];
-
-    const isDisabledByParent =
-      parentDisabledField &&
-      Number(
-        selectedParent[
-          parentDisabledField
-        ] ?? 0
-      ) === 1;
-
-    if (isDisabledByParent) {
-      return res.status(200).json({
-        success: true,
-
-        create_role_id:
-          requestedRoleId,
-
-        parent_id:
-          selectedParentId,
-
-        parent_role_id:
-          parentRoleId,
-
-        current_role_id:
-          requestedRoleId,
-
-        current_role_name:
-          getRoleName(requestedRoleId),
-
-        search:
-          searchTerm,
-
-        total:
-          0,
-
-        data: [],
-
-        message:
-          `${getRoleName(
-            parentRoleId
-          )} has disabled ${getRoleName(
-            requestedRoleId
-          )}`,
-      });
-    }
-
-    // =====================================================
-    // FETCH REQUESTED ROLE UNDER SELECTED PARENT
-    // =====================================================
 
     let whereClause = `
       WHERE role_id = ?
@@ -1533,127 +1301,59 @@ export const getDropdownUsers = async (req, res) => {
       selectedParentId,
     ];
 
-    // =====================================================
-    // ADD SEARCH CONDITION
-    // =====================================================
-
     if (searchTerm) {
       whereClause += `
         AND (
           name LIKE ?
           OR email LIKE ?
           OR phone LIKE ?
-          OR organization_name LIKE ?
         )
       `;
 
-      const searchValue =
-        `%${searchTerm}%`;
+      const searchValue = `%${searchTerm}%`;
 
       queryParams.push(
-        searchValue,
         searchValue,
         searchValue,
         searchValue
       );
     }
 
-    // =====================================================
-    // FETCH USERS
-    // =====================================================
-
     const [rows] = await db.query(
       `
       SELECT
         id,
-        organization_name,
         name,
         email,
         phone,
         role_id,
         parent_id,
-        created_by,
-
-        parent_admin_disabled,
-        parent_cnf_disabled,
-        parent_super_distributor_disabled,
-        parent_distributor_disabled,
-        parent_fos_disabled,
-        parent_retailer_disabled,
-        parent_sub_retailer_disabled,
-        parent_employee_disabled,
-        parent_staff_disabled
-
+        created_by
       FROM users
-
       ${whereClause}
-
       ORDER BY name ASC
       `,
       queryParams
     );
 
-    // =====================================================
-    // REMOVE DISABLED USERS
-    // =====================================================
-
-    const filteredRows = rows.filter((user) => {
-      if (!disabledField) {
-        return true;
-      }
-
-      return Number(
-        user[disabledField] ?? 0
-      ) !== 1;
-    });
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
-
     return res.status(200).json({
       success: true,
-
-      create_role_id:
-        requestedRoleId,
-
-      parent_id:
-        selectedParentId,
-
-      parent_role_id:
-        parentRoleId,
-
-      current_role_id:
-        requestedRoleId,
-
-      current_role_name:
-        getRoleName(requestedRoleId),
-
-      search:
-        searchTerm,
-
-      total:
-        filteredRows.length,
-
-      data:
-        filteredRows,
+      create_role_id: requestedRoleId,
+      parent_id: selectedParentId,
+      parent_role_id: parentRoleId,
+      current_role_id: requestedRoleId,
+      current_role_name: getRoleName(requestedRoleId),
+      search: searchTerm,
+      total: rows.length,
+      data: rows,
     });
-
   } catch (error) {
-
-    console.error(
-      "getDropdownUsers Error:",
-      error
-    );
+    console.error("getDropdownUsers Error:", error);
 
     return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to get dropdown users",
-
-      error:
-        error.message,
+      message: "Failed to get dropdown users",
+      error: error.message,
     });
   }
 };
