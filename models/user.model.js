@@ -229,26 +229,408 @@ export const createUser = async (data) => {
   return result.insertId;
 };
 // Get All Users
-export const getAllUsers = async (limit, offset, role_id = null) => {
+export const getAllUsers = async (
+  limit,
+  offset,
+  role_id = null,
+  loggedInUserId = null,
+  loggedInRoleId = null
+) => {
   try {
     // =====================================================
-    // WHERE CONDITION
+    // VALIDATION
     // =====================================================
 
-    let whereCondition = "";
-    let queryParams = [];
+    limit = Number(limit) || 10;
+    offset = Number(offset) || 0;
 
-    if (role_id !== null && role_id !== "") {
-      whereCondition = `WHERE u.role_id = ?`;
-      queryParams.push(Number(role_id));
+    loggedInUserId =
+      Number(loggedInUserId);
+
+    loggedInRoleId =
+      Number(loggedInRoleId);
+
+    if (
+      !Number.isInteger(loggedInUserId) ||
+      loggedInUserId <= 0
+    ) {
+      throw new Error(
+        "Logged-in user ID is required"
+      );
     }
 
     // =====================================================
-    // GET USERS
+    // DEBUG
     // =====================================================
 
-    const sql = `
+    console.log(
+      "=============================================="
+    );
+
+    console.log(
+      "GET ALL USERS MODEL"
+    );
+
+    console.log(
+      "Logged In User ID:",
+      loggedInUserId
+    );
+
+    console.log(
+      "Logged In Role ID:",
+      loggedInRoleId
+    );
+
+    console.log(
+      "Requested Role ID:",
+      role_id
+    );
+
+    console.log(
+      "Limit:",
+      limit
+    );
+
+    console.log(
+      "Offset:",
+      offset
+    );
+
+    console.log(
+      "=============================================="
+    );
+
+    // =====================================================
+    // MASTER ADMIN
+    // =====================================================
+    //
+    // role_id = 0
+    //
+    // Master Admin ko complete users dikh sakte hain.
+    //
+    // =====================================================
+
+    if (loggedInRoleId === 0) {
+
+      let whereCondition = "";
+
+      let queryParams = [];
+
+      // ===================================================
+      // ROLE FILTER
+      // ===================================================
+
+      if (
+        role_id !== null &&
+        role_id !== ""
+      ) {
+
+        whereCondition =
+          `WHERE u.role_id = ?`;
+
+        queryParams.push(
+          Number(role_id)
+        );
+      }
+
+      // ===================================================
+      // USERS QUERY
+      // ===================================================
+
+      const sql = `
+        SELECT
+
+          u.id,
+          u.organization_name,
+          u.name,
+          u.email,
+          u.phone,
+          u.company_address,
+          u.country,
+          u.state,
+          u.city,
+          u.role_id,
+          u.created_by,
+          u.parent_id,
+
+          -- ============================================
+          -- USER STATUS
+          -- ============================================
+
+          u.userStatus,
+
+          -- ============================================
+          -- PARENT DETAILS
+          -- ============================================
+
+          CASE
+            WHEN u.role_id = 1
+              THEN creator.name
+            ELSE parent.name
+          END AS parent_name,
+
+          CASE
+            WHEN u.role_id = 1
+              THEN creator.organization_name
+            ELSE parent.organization_name
+          END AS parent_organization_name,
+
+          -- ============================================
+          -- DEVICE PERMISSIONS
+          -- ============================================
+
+          u.new_device,
+          u.old_device,
+          u.supreme_device,
+          u.pro_star,
+          u.lite,
+          u.google_tv,
+          u.supreme_lock,
+
+          u.created_at,
+          u.updated_at
+
+        FROM users u
+
+        -- ============================================
+        -- NORMAL PARENT
+        -- ============================================
+
+        LEFT JOIN users parent
+          ON parent.id = u.parent_id
+
+        -- ============================================
+        -- CREATOR
+        -- ============================================
+
+        LEFT JOIN users creator
+          ON creator.id = u.created_by
+
+        ${whereCondition}
+
+        ORDER BY u.id DESC
+
+        LIMIT ? OFFSET ?
+      `;
+
+      queryParams.push(
+        limit,
+        offset
+      );
+
+      const [
+        users
+      ] = await db.query(
+        sql,
+        queryParams
+      );
+
+      // =================================================
+      // COUNT
+      // =================================================
+
+      const countSql = `
+        SELECT
+          COUNT(*) AS total
+
+        FROM users u
+
+        ${whereCondition}
+      `;
+
+      const [
+        countResult
+      ] = await db.query(
+        countSql,
+        role_id !== null &&
+        role_id !== ""
+          ? [Number(role_id)]
+          : []
+      );
+
+      const total =
+        Number(
+          countResult[0]?.total || 0
+        );
+
+      // =================================================
+      // DEBUG
+      // =================================================
+
+      console.log(
+        "MASTER ADMIN USERS:",
+        users.length
+      );
+
+      console.log(
+        "MASTER ADMIN TOTAL:",
+        total
+      );
+
+      // =================================================
+      // RETURN
+      // =================================================
+
+      return {
+        users,
+        total,
+      };
+    }
+
+    // =====================================================
+    // NON MASTER ADMIN
+    // =====================================================
+    //
+    // IMPORTANT:
+    //
+    // Yahan sirf logged-in user ki descendants niklegi.
+    //
+    // Example:
+    //
+    // CNF 1
+    //   |
+    //   └── Super 1
+    //        |
+    //        └── Distributor 1
+    //             |
+    //             └── FOS 1
+    //                  |
+    //                  └── Retailer 1
+    //
+    // CNF 2 ki chain yahan nahi aayegi.
+    //
+    // =====================================================
+
+    // =====================================================
+    // COUNT QUERY
+    // =====================================================
+
+    let countSql = `
+      WITH RECURSIVE user_chain AS (
+
+        -- ===============================================
+        -- ROOT USER
+        -- ===============================================
+
+        SELECT
+          u.id,
+          u.created_by,
+          u.parent_id,
+          u.role_id
+
+        FROM users u
+
+        WHERE u.id = ?
+
+        UNION ALL
+
+        -- ===============================================
+        -- CHILD USERS
+        -- ===============================================
+
+        SELECT
+          child.id,
+          child.created_by,
+          child.parent_id,
+          child.role_id
+
+        FROM users child
+
+        INNER JOIN user_chain parent
+          ON child.created_by = parent.id
+      )
+
       SELECT
+        COUNT(*) AS total
+
+      FROM users u
+
+      INNER JOIN user_chain uc
+        ON uc.id = u.id
+
+      WHERE u.id != ?
+    `;
+
+    const countParams = [
+      loggedInUserId,
+      loggedInUserId,
+    ];
+
+    // =====================================================
+    // ROLE FILTER
+    // =====================================================
+
+    if (
+      role_id !== null &&
+      role_id !== ""
+    ) {
+
+      countSql += `
+        AND u.role_id = ?
+      `;
+
+      countParams.push(
+        Number(role_id)
+      );
+    }
+
+    // =====================================================
+    // EXECUTE COUNT
+    // =====================================================
+
+    const [
+      countResult
+    ] = await db.query(
+      countSql,
+      countParams
+    );
+
+    const total =
+      Number(
+        countResult[0]?.total || 0
+      );
+
+    // =====================================================
+    // USERS QUERY
+    // =====================================================
+
+    let sql = `
+      WITH RECURSIVE user_chain AS (
+
+        -- ===============================================
+        -- ROOT USER
+        -- ===============================================
+
+        SELECT
+          u.id,
+          u.created_by,
+          u.parent_id,
+          u.role_id
+
+        FROM users u
+
+        WHERE u.id = ?
+
+        UNION ALL
+
+        -- ===============================================
+        -- CHILD USERS
+        -- ===============================================
+
+        SELECT
+          child.id,
+          child.created_by,
+          child.parent_id,
+          child.role_id
+
+        FROM users child
+
+        INNER JOIN user_chain parent
+          ON child.created_by = parent.id
+      )
+
+      SELECT
+
         u.id,
         u.organization_name,
         u.name,
@@ -262,23 +644,15 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
         u.created_by,
         u.parent_id,
 
-        -- ================================================
+        -- =============================================
         -- USER STATUS
-        -- 1 = ACTIVE
-        -- 0 = INACTIVE
-        -- ================================================
+        -- =============================================
 
         u.userStatus,
 
-        -- ================================================
+        -- =============================================
         -- PARENT DETAILS
-        -- ================================================
-        -- Admin:
-        -- created_by user ko parent maana jayega
-        --
-        -- Baaki roles:
-        -- parent_id wala user parent hoga
-        -- ================================================
+        -- =============================================
 
         CASE
           WHEN u.role_id = 1
@@ -292,9 +666,9 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
           ELSE parent.organization_name
         END AS parent_organization_name,
 
-        -- ================================================
+        -- =============================================
         -- DEVICE PERMISSIONS
-        -- ================================================
+        -- =============================================
 
         u.new_device,
         u.old_device,
@@ -309,51 +683,106 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
 
       FROM users u
 
-      -- ================================================
+      INNER JOIN user_chain uc
+        ON uc.id = u.id
+
+      -- =============================================
       -- NORMAL PARENT
-      -- ================================================
+      -- =============================================
 
       LEFT JOIN users parent
         ON parent.id = u.parent_id
 
-      -- ================================================
-      -- CREATED BY USER
-      -- Admin ke liye ye parent hoga
-      -- ================================================
+      -- =============================================
+      -- CREATOR
+      -- =============================================
 
       LEFT JOIN users creator
         ON creator.id = u.created_by
 
-      ${whereCondition}
+      WHERE u.id != ?
+    `;
 
+    const sqlParams = [
+      loggedInUserId,
+      loggedInUserId,
+    ];
+
+    // =====================================================
+    // ROLE FILTER
+    // =====================================================
+
+    if (
+      role_id !== null &&
+      role_id !== ""
+    ) {
+
+      sql += `
+        AND u.role_id = ?
+      `;
+
+      sqlParams.push(
+        Number(role_id)
+      );
+    }
+
+    // =====================================================
+    // PAGINATION
+    // =====================================================
+
+    sql += `
       ORDER BY u.id DESC
-
       LIMIT ? OFFSET ?
     `;
 
-    queryParams.push(Number(limit));
-    queryParams.push(Number(offset));
-
-    const [users] = await db.query(
-      sql,
-      queryParams
+    sqlParams.push(
+      limit,
+      offset
     );
 
     // =====================================================
-    // TOTAL COUNT
+    // EXECUTE USERS QUERY
     // =====================================================
 
-    const countSql = `
-      SELECT COUNT(*) AS total
-      FROM users u
-      ${whereCondition}
-    `;
+    const [
+      users
+    ] = await db.query(
+      sql,
+      sqlParams
+    );
 
-    const [countResult] = await db.query(
-      countSql,
-      role_id !== null && role_id !== ""
-        ? [Number(role_id)]
-        : []
+    // =====================================================
+    // DEBUG
+    // =====================================================
+
+    console.log(
+      "NON MASTER USERS FOUND:",
+      users.length
+    );
+
+    console.log(
+      "NON MASTER TOTAL:",
+      total
+    );
+
+    console.log(
+      "USER IDs:",
+      users.map(
+        (user) => user.id
+      )
+    );
+
+    console.log(
+      "USER DETAILS:",
+      users.map(
+        (user) => ({
+          id: user.id,
+          name: user.name,
+          role_id: user.role_id,
+          created_by: user.created_by,
+          parent_id: user.parent_id,
+        })
+      )
     );
 
     // =====================================================
@@ -362,9 +791,7 @@ export const getAllUsers = async (limit, offset, role_id = null) => {
 
     return {
       users,
-      total: Number(
-        countResult[0].total
-      ),
+      total,
     };
 
   } catch (error) {

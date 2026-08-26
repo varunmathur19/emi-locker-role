@@ -990,6 +990,10 @@ export const loginUser = async (req, res) => {
 // =========================
 export const getUsers = async (req, res) => {
   try {
+    console.log("=================================");
+    console.log("GET ALL STAFF DATA");
+    console.log("REQ.USER:", req.user);
+    console.log("=================================");
 
     // ==========================================
     // PAGINATION
@@ -1004,40 +1008,87 @@ export const getUsers = async (req, res) => {
     const offset =
       (page - 1) * limit;
 
-
     // ==========================================
-    // OPTIONAL ROLE FILTER
+    // ROLE FILTER
     // ==========================================
 
-    const role_id =
+    let role_id = null;
+
+    if (
       req.query.role_id !== undefined &&
       req.query.role_id !== ""
-        ? Number(req.query.role_id)
-        : null;
+    ) {
+      role_id = Number(req.query.role_id);
 
+      if (!Number.isInteger(role_id)) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role_id",
+        });
+      }
+    }
 
     // ==========================================
-    // GET USERS
+    // LOGGED-IN USER
     // ==========================================
 
-    const result =
-      await getAllUsers(
-        limit,
-        offset,
-        role_id
-      );
+    const loggedInUserId = Number(
+      req.user?.id
+    );
 
+    const loggedInRoleId = Number(
+      req.user?.role_id
+    );
+
+    console.log(
+      "Logged In User ID:",
+      loggedInUserId
+    );
+
+    console.log(
+      "Logged In Role ID:",
+      loggedInRoleId
+    );
+
+    console.log(
+      "Requested Role ID:",
+      role_id
+    );
+
+    // ==========================================
+    // VALIDATE USER
+    // ==========================================
+
+    if (
+      !Number.isInteger(loggedInUserId) ||
+      loggedInUserId <= 0
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized user",
+      });
+    }
+
+    // ==========================================
+    // GET HIERARCHY USERS
+    // ==========================================
+
+    const result = await getAllUsers(
+      limit,
+      offset,
+      role_id,
+      loggedInUserId,
+      loggedInRoleId
+    );
 
     // ==========================================
     // RESPONSE
     // ==========================================
 
     return res.status(200).json({
-
       success: true,
 
       pagination: {
-
         currentPage: page,
 
         totalPages:
@@ -1049,11 +1100,9 @@ export const getUsers = async (req, res) => {
 
         totalUsers:
           result.total,
-
       },
 
       data: result.users,
-
     });
 
   } catch (error) {
@@ -1064,13 +1113,11 @@ export const getUsers = async (req, res) => {
     );
 
     return res.status(500).json({
-
       success: false,
-
-      message: error.message,
-
+      message:
+        error.message ||
+        "Failed to get users",
     });
-
   }
 };
 
