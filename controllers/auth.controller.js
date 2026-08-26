@@ -2047,7 +2047,6 @@ export const getStaffDataById = async (req, res) => {
 //Interal login
 export const loginAsUser = async (req, res) => {
   try {
-
     // ==========================================
     // CURRENT LOGGED-IN USER
     // ==========================================
@@ -2071,8 +2070,7 @@ export const loginAsUser = async (req, res) => {
     // FIND TARGET USER
     // ==========================================
 
-    const targetUser =
-      await findUserById(user_id);
+    const targetUser = await findUserById(user_id);
 
     if (!targetUser) {
       return res.status(404).json({
@@ -2082,59 +2080,27 @@ export const loginAsUser = async (req, res) => {
     }
 
     // ==========================================
-    // SAME USER CHECK
+    // ORIGINAL LOGIN USER
     // ==========================================
 
-    if (
-      Number(loggedInUser.id) ===
-      Number(targetUser.id)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "You are already logged in as this user",
-      });
-    }
-
-    // ==========================================
-    // ORIGINAL ROLE
-    // ==========================================
-    //
-    // Normal login:
-    //
-    // Distributor = 4
-    //
-    // Impersonation:
-    //
-    // Distributor -> FOS
-    //
-    // Current role = 5
-    // Original role = 4
-    //
-    // Permission hamesha ORIGINAL ROLE
-    // se calculate hogi.
-    // ==========================================
+    const isCurrentlyImpersonating =
+      loggedInUser.is_impersonating === true ||
+      loggedInUser.is_impersonating === 1 ||
+      loggedInUser.is_impersonating === "true";
 
     const originalRoleId =
-      loggedInUser.is_impersonating &&
+      isCurrentlyImpersonating &&
       loggedInUser.original_role_id !== null &&
       loggedInUser.original_role_id !== undefined
-        ? Number(
-            loggedInUser.original_role_id
-          )
-        : Number(
-            loggedInUser.role_id
-          );
+        ? Number(loggedInUser.original_role_id)
+        : Number(loggedInUser.role_id);
 
     const originalUserId =
-      loggedInUser.is_impersonating &&
-      loggedInUser.original_user_id
-        ? Number(
-            loggedInUser.original_user_id
-          )
-        : Number(
-            loggedInUser.id
-          );
+      isCurrentlyImpersonating &&
+      loggedInUser.original_user_id !== null &&
+      loggedInUser.original_user_id !== undefined
+        ? Number(loggedInUser.original_user_id)
+        : Number(loggedInUser.id);
 
     // ==========================================
     // ROLE HIERARCHY
@@ -2146,51 +2112,48 @@ export const loginAsUser = async (req, res) => {
     // 4 Distributor
     // 5 FOS
     // 6 Retailer
-    // 7 Employee
-    // 8 Staff
+    // 7 Sub Retailer
+    // 8 Employee
+    // 9 Staff
     // ==========================================
 
-    // Target lower-level role hona chahiye
-    // ORIGINAL LOGIN USER ke comparison mein.
+    const targetRoleId = Number(targetUser.role_id);
+
+    // ==========================================
+    // ORIGINAL USER KO WAPAS LOGIN ALLOW
+    // ==========================================
+
+    const isOriginalUser =
+      Number(targetUser.id) === Number(originalUserId);
+
+    // ==========================================
+    // SAME CURRENT USER KO BHI LOGIN ALLOW
     //
     // Example:
     //
-    // Distributor (4)
-    //     ↓
-    // FOS (5)       ALLOWED
+    // Distributor -> FOS
+    // FOS -> FOS
     //
-    // FOS (5)
-    //     ↓
-    // Distributor (4)  BLOCKED
-    //
-    // But agar Distributor -> FOS hua hai,
-    // originalRoleId abhi bhi 4 hai.
-    //
-    // Isliye:
-    //
-    // Distributor -> FOS -> Distributor
-    // ALLOWED
-    //
+    // Same user hone ke wajah se block nahi hoga.
+    // ==========================================
+
+    const isSameCurrentUser =
+      Number(targetUser.id) === Number(loggedInUser.id);
+
+    // ==========================================
+    // LOWER LEVEL VALIDATION
+    // ==========================================
 
     if (
-      Number(targetUser.role_id) <=
-      Number(originalRoleId)
+      !isOriginalUser &&
+      !isSameCurrentUser &&
+      targetRoleId <= originalRoleId
     ) {
-
-      // IMPORTANT:
-      // Agar target original user khud hai,
-      // toh usko wapas login karne dena hai.
-
-      if (
-        Number(targetUser.id) !==
-        Number(originalUserId)
-      ) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "You can only login as a lower level user",
-        });
-      }
+      return res.status(403).json({
+        success: false,
+        message:
+          "You can only login as a lower level user",
+      });
     }
 
     // ==========================================
@@ -2199,11 +2162,10 @@ export const loginAsUser = async (req, res) => {
 
     const token = jwt.sign(
       {
-        // CURRENT USER
+        // CURRENT / TARGET USER
         id: targetUser.id,
 
-        role_id:
-          Number(targetUser.role_id),
+        role_id: targetRoleId,
 
         email: targetUser.email,
 
@@ -2211,11 +2173,9 @@ export const loginAsUser = async (req, res) => {
         // ORIGINAL LOGIN USER
         // ======================================
 
-        original_user_id:
-          originalUserId,
+        original_user_id: originalUserId,
 
-        original_role_id:
-          originalRoleId,
+        original_role_id: originalRoleId,
 
         // ======================================
         // IMPERSONATION
@@ -2236,24 +2196,20 @@ export const loginAsUser = async (req, res) => {
     // ==========================================
 
     return res.status(200).json({
-
       success: true,
 
-      message:
-        "Login as user successful",
+      message: "Login as user successful",
 
       token,
 
       user: {
-
         id: targetUser.id,
 
         name: targetUser.name,
 
         email: targetUser.email,
 
-        role_id:
-          Number(targetUser.role_id),
+        role_id: targetRoleId,
 
         parent_id:
           targetUser.parent_id || null,
@@ -2265,33 +2221,25 @@ export const loginAsUser = async (req, res) => {
           targetUser.parent_cnf_id || null,
 
         parent_super_distributor_id:
-          targetUser.parent_super_distributor_id ||
-          null,
+          targetUser.parent_super_distributor_id || null,
 
         parent_distributor_id:
-          targetUser.parent_distributor_id ||
-          null,
+          targetUser.parent_distributor_id || null,
 
         parent_fos_id:
-          targetUser.parent_fos_id ||
-          null,
+          targetUser.parent_fos_id || null,
 
         parent_retailer_id:
-          targetUser.parent_retailer_id ||
-          null,
+          targetUser.parent_retailer_id || null,
 
         parent_employee_id:
-          targetUser.parent_employee_id ||
-          null,
+          targetUser.parent_employee_id || null,
 
         parent_staff_id:
-          targetUser.parent_staff_id ||
-          null,
+          targetUser.parent_staff_id || null,
       },
     });
-
   } catch (error) {
-
     console.error(
       "Login As User Error:",
       error
