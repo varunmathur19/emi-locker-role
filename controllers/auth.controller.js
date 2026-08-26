@@ -3159,32 +3159,24 @@ export const deleteModule = async (req, res) => {
 
 
 export const updateModule = async (req, res) => {
-
   try {
+    if (Number(req.user?.role_id) !== 0) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-    // =================================================
-    // ROLE CHECK
-    // =================================================
-
-    if (
-      Number(req.user?.role_id) !== 0
-    ) {
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(403).json({
-
         success: false,
-
-        message:
-          "Only Master Admin can update module",
-
+        message: "Only Master Admin can update module",
       });
-
     }
-
-
-    // =================================================
-    // GET FORM DATA
-    // =================================================
 
     const {
       oldModule,
@@ -3193,68 +3185,42 @@ export const updateModule = async (req, res) => {
       status,
     } = req.body;
 
-
-    // =================================================
-    // OLD MODULE REQUIRED
-    // =================================================
-
     if (
       typeof oldModule !== "string" ||
       !oldModule.trim()
     ) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Old module name is required",
-
+        message: "Old module name is required",
       });
-
     }
-
-
-    // =================================================
-    // CHECK NEW MODULE
-    // =================================================
 
     const hasNewModule =
       typeof newModule === "string" &&
       newModule.trim() !== "";
-
-
-    // =================================================
-    // CHECK NEW SEQUENCE
-    // =================================================
 
     const hasNewSequence =
       newSequence !== undefined &&
       newSequence !== null &&
       String(newSequence).trim() !== "";
 
-
-    // =================================================
-    // CHECK NEW STATUS
-    // =================================================
-
     const hasNewStatus =
       status !== undefined &&
       status !== null &&
       String(status).trim() !== "";
 
-
-    // =================================================
-    // CHECK NEW ICON
-    // =================================================
-
-    const hasNewIcon =
-      !!req.file;
-
-
-    // =================================================
-    // AT LEAST ONE FIELD REQUIRED
-    // =================================================
+    const hasNewIcon = !!req.file;
 
     if (
       !hasNewModule &&
@@ -3262,654 +3228,311 @@ export const updateModule = async (req, res) => {
       !hasNewStatus &&
       !hasNewIcon
     ) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "At least one field is required to update",
-
+        message: "At least one field is required to update",
       });
-
     }
-
-
-    // =================================================
-    // VALIDATE SEQUENCE
-    // =================================================
 
     let sequence = null;
 
-
     if (hasNewSequence) {
-
-      sequence =
-        Number(newSequence);
-
+      sequence = Number(newSequence);
 
       if (
         !Number.isInteger(sequence) ||
         sequence < 1
       ) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
         return res.status(400).json({
-
           success: false,
-
-          message:
-            "Valid sequence number is required",
-
+          message: "Valid sequence number is required",
         });
-
       }
-
     }
-
-
-    // =================================================
-    // VALIDATE STATUS
-    // 0 = INACTIVE / HIDE
-    // 1 = ACTIVE / SHOW
-    // =================================================
 
     let moduleStatus = null;
 
-
     if (hasNewStatus) {
-
-      moduleStatus =
-        Number(status);
-
+      moduleStatus = Number(status);
 
       if (
         moduleStatus !== 0 &&
         moduleStatus !== 1
       ) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
         return res.status(400).json({
-
           success: false,
-
-          message:
-            "Status must be either 0 or 1",
-
+          message: "Status must be either 0 or 1",
         });
-
       }
-
     }
 
+    const oldModuleName = oldModule
+      .trim()
+      .toLowerCase();
 
-    // =================================================
-    // CLEAN MODULE NAMES
-    // =================================================
+    const newModuleName = hasNewModule
+      ? newModule.trim().toLowerCase()
+      : null;
 
-    const oldModuleName =
-      oldModule
-        .trim()
-        .toLowerCase();
-
-
-    const newModuleName =
-      hasNewModule
-        ? newModule
-            .trim()
-            .toLowerCase()
-        : null;
-
-
-    // =================================================
-    // GET MASTER ADMIN
-    // =================================================
-
-    const [rows] =
-      await db.query(
-        `
-        SELECT
-          id,
-          modules
-        FROM users
-        WHERE role_id = 0
-        LIMIT 1
-        `
-      );
-
-
-    // =================================================
-    // MASTER ADMIN NOT FOUND
-    // =================================================
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+    `);
 
     if (!rows.length) {
-
-      // Delete uploaded icon
-
       if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        const uploadedFilePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-
-        if (
-          fs.existsSync(
-            uploadedFilePath
-          )
-        ) {
-
-          fs.unlinkSync(
-            uploadedFilePath
-          );
-
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
         }
-
       }
 
-
       return res.status(404).json({
-
         success: false,
-
-        message:
-          "Master Admin not found",
-
+        message: "Master Admin not found",
       });
-
     }
 
+    const masterAdmin = rows[0];
 
-    const masterAdmin =
-      rows[0];
-
-
-    // =================================================
-    // PARSE MODULES
-    // =================================================
-
-    let modules =
-      masterAdmin.modules;
-
+    let modules = masterAdmin.modules;
 
     if (!modules) {
-
       modules = [];
-
-    }
-    else if (
-      typeof modules === "string"
-    ) {
-
+    } else if (typeof modules === "string") {
       try {
-
-        modules =
-          JSON.parse(modules);
-
-      }
-      catch (error) {
-
-        console.error(
-          "MODULE JSON PARSE ERROR:",
-          error
-        );
-
-
-        // Delete uploaded icon
-
+        modules = JSON.parse(modules);
+      } catch (error) {
         if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(500).json({
-
-          success: false,
-
-          message:
-            "Invalid modules data",
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // ARRAY CHECK
-    // =================================================
-
-    if (!Array.isArray(modules)) {
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "Modules data must be an array",
-
-      });
-
-    }
-
-
-    // =================================================
-    // CONVERT OLD MODULE FORMAT
-    //
-    // OLD:
-    // {
-    //   name: "cnf",
-    //   icon: null
-    // }
-    //
-    // NEW:
-    // {
-    //   name: "cnf",
-    //   icon: null,
-    //   sequence: 1,
-    //   status: 1
-    // }
-    // =================================================
-
-    modules =
-      modules.map(
-        (item, index) => {
-
-          // -------------------------------------------
-          // STRING FORMAT
-          // -------------------------------------------
-
-          if (
-            typeof item === "string"
-          ) {
-
-            return {
-
-              name:
-                item,
-
-              icon:
-                null,
-
-              sequence:
-                index + 1,
-
-              status:
-                1,
-
-            };
-
-          }
-
-
-          // -------------------------------------------
-          // OBJECT FORMAT
-          // -------------------------------------------
-
-          return {
-
-            name:
-              item?.name ||
-              "",
-
-            icon:
-              item?.icon ||
-              null,
-
-            sequence:
-              Number(
-                item?.sequence ??
-                index + 1
-              ),
-
-            status:
-              Number(
-                item?.status ??
-                1
-              ) === 0
-                ? 0
-                : 1,
-
-          };
-
-        }
-      );
-
-
-    // =================================================
-    // FIND MODULE
-    // =================================================
-
-    const moduleIndex =
-      modules.findIndex(
-        (item) => {
-
-          return (
-            String(
-              item?.name ||
-              ""
-            )
-              .trim()
-              .toLowerCase() ===
-            oldModuleName
-          );
-
-        }
-      );
-
-
-    // =================================================
-    // MODULE NOT FOUND
-    // =================================================
-
-    if (
-      moduleIndex === -1
-    ) {
-
-      // Delete uploaded icon
-
-      if (req.file) {
-
-        const uploadedFilePath =
-          path.join(
+          const uploadedFilePath = path.join(
             uploadDir,
             req.file.filename
           );
 
-
-        if (
-          fs.existsSync(
-            uploadedFilePath
-          )
-        ) {
-
-          fs.unlinkSync(
-            uploadedFilePath
-          );
-
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
         }
 
+        return res.status(500).json({
+          success: false,
+          message: "Invalid modules data",
+        });
+      }
+    }
+
+    if (!Array.isArray(modules)) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
       }
 
+      return res.status(500).json({
+        success: false,
+        message: "Modules data must be an array",
+      });
+    }
+
+    modules = modules.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          name: item,
+          icon: null,
+          sequence: index + 1,
+          status: 1,
+        };
+      }
+
+      return {
+        name: item?.name || "",
+        icon: item?.icon || null,
+        sequence: Number(
+          item?.sequence ?? index + 1
+        ),
+        status:
+          Number(item?.status ?? 1) === 0
+            ? 0
+            : 1,
+      };
+    });
+
+    const moduleIndex = modules.findIndex(
+      (item) =>
+        String(item?.name || "")
+          .trim()
+          .toLowerCase() === oldModuleName
+    );
+
+    if (moduleIndex === -1) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(404).json({
-
         success: false,
-
-        message:
-          `Old module "${oldModule}" not found`,
-
+        message: `Old module "${oldModule}" not found`,
       });
-
     }
 
-
-    // =================================================
-    // CURRENT MODULE
-    // =================================================
-
-    const currentModule =
-      modules[moduleIndex];
-
-
-    // =================================================
-    // DUPLICATE MODULE NAME
-    // =================================================
+    const currentModule = modules[moduleIndex];
 
     if (hasNewModule) {
-
-      const duplicateModule =
-        modules.some(
-          (item, index) => {
-
-            if (
-              index === moduleIndex
-            ) {
-
-              return false;
-
-            }
-
-
-            return (
-              String(
-                item?.name ||
-                ""
-              )
-                .trim()
-                .toLowerCase() ===
-              newModuleName
-            );
-
+      const duplicateModule = modules.some(
+        (item, index) => {
+          if (index === moduleIndex) {
+            return false;
           }
-        );
 
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === newModuleName
+          );
+        }
+      );
 
       if (duplicateModule) {
-
-        // Delete uploaded icon
-
         if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(409).json({
-
-          success: false,
-
-          message:
-            `Module "${newModule}" already exists`,
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // DUPLICATE SEQUENCE
-    // =================================================
-
-    if (hasNewSequence) {
-
-      const duplicateSequence =
-        modules.some(
-          (item, index) => {
-
-            if (
-              index === moduleIndex
-            ) {
-
-              return false;
-
-            }
-
-
-            return (
-              Number(
-                item?.sequence
-              ) ===
-              sequence
-            );
-
-          }
-        );
-
-
-      if (duplicateSequence) {
-
-        // Delete uploaded icon
-
-        if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(422).json({
-
-          success: false,
-
-          message:
-            `Sequence ${sequence} is already used`,
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // OLD VALUES
-    // =================================================
-
-    const oldIcon =
-      currentModule?.icon ||
-      null;
-
-
-    // =================================================
-    // FINAL NAME
-    // =================================================
-
-    const finalName =
-      hasNewModule
-        ? newModuleName
-        : currentModule?.name || "";
-
-
-    // =================================================
-    // FINAL SEQUENCE
-    // =================================================
-
-    const finalSequence =
-      hasNewSequence
-        ? sequence
-        : Number(
-            currentModule?.sequence ||
-            moduleIndex + 1
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
           );
 
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
-    // =================================================
-    // FINAL STATUS
-    // =================================================
-
-    const finalStatus =
-      hasNewStatus
-        ? moduleStatus
-        : Number(
-            currentModule?.status ?? 1
-          ) === 0
-            ? 0
-            : 1;
-
-
-    // =================================================
-    // FINAL ICON
-    // =================================================
-
-    let finalIcon =
-      currentModule?.icon ||
-      null;
-
-
-    // =================================================
-    // UPDATE ICON ONLY IF PROVIDED
-    // =================================================
-
-    if (hasNewIcon) {
-
-      finalIcon =
-        `/uploads/modules/${req.file.filename}`;
-
+        return res.status(409).json({
+          success: false,
+          message: `Module "${newModule}" already exists`,
+        });
+      }
     }
 
+    if (hasNewSequence) {
+      const duplicateSequence = modules.some(
+        (item, index) => {
+          if (index === moduleIndex) {
+            return false;
+          }
 
-    // =================================================
-    // UPDATE MODULE
-    // =================================================
+          return (
+            Number(item?.sequence) === sequence
+          );
+        }
+      );
+
+      if (duplicateSequence) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
+
+        return res.status(422).json({
+          success: false,
+          message: `Sequence ${sequence} is already used`,
+        });
+      }
+    }
+
+    const oldIcon = currentModule?.icon || null;
+
+    const finalName = hasNewModule
+      ? newModuleName
+      : currentModule?.name || "";
+
+    const finalSequence = hasNewSequence
+      ? sequence
+      : Number(
+          currentModule?.sequence ||
+          moduleIndex + 1
+        );
+
+    const finalStatus = hasNewStatus
+      ? moduleStatus
+      : Number(
+          currentModule?.status ?? 1
+        ) === 0
+        ? 0
+        : 1;
+
+    let finalIcon = currentModule?.icon || null;
+
+    if (hasNewIcon) {
+      finalIcon = `/uploads/modules/${req.file.filename}`;
+    }
+
+    const previousStatus = Number(
+      currentModule?.status ?? 1
+    );
 
     modules[moduleIndex] = {
-
-      name:
-        finalName,
-
-      icon:
-        finalIcon,
-
-      sequence:
-        finalSequence,
-
-      status:
-        finalStatus,
-
+      name: finalName,
+      icon: finalIcon,
+      sequence: finalSequence,
+      status: finalStatus,
     };
-
-
-    // =================================================
-    // SORT BY SEQUENCE
-    // =================================================
 
     modules.sort(
       (a, b) =>
@@ -3917,10 +3540,58 @@ export const updateModule = async (req, res) => {
         Number(b.sequence)
     );
 
+    if (
+      hasNewStatus &&
+      previousStatus === 1 &&
+      finalStatus === 0
+    ) {
+      const roleMap = {
+        admin: 1,
+        cnf: 2,
+        "super distributor": 3,
+        "super distributer": 3,
+        distributor: 4,
+        fos: 5,
+        retailer: 6,
+        "sub retailer": 7,
+        employee: 8,
+        staff: 9,
+      };
 
-    // =================================================
-    // UPDATE DATABASE
-    // =================================================
+      const inactiveRoleId =
+        roleMap[oldModuleName];
+
+      if (inactiveRoleId) {
+        const [inactiveUsers] = await db.query(
+          `
+          SELECT
+            id,
+            parent_id
+          FROM users
+          WHERE role_id = ?
+          `,
+          [inactiveRoleId]
+        );
+
+        for (const inactiveUser of inactiveUsers) {
+          if (!inactiveUser.parent_id) {
+            continue;
+          }
+
+          await db.query(
+            `
+            UPDATE users
+            SET parent_id = ?
+            WHERE parent_id = ?
+            `,
+            [
+              inactiveUser.parent_id,
+              inactiveUser.id,
+            ]
+          );
+        }
+      }
+    }
 
     await db.query(
       `
@@ -3935,148 +3606,71 @@ export const updateModule = async (req, res) => {
       ]
     );
 
-
-    // =================================================
-    // DELETE OLD ICON
-    // ONLY WHEN NEW ICON IS UPLOADED
-    // =================================================
-
     if (
       hasNewIcon &&
       oldIcon &&
       oldIcon !== finalIcon
     ) {
-
       try {
+        const oldIconPath = path.join(
+          process.cwd(),
+          oldIcon.replace(/^\/+/, "")
+        );
 
-        const oldIconPath =
-          path.join(
-            process.cwd(),
-            oldIcon.replace(
-              /^\/+/,
-              ""
-            )
-          );
-
-
-        if (
-          fs.existsSync(
-            oldIconPath
-          )
-        ) {
-
-          fs.unlinkSync(
-            oldIconPath
-          );
-
+        if (fs.existsSync(oldIconPath)) {
+          fs.unlinkSync(oldIconPath);
         }
-
-      }
-      catch (iconDeleteError) {
-
+      } catch (iconDeleteError) {
         console.error(
           "OLD ICON DELETE ERROR:",
           iconDeleteError
         );
-
       }
-
     }
 
-
-    // =================================================
-    // SUCCESS
-    // =================================================
-
     return res.status(200).json({
-
       success: true,
-
-      message:
-        "Module updated successfully",
-
+      message: "Module updated successfully",
       module: {
-
-        oldModule:
-          oldModuleName,
-
-        newModule:
-          finalName,
-
-        icon:
-          finalIcon,
-
-        sequence:
-          finalSequence,
-
-        status:
-          finalStatus,
-
+        oldModule: oldModuleName,
+        newModule: finalName,
+        icon: finalIcon,
+        sequence: finalSequence,
+        status: finalStatus,
       },
-
       modules,
-
     });
-
-  }
-  catch (error) {
-
+  } catch (error) {
     console.error(
       "UPDATE MODULE ERROR:",
       error
     );
 
-
-    // =================================================
-    // DELETE NEW ICON ON ERROR
-    // =================================================
-
     if (req.file) {
-
       try {
+        const filePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        const filePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-
-        if (
-          fs.existsSync(filePath)
-        ) {
-
-          fs.unlinkSync(
-            filePath
-          );
-
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
         }
-
-      }
-      catch (fileError) {
-
+      } catch (fileError) {
         console.error(
           "FILE DELETE ERROR:",
           fileError
         );
-
       }
-
     }
 
-
     return res.status(500).json({
-
       success: false,
-
       message:
         error?.message ||
         "Failed to update module",
-
     });
-
   }
-
 };
 
 export const updateUserStatus = async (req, res) => {
