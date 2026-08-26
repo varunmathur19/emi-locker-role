@@ -183,6 +183,7 @@ router.post("/login",
 // Get All Users
 router.get(
     "/getAllStaffData",
+    authMiddleware,
     getUsers
 );
 
