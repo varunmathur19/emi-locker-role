@@ -1145,6 +1145,9 @@ export const getDropdownUsers = async (req, res) => {
   try {
     const { role_id, parent_id, search } = req.query;
 
+    // =========================================
+    // VALIDATE ROLE
+    // =========================================
     if (
       role_id === undefined ||
       role_id === null ||
@@ -1160,7 +1163,8 @@ export const getDropdownUsers = async (req, res) => {
 
     if (
       !Number.isInteger(requestedRoleId) ||
-      requestedRoleId < 1
+      requestedRoleId < 1 ||
+      requestedRoleId > 9
     ) {
       return res.status(400).json({
         success: false,
@@ -1168,15 +1172,9 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    const validRoles = [1, 2, 3, 4, 5, 6, 7, 8, 9];
-
-    if (!validRoles.includes(requestedRoleId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or unsupported role_id",
-      });
-    }
-
+    // =========================================
+    // PARENT ID
+    // =========================================
     let selectedParentId = null;
 
     if (
@@ -1197,110 +1195,38 @@ export const getDropdownUsers = async (req, res) => {
       }
     }
 
+    // =========================================
+    // SEARCH
+    // =========================================
     const searchTerm =
       typeof search === "string"
         ? search.trim()
         : "";
 
-    if (selectedParentId === null) {
-      let whereClause = `
-        WHERE role_id = ?
-      `;
-
-      const queryParams = [requestedRoleId];
-
-      if (searchTerm) {
-        whereClause += `
-          AND (
-            name LIKE ?
-            OR email LIKE ?
-            OR phone LIKE ?
-          )
-        `;
-
-        const searchValue = `%${searchTerm}%`;
-
-        queryParams.push(
-          searchValue,
-          searchValue,
-          searchValue
-        );
-      }
-
-      const [rows] = await db.query(
-        `
-        SELECT
-          id,
-          name,
-          email,
-          phone,
-          role_id,
-          parent_id,
-          created_by
-        FROM users
-        ${whereClause}
-        ORDER BY name ASC
-        `,
-        queryParams
-      );
-
-      return res.status(200).json({
-        success: true,
-        create_role_id: requestedRoleId,
-        parent_id: null,
-        current_role_id: requestedRoleId,
-        current_role_name: getRoleName(requestedRoleId),
-        search: searchTerm,
-        total: rows.length,
-        data: rows,
-      });
-    }
-
-    const [parentRows] = await db.query(
-      `
-      SELECT
-        id,
-        name,
-        email,
-        phone,
-        role_id,
-        parent_id,
-        created_by
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [selectedParentId]
-    );
-
-    if (!parentRows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "Parent user not found",
-      });
-    }
-
-    const selectedParent = parentRows[0];
-    const parentRoleId = Number(selectedParent.role_id);
-
-    if (requestedRoleId <= parentRoleId) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Selected parent must be a higher level role",
-      });
-    }
-
+    // =========================================
+    // BUILD QUERY
+    // =========================================
     let whereClause = `
       WHERE role_id = ?
-      AND parent_id = ?
     `;
 
     const queryParams = [
       requestedRoleId,
-      selectedParentId,
     ];
 
+    // Parent selected hai to uske direct
+    // children hi dikhane hain
+    if (selectedParentId !== null) {
+      whereClause += `
+        AND parent_id = ?
+      `;
+
+      queryParams.push(
+        selectedParentId
+      );
+    }
+
+    // Search
     if (searchTerm) {
       whereClause += `
         AND (
@@ -1310,7 +1236,8 @@ export const getDropdownUsers = async (req, res) => {
         )
       `;
 
-      const searchValue = `%${searchTerm}%`;
+      const searchValue =
+        `%${searchTerm}%`;
 
       queryParams.push(
         searchValue,
@@ -1319,6 +1246,9 @@ export const getDropdownUsers = async (req, res) => {
       );
     }
 
+    // =========================================
+    // GET USERS
+    // =========================================
     const [rows] = await db.query(
       `
       SELECT
@@ -1336,24 +1266,48 @@ export const getDropdownUsers = async (req, res) => {
       queryParams
     );
 
+    // =========================================
+    // RESPONSE
+    // =========================================
     return res.status(200).json({
       success: true,
-      create_role_id: requestedRoleId,
-      parent_id: selectedParentId,
-      parent_role_id: parentRoleId,
-      current_role_id: requestedRoleId,
-      current_role_name: getRoleName(requestedRoleId),
-      search: searchTerm,
-      total: rows.length,
-      data: rows,
+
+      create_role_id:
+        requestedRoleId,
+
+      parent_id:
+        selectedParentId,
+
+      current_role_id:
+        requestedRoleId,
+
+      current_role_name:
+        getRoleName(
+          requestedRoleId
+        ),
+
+      search:
+        searchTerm,
+
+      total:
+        rows.length,
+
+      data:
+        rows,
     });
+
   } catch (error) {
-    console.error("getDropdownUsers Error:", error);
+    console.error(
+      "getDropdownUsers Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to get dropdown users",
-      error: error.message,
+      message:
+        "Failed to get dropdown users",
+      error:
+        error.message,
     });
   }
 };

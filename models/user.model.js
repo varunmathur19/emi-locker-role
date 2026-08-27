@@ -210,21 +210,11 @@ export const createUser = async (data) => {
 
   ];
 
-
-  // ==========================================
-  // DATABASE INSERT
-  // ==========================================
-
   const [result] =
     await db.query(
       sql,
       values
     );
-
-
-  // ==========================================
-  // RETURN NEW USER ID
-  // ==========================================
 
   return result.insertId;
 };
