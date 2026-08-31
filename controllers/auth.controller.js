@@ -969,27 +969,17 @@ export const loginUser = async (req, res) => {
 // =========================
 export const getUsers = async (req, res) => {
   try {
-    console.log("=================================");
-    console.log("GET ALL STAFF DATA");
-    console.log("REQ.USER:", req.user);
-    console.log("=================================");
+    const page = Math.max(
+      Number(req.query.page) || 1,
+      1
+    );
 
-    // ==========================================
-    // PAGINATION
-    // ==========================================
+    const limit = Math.max(
+      Number(req.query.limit) || 10,
+      1
+    );
 
-    const page =
-      Number(req.query.page) || 1;
-
-    const limit =
-      Number(req.query.limit) || 10;
-
-    const offset =
-      (page - 1) * limit;
-
-    // ==========================================
-    // ROLE FILTER
-    // ==========================================
+    const offset = (page - 1) * limit;
 
     let role_id = null;
 
@@ -1007,10 +997,6 @@ export const getUsers = async (req, res) => {
       }
     }
 
-    // ==========================================
-    // LOGGED-IN USER
-    // ==========================================
-
     const loggedInUserId = Number(
       req.user?.id
     );
@@ -1018,25 +1004,6 @@ export const getUsers = async (req, res) => {
     const loggedInRoleId = Number(
       req.user?.role_id
     );
-
-    console.log(
-      "Logged In User ID:",
-      loggedInUserId
-    );
-
-    console.log(
-      "Logged In Role ID:",
-      loggedInRoleId
-    );
-
-    console.log(
-      "Requested Role ID:",
-      role_id
-    );
-
-    // ==========================================
-    // VALIDATE USER
-    // ==========================================
 
     if (
       !Number.isInteger(loggedInUserId) ||
@@ -1048,9 +1015,14 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // GET HIERARCHY USERS
-    // ==========================================
+    if (
+      !Number.isInteger(loggedInRoleId)
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid logged-in user role",
+      });
+    }
 
     const result = await getAllUsers(
       limit,
@@ -1060,41 +1032,28 @@ export const getUsers = async (req, res) => {
       loggedInRoleId
     );
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
-
     return res.status(200).json({
       success: true,
-
       pagination: {
         currentPage: page,
-
-        totalPages:
-          Math.ceil(
-            result.total / limit
-          ),
-
+        totalPages: Math.ceil(
+          result.total / limit
+        ),
         limit,
-
-        totalUsers:
-          result.total,
+        totalUsers: result.total,
       },
-
       data: result.users,
     });
-
   } catch (error) {
-
     console.error(
-      "Get Users Error:",
+      "GET USERS ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
       message:
-        error.message ||
+        error?.message ||
         "Failed to get users",
     });
   }
