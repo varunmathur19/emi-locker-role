@@ -210,21 +210,11 @@ export const createUser = async (data) => {
 
   ];
 
-
-  // ==========================================
-  // DATABASE INSERT
-  // ==========================================
-
   const [result] =
     await db.query(
       sql,
       values
     );
-
-
-  // ==========================================
-  // RETURN NEW USER ID
-  // ==========================================
 
   return result.insertId;
 };
@@ -807,59 +797,42 @@ export const getAllUsers = async (
 
 //get getAllHierarchyUsers 
 export const getAllHierarchyUsers = async () => {
+    try {
+        const [rows] = await db.query(`
+            SELECT
+                id,
+                organization_name,
+                role_id,
+                name,
+                email,
+                phone,
+                company_address,
+                country,
+                state,
+                city,
+                created_by,
+                created_at,
+                parent_id,
 
-    const [rows] = await db.query(`
-        SELECT
-            id,
-            organization_name,
-            role_id,
-            name,
-            email,
-            phone,
-            company_address,
-            country,
-            state,
-            city,
-            created_by,
-            created_at,
+                new_device,
+                old_device,
+                supreme_device,
+                pro_star,
+                lite,
+                google_tv,
+                supreme_lock
 
-            parent_id,
+            FROM users
 
-            parent_admin_id,
-            parent_cnf_id,
-            parent_super_distributor_id,
-            parent_distributor_id,
-            parent_fos_id,
-            parent_retailer_id,
-            parent_sub_retailer_id,
-            parent_employee_id,
-            parent_staff_id,
+            ORDER BY id ASC
+        `);
 
-            parent_admin_disabled,
-            parent_cnf_disabled,
-            parent_super_distributor_disabled,
-            parent_distributor_disabled,
-            parent_fos_disabled,
-            parent_retailer_disabled,
-            parent_sub_retailer_disabled,
-            parent_employee_disabled,
-            parent_staff_disabled,
+        return rows;
 
-            new_device,
-            old_device,
-            supreme_device,
-            pro_star,
-            lite,
-            google_tv,
-            supreme_lock
-
-        FROM users
-
-        ORDER BY id ASC
-    `);
-
-    return rows;
+    } catch (error) {
+        console.error("Error fetching hierarchy users:", error);
+        throw error;
+    }
 };
-
 
 

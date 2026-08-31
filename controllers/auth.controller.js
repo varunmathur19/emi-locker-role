@@ -201,27 +201,6 @@ export const createuserrole = async (req, res) => {
       }
     }
 
-    // =====================================================
-    // ALLOWED PARENT ROLES
-    // =====================================================
-    //
-    // Admin
-    //    ↓
-    // CNF
-    //    ↓
-    // Super Distributor
-    //    ↓
-    // Distributor
-    //    ↓
-    // FOS
-    //    ↓
-    // Retailer
-    //    ↓
-    // Sub Retailer
-    //
-    // Employee can have the configured hierarchy parents.
-    //
-    // =====================================================
 
     const allowedParentRoles = {
       [ROLES.CNF]: [
@@ -1164,16 +1143,11 @@ export const getUsers = async (req, res) => {
 // =========================
 export const getDropdownUsers = async (req, res) => {
   try {
-    const {
-      role_id,
-      parent_id,
-      search,
-    } = req.query;
+    const { role_id, parent_id, search } = req.query;
 
-    // =====================================================
-    // VALIDATE ROLE ID
-    // =====================================================
-
+    // =========================================
+    // VALIDATE ROLE
+    // =========================================
     if (
       role_id === undefined ||
       role_id === null ||
@@ -1188,8 +1162,9 @@ export const getDropdownUsers = async (req, res) => {
     const requestedRoleId = Number(role_id);
 
     if (
-      Number.isNaN(requestedRoleId) ||
-      !Number.isInteger(requestedRoleId)
+      !Number.isInteger(requestedRoleId) ||
+      requestedRoleId < 1 ||
+      requestedRoleId > 9
     ) {
       return res.status(400).json({
         success: false,
@@ -1197,52 +1172,9 @@ export const getDropdownUsers = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // SUPPORTED ROLES
-    // =====================================================
-
-    const validRoles = [
-      1, // Admin
-      2, // CNF
-      3, // Super Distributor
-      4, // Distributor
-      5, // FOS
-      6, // Retailer
-      7, // Sub Retailer
-      8, // Employee
-      9, // Staff
-    ];
-
-    if (!validRoles.includes(requestedRoleId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or unsupported role_id",
-      });
-    }
-
-    // =====================================================
-    // DISABLED FIELD MAP
-    // =====================================================
-
-    const disabledFieldMap = {
-      1: "parent_admin_disabled",
-      2: "parent_cnf_disabled",
-      3: "parent_super_distributor_disabled",
-      4: "parent_distributor_disabled",
-      5: "parent_fos_disabled",
-      6: "parent_retailer_disabled",
-      7: "parent_sub_retailer_disabled",
-      8: "parent_employee_disabled",
-      9: "parent_staff_disabled",
-    };
-
-    const disabledField =
-      disabledFieldMap[requestedRoleId];
-
-    // =====================================================
-    // VALIDATE PARENT ID
-    // =====================================================
-
+    // =========================================
+    // PARENT ID
+    // =========================================
     let selectedParentId = null;
 
     if (
@@ -1253,7 +1185,6 @@ export const getDropdownUsers = async (req, res) => {
       selectedParentId = Number(parent_id);
 
       if (
-        Number.isNaN(selectedParentId) ||
         !Number.isInteger(selectedParentId) ||
         selectedParentId <= 0
       ) {
@@ -1264,286 +1195,44 @@ export const getDropdownUsers = async (req, res) => {
       }
     }
 
-    // =====================================================
+    // =========================================
     // SEARCH
-    // =====================================================
-
+    // =========================================
     const searchTerm =
       typeof search === "string"
         ? search.trim()
         : "";
 
-    // =====================================================
-    // CASE 1
-    // NO PARENT SELECTED
-    //
-    // Example:
-    // role_id=2
-    //
-    // Returns all CNF users.
-    //
-    // With search:
-    // role_id=2&search=rahul
-    //
-    // Returns only matching CNF users.
-    // =====================================================
-
-    if (selectedParentId === null) {
-      let whereClause = `
-        WHERE role_id = ?
-      `;
-
-      const queryParams = [
-        requestedRoleId,
-      ];
-
-      // ===================================================
-      // ADD SEARCH CONDITION
-      // ===================================================
-
-      if (searchTerm) {
-        whereClause += `
-          AND (
-            name LIKE ?
-            OR email LIKE ?
-            OR phone LIKE ?
-            OR organization_name LIKE ?
-          )
-        `;
-
-        const searchValue =
-          `%${searchTerm}%`;
-
-        queryParams.push(
-          searchValue,
-          searchValue,
-          searchValue,
-          searchValue
-        );
-      }
-
-      // ===================================================
-      // FETCH USERS
-      // ===================================================
-
-      const [rows] = await db.query(
-        `
-        SELECT
-          id,
-          organization_name,
-          name,
-          email,
-          phone,
-          role_id,
-          parent_id,
-          created_by,
-
-          parent_admin_disabled,
-          parent_cnf_disabled,
-          parent_super_distributor_disabled,
-          parent_distributor_disabled,
-          parent_fos_disabled,
-          parent_retailer_disabled,
-          parent_sub_retailer_disabled,
-          parent_employee_disabled,
-          parent_staff_disabled
-
-        FROM users
-
-        ${whereClause}
-
-        ORDER BY name ASC
-        `,
-        queryParams
-      );
-
-      // ===================================================
-      // REMOVE DISABLED USERS
-      // ===================================================
-
-      const filteredRows = rows.filter((user) => {
-        if (!disabledField) {
-          return true;
-        }
-
-        return Number(
-          user[disabledField] ?? 0
-        ) !== 1;
-      });
-
-      // ===================================================
-      // RESPONSE
-      // ===================================================
-
-      return res.status(200).json({
-        success: true,
-
-        create_role_id:
-          requestedRoleId,
-
-        parent_id:
-          null,
-
-        current_role_id:
-          requestedRoleId,
-
-        current_role_name:
-          getRoleName(requestedRoleId),
-
-        search:
-          searchTerm,
-
-        total:
-          filteredRows.length,
-
-        data:
-          filteredRows,
-      });
-    }
-
-    // =====================================================
-    // CASE 2
-    // PARENT SELECTED
-    // =====================================================
-
-    const [parentRows] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        name,
-        email,
-        phone,
-        role_id,
-        parent_id,
-        created_by,
-
-        parent_admin_disabled,
-        parent_cnf_disabled,
-        parent_super_distributor_disabled,
-        parent_distributor_disabled,
-        parent_fos_disabled,
-        parent_retailer_disabled,
-        parent_sub_retailer_disabled,
-        parent_employee_disabled,
-        parent_staff_disabled
-
-      FROM users
-
-      WHERE id = ?
-
-      LIMIT 1
-      `,
-      [selectedParentId]
-    );
-
-    // =====================================================
-    // PARENT NOT FOUND
-    // =====================================================
-
-    if (!parentRows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "Parent user not found",
-      });
-    }
-
-    const selectedParent =
-      parentRows[0];
-
-    const parentRoleId =
-      Number(selectedParent.role_id);
-
-    // =====================================================
-    // CHECK WHETHER SELECTED PARENT CAN BE PARENT
-    // =====================================================
-
-    if (
-      requestedRoleId <= parentRoleId
-    ) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Selected parent must be a higher level role",
-      });
-    }
-
-    // =====================================================
-    // CHECK PARENT DISABLED THIS ROLE
-    // =====================================================
-
-    const parentDisabledField =
-      disabledFieldMap[requestedRoleId];
-
-    const isDisabledByParent =
-      parentDisabledField &&
-      Number(
-        selectedParent[
-          parentDisabledField
-        ] ?? 0
-      ) === 1;
-
-    if (isDisabledByParent) {
-      return res.status(200).json({
-        success: true,
-
-        create_role_id:
-          requestedRoleId,
-
-        parent_id:
-          selectedParentId,
-
-        parent_role_id:
-          parentRoleId,
-
-        current_role_id:
-          requestedRoleId,
-
-        current_role_name:
-          getRoleName(requestedRoleId),
-
-        search:
-          searchTerm,
-
-        total:
-          0,
-
-        data: [],
-
-        message:
-          `${getRoleName(
-            parentRoleId
-          )} has disabled ${getRoleName(
-            requestedRoleId
-          )}`,
-      });
-    }
-
-    // =====================================================
-    // FETCH REQUESTED ROLE UNDER SELECTED PARENT
-    // =====================================================
-
+    // =========================================
+    // BUILD QUERY
+    // =========================================
     let whereClause = `
       WHERE role_id = ?
-      AND parent_id = ?
     `;
 
     const queryParams = [
       requestedRoleId,
-      selectedParentId,
     ];
 
-    // =====================================================
-    // ADD SEARCH CONDITION
-    // =====================================================
+    // Parent selected hai to uske direct
+    // children hi dikhane hain
+    if (selectedParentId !== null) {
+      whereClause += `
+        AND parent_id = ?
+      `;
 
+      queryParams.push(
+        selectedParentId
+      );
+    }
+
+    // Search
     if (searchTerm) {
       whereClause += `
         AND (
           name LIKE ?
           OR email LIKE ?
           OR phone LIKE ?
-          OR organization_name LIKE ?
         )
       `;
 
@@ -1553,64 +1242,33 @@ export const getDropdownUsers = async (req, res) => {
       queryParams.push(
         searchValue,
         searchValue,
-        searchValue,
         searchValue
       );
     }
 
-    // =====================================================
-    // FETCH USERS
-    // =====================================================
-
+    // =========================================
+    // GET USERS
+    // =========================================
     const [rows] = await db.query(
       `
       SELECT
         id,
-        organization_name,
         name,
         email,
         phone,
         role_id,
         parent_id,
-        created_by,
-
-        parent_admin_disabled,
-        parent_cnf_disabled,
-        parent_super_distributor_disabled,
-        parent_distributor_disabled,
-        parent_fos_disabled,
-        parent_retailer_disabled,
-        parent_sub_retailer_disabled,
-        parent_employee_disabled,
-        parent_staff_disabled
-
+        created_by
       FROM users
-
       ${whereClause}
-
       ORDER BY name ASC
       `,
       queryParams
     );
 
-    // =====================================================
-    // REMOVE DISABLED USERS
-    // =====================================================
-
-    const filteredRows = rows.filter((user) => {
-      if (!disabledField) {
-        return true;
-      }
-
-      return Number(
-        user[disabledField] ?? 0
-      ) !== 1;
-    });
-
-    // =====================================================
+    // =========================================
     // RESPONSE
-    // =====================================================
-
+    // =========================================
     return res.status(200).json({
       success: true,
 
@@ -1620,27 +1278,25 @@ export const getDropdownUsers = async (req, res) => {
       parent_id:
         selectedParentId,
 
-      parent_role_id:
-        parentRoleId,
-
       current_role_id:
         requestedRoleId,
 
       current_role_name:
-        getRoleName(requestedRoleId),
+        getRoleName(
+          requestedRoleId
+        ),
 
       search:
         searchTerm,
 
       total:
-        filteredRows.length,
+        rows.length,
 
       data:
-        filteredRows,
+        rows,
     });
 
   } catch (error) {
-
     console.error(
       "getDropdownUsers Error:",
       error
@@ -1648,10 +1304,8 @@ export const getDropdownUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-
       message:
         "Failed to get dropdown users",
-
       error:
         error.message,
     });
@@ -1683,11 +1337,14 @@ const getRoleName = (roleId) => {
 
 
 export const updatedstaffdata = async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
     const { id } = req.params;
 
     const {
       organization_name,
+      role_id,
       name,
       email,
       phone,
@@ -1695,15 +1352,10 @@ export const updatedstaffdata = async (req, res) => {
       country,
       state,
       city,
-
-      // =========================================
-      // ONLY ONE PARENT ID
-      // =========================================
       parent_id,
 
-      // =========================================
-      // DEVICE PERMISSIONS
-      // =========================================
+      parent_hierarchy,
+
       new_device,
       old_device,
       supreme_device,
@@ -1712,15 +1364,9 @@ export const updatedstaffdata = async (req, res) => {
       google_tv,
       supreme_lock,
 
-      // =========================================
-      // PASSWORD
-      // =========================================
       password,
     } = req.body;
 
-    // =========================================
-    // VALIDATE USER ID
-    // =========================================
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -1730,46 +1376,105 @@ export const updatedstaffdata = async (req, res) => {
 
     const userId = Number(id);
 
-    if (!Number.isInteger(userId) || userId <= 0) {
+    if (
+      !Number.isInteger(userId) ||
+      userId <= 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid User ID",
       });
     }
 
-    // =========================================
-    // CHECK USER EXISTS
-    // =========================================
-    const [existingUser] = await db.query(
-      `
-      SELECT id, role_id
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
+    const [existingRows] =
+      await connection.query(
+        `
+        SELECT
+          id,
+          role_id,
+          parent_id
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [userId]
+      );
 
-    if (!existingUser || existingUser.length === 0) {
+    if (!existingRows.length) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    // =========================================
-    // NORMALIZE PARENT ID
-    // =========================================
-    const normalizedParentId =
-      parent_id !== null &&
-      parent_id !== undefined &&
-      parent_id !== ""
-        ? Number(parent_id)
-        : null;
+    const currentRoleId = Number(
+      role_id ??
+        existingRows[0].role_id
+    );
 
-    // =========================================
-    // BUILD UPDATE QUERY
-    // =========================================
+    let normalizedParentId =
+      existingRows[0].parent_id ?? null;
+
+    if (
+      parent_id !== undefined
+    ) {
+      if (
+        parent_id === null ||
+        parent_id === ""
+      ) {
+        normalizedParentId = null;
+      } else {
+        normalizedParentId =
+          Number(parent_id);
+
+        if (
+          !Number.isInteger(
+            normalizedParentId
+          ) ||
+          normalizedParentId <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid parent ID",
+          });
+        }
+
+        if (
+          normalizedParentId ===
+          userId
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "User cannot be their own parent",
+          });
+        }
+
+        const [parentRows] =
+          await connection.query(
+            `
+            SELECT
+              id,
+              role_id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [normalizedParentId]
+          );
+
+        if (!parentRows.length) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Selected parent not found",
+          });
+        }
+      }
+    }
+
+    await connection.beginTransaction();
 
     let updateQuery = `
       UPDATE users
@@ -1783,7 +1488,6 @@ export const updatedstaffdata = async (req, res) => {
         state = ?,
         city = ?,
         parent_id = ?,
-
         new_device = ?,
         old_device = ?,
         supreme_device = ?,
@@ -1814,93 +1518,190 @@ export const updatedstaffdata = async (req, res) => {
       Number(supreme_lock ?? 0),
     ];
 
-    // =========================================
-    // PASSWORD ONLY IF PROVIDED
-    // =========================================
     if (
       password !== undefined &&
       password !== null &&
       password !== ""
     ) {
-      updateQuery += `
-        , password = ?
+      updateQuery += `,
+        password = ?
       `;
 
       updateValues.push(password);
     }
 
-    // =========================================
-    // WHERE
-    // =========================================
     updateQuery += `
       WHERE id = ?
     `;
 
     updateValues.push(userId);
 
-    // =========================================
-    // UPDATE USER
-    // =========================================
-    const [result] = await db.query(
+    await connection.query(
       updateQuery,
       updateValues
     );
 
-    // =========================================
-    // CHECK UPDATE
-    // =========================================
-    if (result.affectedRows === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No changes made",
-      });
+    if (
+      Array.isArray(
+        parent_hierarchy
+      )
+    ) {
+      const hierarchy = parent_hierarchy
+        .map((item) => ({
+          role_id: Number(
+            item?.role_id
+          ),
+          user_id: Number(
+            item?.user_id
+          ),
+        }))
+        .filter(
+          (item) =>
+            Number.isInteger(
+              item.role_id
+            ) &&
+            item.role_id > 0 &&
+            Number.isInteger(
+              item.user_id
+            ) &&
+            item.user_id > 0
+        );
+
+      for (
+        let index = 1;
+        index < hierarchy.length;
+        index++
+      ) {
+        const current =
+          hierarchy[index];
+
+        const previous =
+          hierarchy[index - 1];
+
+        if (
+          current.user_id ===
+          userId
+        ) {
+          continue;
+        }
+
+        if (
+          current.user_id ===
+          previous.user_id
+        ) {
+          continue;
+        }
+
+        const [selectedUserRows] =
+          await connection.query(
+            `
+            SELECT
+              id,
+              role_id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [current.user_id]
+          );
+
+        if (
+          !selectedUserRows.length
+        ) {
+          throw new Error(
+            `Hierarchy user not found: ${current.user_id}`
+          );
+        }
+
+        const actualRoleId =
+          Number(
+            selectedUserRows[0]
+              .role_id
+          );
+
+        if (
+          actualRoleId !==
+          current.role_id
+        ) {
+          throw new Error(
+            `Role mismatch for user ${current.user_id}`
+          );
+        }
+
+        const [parentRows] =
+          await connection.query(
+            `
+            SELECT
+              id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [previous.user_id]
+          );
+
+        if (!parentRows.length) {
+          throw new Error(
+            `Parent user not found: ${previous.user_id}`
+          );
+        }
+
+        await connection.query(
+          `
+          UPDATE users
+          SET parent_id = ?
+          WHERE id = ?
+          AND role_id = ?
+          `,
+          [
+            previous.user_id,
+            current.user_id,
+            current.role_id,
+          ]
+        );
+      }
     }
 
-    // =========================================
-    // GET UPDATED USER
-    // IMPORTANT:
-    // PASSWORD SELECT NAHI KARNA
-    // =========================================
-    const [updatedUser] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        role_id,
-        name,
-        email,
-        phone,
-        company_address,
-        country,
-        state,
-        city,
-        parent_id,
+    const [updatedRows] =
+      await connection.query(
+        `
+        SELECT
+          id,
+          organization_name,
+          role_id,
+          name,
+          email,
+          phone,
+          company_address,
+          country,
+          state,
+          city,
+          parent_id,
+          new_device,
+          old_device,
+          supreme_device,
+          pro_star,
+          lite,
+          google_tv,
+          supreme_lock
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [userId]
+      );
 
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock
+    await connection.commit();
 
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    // =========================================
-    // SUCCESS
-    // =========================================
     return res.status(200).json({
       success: true,
-      message: "Staff data updated successfully",
-      data: updatedUser[0],
+      message:
+        "Staff data updated successfully",
+      data: updatedRows[0],
     });
-
   } catch (error) {
+    await connection.rollback();
+
     console.error(
       "UPDATE STAFF ERROR:",
       error
@@ -1908,9 +1709,12 @@ export const updatedstaffdata = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update staff data",
+      message:
+        "Failed to update staff data",
       error: error.message,
     });
+  } finally {
+    connection.release();
   }
 };
 
@@ -3087,71 +2891,7 @@ export const getModules = async (
 
 };
 
-// export const getModules = async (req, res) => {
-//   try {
-//     // ==========================================
-//     // GET MASTER ADMIN MODULES
-//     // ==========================================
 
-//     const [rows] = await db.query(
-//       `
-//       SELECT modules
-//       FROM users
-//       WHERE role_id = 0
-//       LIMIT 1
-//       `
-//     );
-
-//     // ==========================================
-//     // MASTER ADMIN NOT FOUND
-//     // ==========================================
-
-//     if (!rows.length) {
-//       return res.json({
-//         success: true,
-//         modules: [],
-//       });
-//     }
-
-//     // ==========================================
-//     // GET MODULES
-//     // ==========================================
-
-//     let modules = [];
-
-//     if (rows[0].modules) {
-//       modules =
-//         typeof rows[0].modules === "string"
-//           ? JSON.parse(rows[0].modules)
-//           : rows[0].modules;
-//     }
-
-//     // ==========================================
-//     // SAFETY CHECK
-//     // ==========================================
-
-//     if (!Array.isArray(modules)) {
-//       modules = [];
-//     }
-
-//     // ==========================================
-//     // RESPONSE
-//     // ==========================================
-
-//     return res.json({
-//       success: true,
-//       modules,
-//     });
-
-//   } catch (error) {
-//     console.error("Get Modules Error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//     });
-//   }
-// };
 
 export const deleteModule = async (req, res) => {
   try {
@@ -3459,32 +3199,24 @@ export const deleteModule = async (req, res) => {
 
 
 export const updateModule = async (req, res) => {
-
   try {
+    if (Number(req.user?.role_id) !== 0) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-    // =================================================
-    // ROLE CHECK
-    // =================================================
-
-    if (
-      Number(req.user?.role_id) !== 0
-    ) {
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(403).json({
-
         success: false,
-
-        message:
-          "Only Master Admin can update module",
-
+        message: "Only Master Admin can update module",
       });
-
     }
-
-
-    // =================================================
-    // GET FORM DATA
-    // =================================================
 
     const {
       oldModule,
@@ -3493,68 +3225,42 @@ export const updateModule = async (req, res) => {
       status,
     } = req.body;
 
-
-    // =================================================
-    // OLD MODULE REQUIRED
-    // =================================================
-
     if (
       typeof oldModule !== "string" ||
       !oldModule.trim()
     ) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "Old module name is required",
-
+        message: "Old module name is required",
       });
-
     }
-
-
-    // =================================================
-    // CHECK NEW MODULE
-    // =================================================
 
     const hasNewModule =
       typeof newModule === "string" &&
       newModule.trim() !== "";
-
-
-    // =================================================
-    // CHECK NEW SEQUENCE
-    // =================================================
 
     const hasNewSequence =
       newSequence !== undefined &&
       newSequence !== null &&
       String(newSequence).trim() !== "";
 
-
-    // =================================================
-    // CHECK NEW STATUS
-    // =================================================
-
     const hasNewStatus =
       status !== undefined &&
       status !== null &&
       String(status).trim() !== "";
 
-
-    // =================================================
-    // CHECK NEW ICON
-    // =================================================
-
-    const hasNewIcon =
-      !!req.file;
-
-
-    // =================================================
-    // AT LEAST ONE FIELD REQUIRED
-    // =================================================
+    const hasNewIcon = !!req.file;
 
     if (
       !hasNewModule &&
@@ -3562,654 +3268,311 @@ export const updateModule = async (req, res) => {
       !hasNewStatus &&
       !hasNewIcon
     ) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(400).json({
-
         success: false,
-
-        message:
-          "At least one field is required to update",
-
+        message: "At least one field is required to update",
       });
-
     }
-
-
-    // =================================================
-    // VALIDATE SEQUENCE
-    // =================================================
 
     let sequence = null;
 
-
     if (hasNewSequence) {
-
-      sequence =
-        Number(newSequence);
-
+      sequence = Number(newSequence);
 
       if (
         !Number.isInteger(sequence) ||
         sequence < 1
       ) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
         return res.status(400).json({
-
           success: false,
-
-          message:
-            "Valid sequence number is required",
-
+          message: "Valid sequence number is required",
         });
-
       }
-
     }
-
-
-    // =================================================
-    // VALIDATE STATUS
-    // 0 = INACTIVE / HIDE
-    // 1 = ACTIVE / SHOW
-    // =================================================
 
     let moduleStatus = null;
 
-
     if (hasNewStatus) {
-
-      moduleStatus =
-        Number(status);
-
+      moduleStatus = Number(status);
 
       if (
         moduleStatus !== 0 &&
         moduleStatus !== 1
       ) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
         return res.status(400).json({
-
           success: false,
-
-          message:
-            "Status must be either 0 or 1",
-
+          message: "Status must be either 0 or 1",
         });
-
       }
-
     }
 
+    const oldModuleName = oldModule
+      .trim()
+      .toLowerCase();
 
-    // =================================================
-    // CLEAN MODULE NAMES
-    // =================================================
+    const newModuleName = hasNewModule
+      ? newModule.trim().toLowerCase()
+      : null;
 
-    const oldModuleName =
-      oldModule
-        .trim()
-        .toLowerCase();
-
-
-    const newModuleName =
-      hasNewModule
-        ? newModule
-            .trim()
-            .toLowerCase()
-        : null;
-
-
-    // =================================================
-    // GET MASTER ADMIN
-    // =================================================
-
-    const [rows] =
-      await db.query(
-        `
-        SELECT
-          id,
-          modules
-        FROM users
-        WHERE role_id = 0
-        LIMIT 1
-        `
-      );
-
-
-    // =================================================
-    // MASTER ADMIN NOT FOUND
-    // =================================================
+    const [rows] = await db.query(`
+      SELECT
+        id,
+        modules
+      FROM users
+      WHERE role_id = 0
+      LIMIT 1
+    `);
 
     if (!rows.length) {
-
-      // Delete uploaded icon
-
       if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        const uploadedFilePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-
-        if (
-          fs.existsSync(
-            uploadedFilePath
-          )
-        ) {
-
-          fs.unlinkSync(
-            uploadedFilePath
-          );
-
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
         }
-
       }
 
-
       return res.status(404).json({
-
         success: false,
-
-        message:
-          "Master Admin not found",
-
+        message: "Master Admin not found",
       });
-
     }
 
+    const masterAdmin = rows[0];
 
-    const masterAdmin =
-      rows[0];
-
-
-    // =================================================
-    // PARSE MODULES
-    // =================================================
-
-    let modules =
-      masterAdmin.modules;
-
+    let modules = masterAdmin.modules;
 
     if (!modules) {
-
       modules = [];
-
-    }
-    else if (
-      typeof modules === "string"
-    ) {
-
+    } else if (typeof modules === "string") {
       try {
-
-        modules =
-          JSON.parse(modules);
-
-      }
-      catch (error) {
-
-        console.error(
-          "MODULE JSON PARSE ERROR:",
-          error
-        );
-
-
-        // Delete uploaded icon
-
+        modules = JSON.parse(modules);
+      } catch (error) {
         if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(500).json({
-
-          success: false,
-
-          message:
-            "Invalid modules data",
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // ARRAY CHECK
-    // =================================================
-
-    if (!Array.isArray(modules)) {
-
-      return res.status(500).json({
-
-        success: false,
-
-        message:
-          "Modules data must be an array",
-
-      });
-
-    }
-
-
-    // =================================================
-    // CONVERT OLD MODULE FORMAT
-    //
-    // OLD:
-    // {
-    //   name: "cnf",
-    //   icon: null
-    // }
-    //
-    // NEW:
-    // {
-    //   name: "cnf",
-    //   icon: null,
-    //   sequence: 1,
-    //   status: 1
-    // }
-    // =================================================
-
-    modules =
-      modules.map(
-        (item, index) => {
-
-          // -------------------------------------------
-          // STRING FORMAT
-          // -------------------------------------------
-
-          if (
-            typeof item === "string"
-          ) {
-
-            return {
-
-              name:
-                item,
-
-              icon:
-                null,
-
-              sequence:
-                index + 1,
-
-              status:
-                1,
-
-            };
-
-          }
-
-
-          // -------------------------------------------
-          // OBJECT FORMAT
-          // -------------------------------------------
-
-          return {
-
-            name:
-              item?.name ||
-              "",
-
-            icon:
-              item?.icon ||
-              null,
-
-            sequence:
-              Number(
-                item?.sequence ??
-                index + 1
-              ),
-
-            status:
-              Number(
-                item?.status ??
-                1
-              ) === 0
-                ? 0
-                : 1,
-
-          };
-
-        }
-      );
-
-
-    // =================================================
-    // FIND MODULE
-    // =================================================
-
-    const moduleIndex =
-      modules.findIndex(
-        (item) => {
-
-          return (
-            String(
-              item?.name ||
-              ""
-            )
-              .trim()
-              .toLowerCase() ===
-            oldModuleName
-          );
-
-        }
-      );
-
-
-    // =================================================
-    // MODULE NOT FOUND
-    // =================================================
-
-    if (
-      moduleIndex === -1
-    ) {
-
-      // Delete uploaded icon
-
-      if (req.file) {
-
-        const uploadedFilePath =
-          path.join(
+          const uploadedFilePath = path.join(
             uploadDir,
             req.file.filename
           );
 
-
-        if (
-          fs.existsSync(
-            uploadedFilePath
-          )
-        ) {
-
-          fs.unlinkSync(
-            uploadedFilePath
-          );
-
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
         }
 
+        return res.status(500).json({
+          success: false,
+          message: "Invalid modules data",
+        });
+      }
+    }
+
+    if (!Array.isArray(modules)) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
       }
 
+      return res.status(500).json({
+        success: false,
+        message: "Modules data must be an array",
+      });
+    }
+
+    modules = modules.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          name: item,
+          icon: null,
+          sequence: index + 1,
+          status: 1,
+        };
+      }
+
+      return {
+        name: item?.name || "",
+        icon: item?.icon || null,
+        sequence: Number(
+          item?.sequence ?? index + 1
+        ),
+        status:
+          Number(item?.status ?? 1) === 0
+            ? 0
+            : 1,
+      };
+    });
+
+    const moduleIndex = modules.findIndex(
+      (item) =>
+        String(item?.name || "")
+          .trim()
+          .toLowerCase() === oldModuleName
+    );
+
+    if (moduleIndex === -1) {
+      if (req.file) {
+        const uploadedFilePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
+
+        if (fs.existsSync(uploadedFilePath)) {
+          fs.unlinkSync(uploadedFilePath);
+        }
+      }
 
       return res.status(404).json({
-
         success: false,
-
-        message:
-          `Old module "${oldModule}" not found`,
-
+        message: `Old module "${oldModule}" not found`,
       });
-
     }
 
-
-    // =================================================
-    // CURRENT MODULE
-    // =================================================
-
-    const currentModule =
-      modules[moduleIndex];
-
-
-    // =================================================
-    // DUPLICATE MODULE NAME
-    // =================================================
+    const currentModule = modules[moduleIndex];
 
     if (hasNewModule) {
-
-      const duplicateModule =
-        modules.some(
-          (item, index) => {
-
-            if (
-              index === moduleIndex
-            ) {
-
-              return false;
-
-            }
-
-
-            return (
-              String(
-                item?.name ||
-                ""
-              )
-                .trim()
-                .toLowerCase() ===
-              newModuleName
-            );
-
+      const duplicateModule = modules.some(
+        (item, index) => {
+          if (index === moduleIndex) {
+            return false;
           }
-        );
 
+          return (
+            String(item?.name || "")
+              .trim()
+              .toLowerCase() === newModuleName
+          );
+        }
+      );
 
       if (duplicateModule) {
-
-        // Delete uploaded icon
-
         if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(409).json({
-
-          success: false,
-
-          message:
-            `Module "${newModule}" already exists`,
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // DUPLICATE SEQUENCE
-    // =================================================
-
-    if (hasNewSequence) {
-
-      const duplicateSequence =
-        modules.some(
-          (item, index) => {
-
-            if (
-              index === moduleIndex
-            ) {
-
-              return false;
-
-            }
-
-
-            return (
-              Number(
-                item?.sequence
-              ) ===
-              sequence
-            );
-
-          }
-        );
-
-
-      if (duplicateSequence) {
-
-        // Delete uploaded icon
-
-        if (req.file) {
-
-          const uploadedFilePath =
-            path.join(
-              uploadDir,
-              req.file.filename
-            );
-
-
-          if (
-            fs.existsSync(
-              uploadedFilePath
-            )
-          ) {
-
-            fs.unlinkSync(
-              uploadedFilePath
-            );
-
-          }
-
-        }
-
-
-        return res.status(422).json({
-
-          success: false,
-
-          message:
-            `Sequence ${sequence} is already used`,
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // OLD VALUES
-    // =================================================
-
-    const oldIcon =
-      currentModule?.icon ||
-      null;
-
-
-    // =================================================
-    // FINAL NAME
-    // =================================================
-
-    const finalName =
-      hasNewModule
-        ? newModuleName
-        : currentModule?.name || "";
-
-
-    // =================================================
-    // FINAL SEQUENCE
-    // =================================================
-
-    const finalSequence =
-      hasNewSequence
-        ? sequence
-        : Number(
-            currentModule?.sequence ||
-            moduleIndex + 1
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
           );
 
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
 
-    // =================================================
-    // FINAL STATUS
-    // =================================================
-
-    const finalStatus =
-      hasNewStatus
-        ? moduleStatus
-        : Number(
-            currentModule?.status ?? 1
-          ) === 0
-            ? 0
-            : 1;
-
-
-    // =================================================
-    // FINAL ICON
-    // =================================================
-
-    let finalIcon =
-      currentModule?.icon ||
-      null;
-
-
-    // =================================================
-    // UPDATE ICON ONLY IF PROVIDED
-    // =================================================
-
-    if (hasNewIcon) {
-
-      finalIcon =
-        `/uploads/modules/${req.file.filename}`;
-
+        return res.status(409).json({
+          success: false,
+          message: `Module "${newModule}" already exists`,
+        });
+      }
     }
 
+    if (hasNewSequence) {
+      const duplicateSequence = modules.some(
+        (item, index) => {
+          if (index === moduleIndex) {
+            return false;
+          }
 
-    // =================================================
-    // UPDATE MODULE
-    // =================================================
+          return (
+            Number(item?.sequence) === sequence
+          );
+        }
+      );
+
+      if (duplicateSequence) {
+        if (req.file) {
+          const uploadedFilePath = path.join(
+            uploadDir,
+            req.file.filename
+          );
+
+          if (fs.existsSync(uploadedFilePath)) {
+            fs.unlinkSync(uploadedFilePath);
+          }
+        }
+
+        return res.status(422).json({
+          success: false,
+          message: `Sequence ${sequence} is already used`,
+        });
+      }
+    }
+
+    const oldIcon = currentModule?.icon || null;
+
+    const finalName = hasNewModule
+      ? newModuleName
+      : currentModule?.name || "";
+
+    const finalSequence = hasNewSequence
+      ? sequence
+      : Number(
+          currentModule?.sequence ||
+          moduleIndex + 1
+        );
+
+    const finalStatus = hasNewStatus
+      ? moduleStatus
+      : Number(
+          currentModule?.status ?? 1
+        ) === 0
+        ? 0
+        : 1;
+
+    let finalIcon = currentModule?.icon || null;
+
+    if (hasNewIcon) {
+      finalIcon = `/uploads/modules/${req.file.filename}`;
+    }
+
+    const previousStatus = Number(
+      currentModule?.status ?? 1
+    );
 
     modules[moduleIndex] = {
-
-      name:
-        finalName,
-
-      icon:
-        finalIcon,
-
-      sequence:
-        finalSequence,
-
-      status:
-        finalStatus,
-
+      name: finalName,
+      icon: finalIcon,
+      sequence: finalSequence,
+      status: finalStatus,
     };
-
-
-    // =================================================
-    // SORT BY SEQUENCE
-    // =================================================
 
     modules.sort(
       (a, b) =>
@@ -4217,10 +3580,58 @@ export const updateModule = async (req, res) => {
         Number(b.sequence)
     );
 
+    if (
+      hasNewStatus &&
+      previousStatus === 1 &&
+      finalStatus === 0
+    ) {
+      const roleMap = {
+        admin: 1,
+        cnf: 2,
+        "super distributor": 3,
+        "super distributer": 3,
+        distributor: 4,
+        fos: 5,
+        retailer: 6,
+        "sub retailer": 7,
+        employee: 8,
+        staff: 9,
+      };
 
-    // =================================================
-    // UPDATE DATABASE
-    // =================================================
+      const inactiveRoleId =
+        roleMap[oldModuleName];
+
+      if (inactiveRoleId) {
+        const [inactiveUsers] = await db.query(
+          `
+          SELECT
+            id,
+            parent_id
+          FROM users
+          WHERE role_id = ?
+          `,
+          [inactiveRoleId]
+        );
+
+        for (const inactiveUser of inactiveUsers) {
+          if (!inactiveUser.parent_id) {
+            continue;
+          }
+
+          await db.query(
+            `
+            UPDATE users
+            SET parent_id = ?
+            WHERE parent_id = ?
+            `,
+            [
+              inactiveUser.parent_id,
+              inactiveUser.id,
+            ]
+          );
+        }
+      }
+    }
 
     await db.query(
       `
@@ -4235,148 +3646,71 @@ export const updateModule = async (req, res) => {
       ]
     );
 
-
-    // =================================================
-    // DELETE OLD ICON
-    // ONLY WHEN NEW ICON IS UPLOADED
-    // =================================================
-
     if (
       hasNewIcon &&
       oldIcon &&
       oldIcon !== finalIcon
     ) {
-
       try {
+        const oldIconPath = path.join(
+          process.cwd(),
+          oldIcon.replace(/^\/+/, "")
+        );
 
-        const oldIconPath =
-          path.join(
-            process.cwd(),
-            oldIcon.replace(
-              /^\/+/,
-              ""
-            )
-          );
-
-
-        if (
-          fs.existsSync(
-            oldIconPath
-          )
-        ) {
-
-          fs.unlinkSync(
-            oldIconPath
-          );
-
+        if (fs.existsSync(oldIconPath)) {
+          fs.unlinkSync(oldIconPath);
         }
-
-      }
-      catch (iconDeleteError) {
-
+      } catch (iconDeleteError) {
         console.error(
           "OLD ICON DELETE ERROR:",
           iconDeleteError
         );
-
       }
-
     }
 
-
-    // =================================================
-    // SUCCESS
-    // =================================================
-
     return res.status(200).json({
-
       success: true,
-
-      message:
-        "Module updated successfully",
-
+      message: "Module updated successfully",
       module: {
-
-        oldModule:
-          oldModuleName,
-
-        newModule:
-          finalName,
-
-        icon:
-          finalIcon,
-
-        sequence:
-          finalSequence,
-
-        status:
-          finalStatus,
-
+        oldModule: oldModuleName,
+        newModule: finalName,
+        icon: finalIcon,
+        sequence: finalSequence,
+        status: finalStatus,
       },
-
       modules,
-
     });
-
-  }
-  catch (error) {
-
+  } catch (error) {
     console.error(
       "UPDATE MODULE ERROR:",
       error
     );
 
-
-    // =================================================
-    // DELETE NEW ICON ON ERROR
-    // =================================================
-
     if (req.file) {
-
       try {
+        const filePath = path.join(
+          uploadDir,
+          req.file.filename
+        );
 
-        const filePath =
-          path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-
-        if (
-          fs.existsSync(filePath)
-        ) {
-
-          fs.unlinkSync(
-            filePath
-          );
-
+        if (fs.existsSync(filePath)) {
+          fs.unlinkSync(filePath);
         }
-
-      }
-      catch (fileError) {
-
+      } catch (fileError) {
         console.error(
           "FILE DELETE ERROR:",
           fileError
         );
-
       }
-
     }
 
-
     return res.status(500).json({
-
       success: false,
-
       message:
         error?.message ||
         "Failed to update module",
-
     });
-
   }
-
 };
 
 export const updateUserStatus = async (req, res) => {
