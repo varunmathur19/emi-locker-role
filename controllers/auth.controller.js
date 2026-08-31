@@ -1337,11 +1337,14 @@ const getRoleName = (roleId) => {
 
 
 export const updatedstaffdata = async (req, res) => {
+  const connection = await db.getConnection();
+
   try {
     const { id } = req.params;
 
     const {
       organization_name,
+      role_id,
       name,
       email,
       phone,
@@ -1349,15 +1352,10 @@ export const updatedstaffdata = async (req, res) => {
       country,
       state,
       city,
-
-      // =========================================
-      // ONLY ONE PARENT ID
-      // =========================================
       parent_id,
 
-      // =========================================
-      // DEVICE PERMISSIONS
-      // =========================================
+      parent_hierarchy,
+
       new_device,
       old_device,
       supreme_device,
@@ -1366,15 +1364,9 @@ export const updatedstaffdata = async (req, res) => {
       google_tv,
       supreme_lock,
 
-      // =========================================
-      // PASSWORD
-      // =========================================
       password,
     } = req.body;
 
-    // =========================================
-    // VALIDATE USER ID
-    // =========================================
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -1384,46 +1376,105 @@ export const updatedstaffdata = async (req, res) => {
 
     const userId = Number(id);
 
-    if (!Number.isInteger(userId) || userId <= 0) {
+    if (
+      !Number.isInteger(userId) ||
+      userId <= 0
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid User ID",
       });
     }
 
-    // =========================================
-    // CHECK USER EXISTS
-    // =========================================
-    const [existingUser] = await db.query(
-      `
-      SELECT id, role_id
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
+    const [existingRows] =
+      await connection.query(
+        `
+        SELECT
+          id,
+          role_id,
+          parent_id
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [userId]
+      );
 
-    if (!existingUser || existingUser.length === 0) {
+    if (!existingRows.length) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    // =========================================
-    // NORMALIZE PARENT ID
-    // =========================================
-    const normalizedParentId =
-      parent_id !== null &&
-      parent_id !== undefined &&
-      parent_id !== ""
-        ? Number(parent_id)
-        : null;
+    const currentRoleId = Number(
+      role_id ??
+        existingRows[0].role_id
+    );
 
-    // =========================================
-    // BUILD UPDATE QUERY
-    // =========================================
+    let normalizedParentId =
+      existingRows[0].parent_id ?? null;
+
+    if (
+      parent_id !== undefined
+    ) {
+      if (
+        parent_id === null ||
+        parent_id === ""
+      ) {
+        normalizedParentId = null;
+      } else {
+        normalizedParentId =
+          Number(parent_id);
+
+        if (
+          !Number.isInteger(
+            normalizedParentId
+          ) ||
+          normalizedParentId <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid parent ID",
+          });
+        }
+
+        if (
+          normalizedParentId ===
+          userId
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "User cannot be their own parent",
+          });
+        }
+
+        const [parentRows] =
+          await connection.query(
+            `
+            SELECT
+              id,
+              role_id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [normalizedParentId]
+          );
+
+        if (!parentRows.length) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Selected parent not found",
+          });
+        }
+      }
+    }
+
+    await connection.beginTransaction();
 
     let updateQuery = `
       UPDATE users
@@ -1437,7 +1488,6 @@ export const updatedstaffdata = async (req, res) => {
         state = ?,
         city = ?,
         parent_id = ?,
-
         new_device = ?,
         old_device = ?,
         supreme_device = ?,
@@ -1468,93 +1518,190 @@ export const updatedstaffdata = async (req, res) => {
       Number(supreme_lock ?? 0),
     ];
 
-    // =========================================
-    // PASSWORD ONLY IF PROVIDED
-    // =========================================
     if (
       password !== undefined &&
       password !== null &&
       password !== ""
     ) {
-      updateQuery += `
-        , password = ?
+      updateQuery += `,
+        password = ?
       `;
 
       updateValues.push(password);
     }
 
-    // =========================================
-    // WHERE
-    // =========================================
     updateQuery += `
       WHERE id = ?
     `;
 
     updateValues.push(userId);
 
-    // =========================================
-    // UPDATE USER
-    // =========================================
-    const [result] = await db.query(
+    await connection.query(
       updateQuery,
       updateValues
     );
 
-    // =========================================
-    // CHECK UPDATE
-    // =========================================
-    if (result.affectedRows === 0) {
-      return res.status(400).json({
-        success: false,
-        message: "No changes made",
-      });
+    if (
+      Array.isArray(
+        parent_hierarchy
+      )
+    ) {
+      const hierarchy = parent_hierarchy
+        .map((item) => ({
+          role_id: Number(
+            item?.role_id
+          ),
+          user_id: Number(
+            item?.user_id
+          ),
+        }))
+        .filter(
+          (item) =>
+            Number.isInteger(
+              item.role_id
+            ) &&
+            item.role_id > 0 &&
+            Number.isInteger(
+              item.user_id
+            ) &&
+            item.user_id > 0
+        );
+
+      for (
+        let index = 1;
+        index < hierarchy.length;
+        index++
+      ) {
+        const current =
+          hierarchy[index];
+
+        const previous =
+          hierarchy[index - 1];
+
+        if (
+          current.user_id ===
+          userId
+        ) {
+          continue;
+        }
+
+        if (
+          current.user_id ===
+          previous.user_id
+        ) {
+          continue;
+        }
+
+        const [selectedUserRows] =
+          await connection.query(
+            `
+            SELECT
+              id,
+              role_id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [current.user_id]
+          );
+
+        if (
+          !selectedUserRows.length
+        ) {
+          throw new Error(
+            `Hierarchy user not found: ${current.user_id}`
+          );
+        }
+
+        const actualRoleId =
+          Number(
+            selectedUserRows[0]
+              .role_id
+          );
+
+        if (
+          actualRoleId !==
+          current.role_id
+        ) {
+          throw new Error(
+            `Role mismatch for user ${current.user_id}`
+          );
+        }
+
+        const [parentRows] =
+          await connection.query(
+            `
+            SELECT
+              id
+            FROM users
+            WHERE id = ?
+            LIMIT 1
+            `,
+            [previous.user_id]
+          );
+
+        if (!parentRows.length) {
+          throw new Error(
+            `Parent user not found: ${previous.user_id}`
+          );
+        }
+
+        await connection.query(
+          `
+          UPDATE users
+          SET parent_id = ?
+          WHERE id = ?
+          AND role_id = ?
+          `,
+          [
+            previous.user_id,
+            current.user_id,
+            current.role_id,
+          ]
+        );
+      }
     }
 
-    // =========================================
-    // GET UPDATED USER
-    // IMPORTANT:
-    // PASSWORD SELECT NAHI KARNA
-    // =========================================
-    const [updatedUser] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        role_id,
-        name,
-        email,
-        phone,
-        company_address,
-        country,
-        state,
-        city,
-        parent_id,
+    const [updatedRows] =
+      await connection.query(
+        `
+        SELECT
+          id,
+          organization_name,
+          role_id,
+          name,
+          email,
+          phone,
+          company_address,
+          country,
+          state,
+          city,
+          parent_id,
+          new_device,
+          old_device,
+          supreme_device,
+          pro_star,
+          lite,
+          google_tv,
+          supreme_lock
+        FROM users
+        WHERE id = ?
+        LIMIT 1
+        `,
+        [userId]
+      );
 
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock
+    await connection.commit();
 
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    // =========================================
-    // SUCCESS
-    // =========================================
     return res.status(200).json({
       success: true,
-      message: "Staff data updated successfully",
-      data: updatedUser[0],
+      message:
+        "Staff data updated successfully",
+      data: updatedRows[0],
     });
-
   } catch (error) {
+    await connection.rollback();
+
     console.error(
       "UPDATE STAFF ERROR:",
       error
@@ -1562,9 +1709,12 @@ export const updatedstaffdata = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update staff data",
+      message:
+        "Failed to update staff data",
       error: error.message,
     });
+  } finally {
+    connection.release();
   }
 };
 
@@ -2741,71 +2891,7 @@ export const getModules = async (
 
 };
 
-// export const getModules = async (req, res) => {
-//   try {
-//     // ==========================================
-//     // GET MASTER ADMIN MODULES
-//     // ==========================================
 
-//     const [rows] = await db.query(
-//       `
-//       SELECT modules
-//       FROM users
-//       WHERE role_id = 0
-//       LIMIT 1
-//       `
-//     );
-
-//     // ==========================================
-//     // MASTER ADMIN NOT FOUND
-//     // ==========================================
-
-//     if (!rows.length) {
-//       return res.json({
-//         success: true,
-//         modules: [],
-//       });
-//     }
-
-//     // ==========================================
-//     // GET MODULES
-//     // ==========================================
-
-//     let modules = [];
-
-//     if (rows[0].modules) {
-//       modules =
-//         typeof rows[0].modules === "string"
-//           ? JSON.parse(rows[0].modules)
-//           : rows[0].modules;
-//     }
-
-//     // ==========================================
-//     // SAFETY CHECK
-//     // ==========================================
-
-//     if (!Array.isArray(modules)) {
-//       modules = [];
-//     }
-
-//     // ==========================================
-//     // RESPONSE
-//     // ==========================================
-
-//     return res.json({
-//       success: true,
-//       modules,
-//     });
-
-//   } catch (error) {
-//     console.error("Get Modules Error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Internal server error",
-//     });
-//   }
-// };
 
 export const deleteModule = async (req, res) => {
   try {
