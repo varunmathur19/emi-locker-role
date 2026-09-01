@@ -32,92 +32,42 @@ export const findUserById = async (id) => {
 };
 
 export const createUser = async (data) => {
-
   const {
-
-    // ========================================
-    // BASIC DETAILS
-    // ========================================
-
     organization_name,
-
     name,
-
     email,
-
     phone,
-
     password,
-
     company_address,
-
     country,
-
     state,
-
     city,
-
-
-    // ========================================
-    // ROLE
-    // ========================================
-
     role_id,
-
     created_by,
-
-
-    // ========================================
-    // PARENT
-    // ========================================
-
     parent_id = null,
-
-
-    // ========================================
-    // DEVICE PERMISSIONS
-    // ========================================
-
     new_device = 0,
-
     old_device = 0,
-
     supreme_device = 0,
-
     pro_star = 0,
-
     lite = 0,
-
     google_tv = 0,
-
     supreme_lock = 0,
-
   } = data;
 
-
-  // ==========================================
-  // INSERT QUERY
-  // ==========================================
-
   const sql = `
-
-    INSERT INTO users
-    (
+    INSERT INTO users (
       organization_name,
       name,
       email,
       phone,
       password,
-
       company_address,
       country,
       state,
       city,
-
       role_id,
       created_by,
       parent_id,
-
       new_device,
       old_device,
       supreme_device,
@@ -126,95 +76,40 @@ export const createUser = async (data) => {
       google_tv,
       supreme_lock
     )
-
-    VALUES
-    (
+    VALUES (
       ?, ?, ?, ?, ?,
-
       ?, ?, ?, ?,
-
       ?, ?, ?,
-
       ?, ?, ?, ?, ?,
       ?, ?
     )
-
   `;
 
-
-  // ==========================================
-  // VALUES
-  // ==========================================
-
   const values = [
-
-    // BASIC
-
     organization_name,
-
     name,
-
     email,
-
     phone,
-
     password,
-
-
-    // LOCATION
-
     company_address,
-
     country,
-
     state,
-
     city,
-
-
-    // ROLE
-
     Number(role_id),
-
-
-    // CREATOR
-
     Number(created_by),
-
-
-    // PARENT
-
-    parent_id !== null &&
-    parent_id !== undefined
+    parent_id !== null && parent_id !== undefined
       ? Number(parent_id)
       : null,
-
-
-    // ========================================
-    // DEVICES
-    // ========================================
-
     Number(new_device ?? 0),
-
     Number(old_device ?? 0),
-
     Number(supreme_device ?? 0),
-
     Number(pro_star ?? 0),
-
     Number(lite ?? 0),
-
     Number(google_tv ?? 0),
-
     Number(supreme_lock ?? 0),
-
   ];
 
-  const [result] =
-    await db.query(
-      sql,
-      values
-    );
+  const [result] = await db.query(sql, values);
 
   return result.insertId;
 };
@@ -227,18 +122,11 @@ export const getAllUsers = async (
   loggedInRoleId = null
 ) => {
   try {
-    // =====================================================
-    // VALIDATION
-    // =====================================================
-
     limit = Number(limit) || 10;
     offset = Number(offset) || 0;
 
-    loggedInUserId =
-      Number(loggedInUserId);
-
-    loggedInRoleId =
-      Number(loggedInRoleId);
+    loggedInUserId = Number(loggedInUserId);
+    loggedInRoleId = Number(loggedInRoleId);
 
     if (
       !Number.isInteger(loggedInUserId) ||
@@ -249,9 +137,13 @@ export const getAllUsers = async (
       );
     }
 
-    // =====================================================
-    // DEBUG
-    // =====================================================
+    if (
+      !Number.isInteger(loggedInRoleId)
+    ) {
+      throw new Error(
+        "Logged-in user role ID is required"
+      );
+    }
 
     console.log(
       "=============================================="
@@ -291,20 +183,23 @@ export const getAllUsers = async (
     );
 
     // =====================================================
-    // MASTER ADMIN
+    // MASTER ADMIN + ADMIN
     // =====================================================
     //
-    // role_id = 0
+    // MASTER ADMIN = 0
+    // ADMIN = 1
     //
-    // Master Admin ko complete users dikh sakte hain.
+    // Dono ko complete users data milega.
     //
     // =====================================================
 
-    if (loggedInRoleId === 0) {
-
+    if (
+      loggedInRoleId === 0 ||
+      loggedInRoleId === 1
+    ) {
       let whereCondition = "";
 
-      let queryParams = [];
+      const queryParams = [];
 
       // ===================================================
       // ROLE FILTER
@@ -314,9 +209,9 @@ export const getAllUsers = async (
         role_id !== null &&
         role_id !== ""
       ) {
-
-        whereCondition =
-          `WHERE u.role_id = ?`;
+        whereCondition = `
+          WHERE u.role_id = ?
+        `;
 
         queryParams.push(
           Number(role_id)
@@ -343,15 +238,7 @@ export const getAllUsers = async (
           u.created_by,
           u.parent_id,
 
-          -- ============================================
-          -- USER STATUS
-          -- ============================================
-
           u.userStatus,
-
-          -- ============================================
-          -- PARENT DETAILS
-          -- ============================================
 
           CASE
             WHEN u.role_id = 1
@@ -364,10 +251,6 @@ export const getAllUsers = async (
               THEN creator.organization_name
             ELSE parent.organization_name
           END AS parent_organization_name,
-
-          -- ============================================
-          -- DEVICE PERMISSIONS
-          -- ============================================
 
           u.new_device,
           u.old_device,
@@ -382,16 +265,8 @@ export const getAllUsers = async (
 
         FROM users u
 
-        -- ============================================
-        -- NORMAL PARENT
-        -- ============================================
-
         LEFT JOIN users parent
           ON parent.id = u.parent_id
-
-        -- ============================================
-        -- CREATOR
-        -- ============================================
 
         LEFT JOIN users creator
           ON creator.id = u.created_by
@@ -415,9 +290,9 @@ export const getAllUsers = async (
         queryParams
       );
 
-      // =================================================
+      // ===================================================
       // COUNT
-      // =================================================
+      // ===================================================
 
       const countSql = `
         SELECT
@@ -428,38 +303,33 @@ export const getAllUsers = async (
         ${whereCondition}
       `;
 
+      const countParams =
+        role_id !== null &&
+        role_id !== ""
+          ? [Number(role_id)]
+          : [];
+
       const [
         countResult
       ] = await db.query(
         countSql,
-        role_id !== null &&
-        role_id !== ""
-          ? [Number(role_id)]
-          : []
+        countParams
       );
 
       const total =
         Number(
-          countResult[0]?.total || 0
+          countResult?.[0]?.total || 0
         );
 
-      // =================================================
-      // DEBUG
-      // =================================================
-
       console.log(
-        "MASTER ADMIN USERS:",
+        "ADMIN / MASTER USERS:",
         users.length
       );
 
       console.log(
-        "MASTER ADMIN TOTAL:",
+        "ADMIN / MASTER TOTAL:",
         total
       );
-
-      // =================================================
-      // RETURN
-      // =================================================
 
       return {
         users,
@@ -468,26 +338,43 @@ export const getAllUsers = async (
     }
 
     // =====================================================
-    // NON MASTER ADMIN
+    // NON ADMIN USERS
     // =====================================================
     //
     // IMPORTANT:
     //
-    // Yahan sirf logged-in user ki descendants niklegi.
+    // Yahan hierarchy parent_id ke according niklegi.
     //
     // Example:
     //
-    // CNF 1
-    //   |
-    //   └── Super 1
-    //        |
-    //        └── Distributor 1
-    //             |
-    //             └── FOS 1
-    //                  |
-    //                  └── Retailer 1
+    // CNF
+    //  id = 10
     //
-    // CNF 2 ki chain yahan nahi aayegi.
+    // Super Distributor
+    //  id = 20
+    //  parent_id = 10
+    //
+    // Distributor
+    //  id = 30
+    //  parent_id = 20
+    //
+    // FOS
+    //  id = 40
+    //  parent_id = 30
+    //
+    // Retailer
+    //  id = 50
+    //  parent_id = 40
+    //
+    // Agar CNF 10 login karega:
+    //
+    // 20, 30, 40, 50
+    //
+    // Agar Super 20 login karega:
+    //
+    // 30, 40, 50
+    //
+    // Doosre CNF/Super ki chain nahi aayegi.
     //
     // =====================================================
 
@@ -498,14 +385,10 @@ export const getAllUsers = async (
     let countSql = `
       WITH RECURSIVE user_chain AS (
 
-        -- ===============================================
-        -- ROOT USER
-        -- ===============================================
-
         SELECT
           u.id,
-          u.created_by,
           u.parent_id,
+          u.created_by,
           u.role_id
 
         FROM users u
@@ -514,20 +397,16 @@ export const getAllUsers = async (
 
         UNION ALL
 
-        -- ===============================================
-        -- CHILD USERS
-        -- ===============================================
-
         SELECT
           child.id,
-          child.created_by,
           child.parent_id,
+          child.created_by,
           child.role_id
 
         FROM users child
 
         INNER JOIN user_chain parent
-          ON child.created_by = parent.id
+          ON child.parent_id = parent.id
       )
 
       SELECT
@@ -554,7 +433,6 @@ export const getAllUsers = async (
       role_id !== null &&
       role_id !== ""
     ) {
-
       countSql += `
         AND u.role_id = ?
       `;
@@ -565,7 +443,7 @@ export const getAllUsers = async (
     }
 
     // =====================================================
-    // EXECUTE COUNT
+    // COUNT EXECUTION
     // =====================================================
 
     const [
@@ -577,7 +455,7 @@ export const getAllUsers = async (
 
     const total =
       Number(
-        countResult[0]?.total || 0
+        countResult?.[0]?.total || 0
       );
 
     // =====================================================
@@ -587,14 +465,10 @@ export const getAllUsers = async (
     let sql = `
       WITH RECURSIVE user_chain AS (
 
-        -- ===============================================
-        -- ROOT USER
-        -- ===============================================
-
         SELECT
           u.id,
-          u.created_by,
           u.parent_id,
+          u.created_by,
           u.role_id
 
         FROM users u
@@ -603,20 +477,16 @@ export const getAllUsers = async (
 
         UNION ALL
 
-        -- ===============================================
-        -- CHILD USERS
-        -- ===============================================
-
         SELECT
           child.id,
-          child.created_by,
           child.parent_id,
+          child.created_by,
           child.role_id
 
         FROM users child
 
         INNER JOIN user_chain parent
-          ON child.created_by = parent.id
+          ON child.parent_id = parent.id
       )
 
       SELECT
@@ -634,15 +504,7 @@ export const getAllUsers = async (
         u.created_by,
         u.parent_id,
 
-        -- =============================================
-        -- USER STATUS
-        -- =============================================
-
         u.userStatus,
-
-        -- =============================================
-        -- PARENT DETAILS
-        -- =============================================
 
         CASE
           WHEN u.role_id = 1
@@ -655,10 +517,6 @@ export const getAllUsers = async (
             THEN creator.organization_name
           ELSE parent.organization_name
         END AS parent_organization_name,
-
-        -- =============================================
-        -- DEVICE PERMISSIONS
-        -- =============================================
 
         u.new_device,
         u.old_device,
@@ -676,16 +534,8 @@ export const getAllUsers = async (
       INNER JOIN user_chain uc
         ON uc.id = u.id
 
-      -- =============================================
-      -- NORMAL PARENT
-      -- =============================================
-
       LEFT JOIN users parent
         ON parent.id = u.parent_id
-
-      -- =============================================
-      -- CREATOR
-      -- =============================================
 
       LEFT JOIN users creator
         ON creator.id = u.created_by
@@ -706,7 +556,6 @@ export const getAllUsers = async (
       role_id !== null &&
       role_id !== ""
     ) {
-
       sql += `
         AND u.role_id = ?
       `;
@@ -746,31 +595,27 @@ export const getAllUsers = async (
     // =====================================================
 
     console.log(
-      "NON MASTER USERS FOUND:",
+      "NON ADMIN USERS FOUND:",
       users.length
     );
 
     console.log(
-      "NON MASTER TOTAL:",
+      "NON ADMIN TOTAL:",
       total
     );
 
     console.log(
-      "USER IDs:",
-      users.map(
-        (user) => user.id
-      )
+      "USER DETAILS:"
     );
 
-    console.log(
-      "USER DETAILS:",
+    console.table(
       users.map(
         (user) => ({
           id: user.id,
           name: user.name,
           role_id: user.role_id,
-          created_by: user.created_by,
           parent_id: user.parent_id,
+          created_by: user.created_by,
         })
       )
     );
@@ -787,7 +632,7 @@ export const getAllUsers = async (
   } catch (error) {
 
     console.error(
-      "Get All Users Model Error:",
+      "GET ALL USERS MODEL ERROR:",
       error
     );
 
