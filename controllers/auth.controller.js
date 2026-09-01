@@ -67,6 +67,13 @@ export const createuserrole = async (req, res) => {
       });
     }
 
+    if (!phone || !String(phone).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Phone number is required",
+      });
+    }
+
     if (!password) {
       return res.status(400).json({
         success: false,
@@ -82,14 +89,104 @@ export const createuserrole = async (req, res) => {
     }
 
     // =====================================================
-    // CLEAN DATA
+    // CLEAN BASIC DATA
     // =====================================================
 
     const cleanName =
       String(name).trim();
 
     const cleanEmail =
-      String(email).trim().toLowerCase();
+      String(email)
+        .trim()
+        .toLowerCase();
+
+    // =====================================================
+    // PHONE NUMBER NORMALIZATION
+    // =====================================================
+    //
+    // Allowed:
+    //
+    // +919876543210
+    // +91 9876543210
+    // +91-9876543210
+    // 9876543210
+    //
+    // Database me:
+    //
+    // +919876543210
+    //
+    // save hoga.
+    //
+    // =====================================================
+
+    let cleanPhone =
+      String(phone)
+        .trim()
+        .replace(/[\s\-()]/g, "");
+
+    // -----------------------------------------------------
+    // +91 FORMAT
+    // -----------------------------------------------------
+
+    if (cleanPhone.startsWith("+91")) {
+      const indianNumber =
+        cleanPhone.substring(3);
+
+      if (!/^[6-9]\d{9}$/.test(indianNumber)) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid phone number. +91 ke baad 10 digit valid mobile number enter karein",
+        });
+      }
+
+      cleanPhone =
+        `+91${indianNumber}`;
+    }
+
+    // -----------------------------------------------------
+    // 91 WITHOUT + NOT ALLOWED AS PREFIX
+    // -----------------------------------------------------
+    //
+    // Example:
+    // 919876543210
+    //
+    // Isko bhi +91 format me convert kar rahe hain.
+    //
+    // -----------------------------------------------------
+
+    else if (
+      /^91[6-9]\d{9}$/.test(cleanPhone)
+    ) {
+      const indianNumber =
+        cleanPhone.substring(2);
+
+      cleanPhone =
+        `+91${indianNumber}`;
+    }
+
+    // -----------------------------------------------------
+    // NORMAL 10 DIGIT NUMBER
+    // -----------------------------------------------------
+
+    else if (
+      /^[6-9]\d{9}$/.test(cleanPhone)
+    ) {
+      cleanPhone =
+        `+91${cleanPhone}`;
+    }
+
+    // -----------------------------------------------------
+    // INVALID PHONE
+    // -----------------------------------------------------
+
+    else {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Invalid phone number. Valid 10 digit mobile number ya +91 ke saath number enter karein",
+      });
+    }
 
     // =====================================================
     // PASSWORD MATCH
@@ -107,7 +204,8 @@ export const createuserrole = async (req, res) => {
     // ROLE VALIDATION
     // =====================================================
 
-    const role = Number(role_id);
+    const role =
+      Number(role_id);
 
     if (!Number.isInteger(role)) {
       return res.status(400).json({
@@ -155,7 +253,8 @@ export const createuserrole = async (req, res) => {
     ) {
       return res.status(401).json({
         success: false,
-        message: "Invalid logged-in user",
+        message:
+          "Invalid logged-in user",
       });
     }
 
@@ -196,11 +295,15 @@ export const createuserrole = async (req, res) => {
       ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid parent_id",
+          message:
+            "Invalid parent_id",
         });
       }
     }
 
+    // =====================================================
+    // ALLOWED PARENT ROLES
+    // =====================================================
 
     const allowedParentRoles = {
       [ROLES.CNF]: [
@@ -307,13 +410,6 @@ export const createuserrole = async (req, res) => {
       // ---------------------------------------------------
       // STAFF PARENT
       // ---------------------------------------------------
-      //
-      // If Admin explicitly selects parent,
-      // parent must be Admin.
-      //
-      // Otherwise logged-in Admin becomes parent.
-      //
-      // ---------------------------------------------------
 
       if (selectedParentId !== null) {
 
@@ -331,7 +427,9 @@ export const createuserrole = async (req, res) => {
         }
 
         const parentRole =
-          Number(selectedParent.role_id);
+          Number(
+            selectedParent.role_id
+          );
 
         if (
           parentRole !== ROLES.ADMIN
@@ -370,7 +468,6 @@ export const createuserrole = async (req, res) => {
       } else {
 
         // -------------------------------------------------
-        // NO PARENT SELECTED
         // LOGGED-IN ADMIN BECOMES PARENT
         // -------------------------------------------------
 
@@ -403,20 +500,15 @@ export const createuserrole = async (req, res) => {
       // ===================================================
       // CREATOR ROLE PERMISSION
       // ===================================================
-      //
-      // Master Admin:
-      // Can create any valid role.
-      //
-      // Other users:
-      // Cannot create same or higher role.
-      //
-      // ===================================================
 
       if (
-        creatorRole !== ROLES.MASTER_ADMIN
+        creatorRole !==
+        ROLES.MASTER_ADMIN
       ) {
 
-        if (role <= creatorRole) {
+        if (
+          role <= creatorRole
+        ) {
           return res.status(403).json({
             success: false,
             message:
@@ -429,16 +521,14 @@ export const createuserrole = async (req, res) => {
       // SELECTED PARENT VALIDATION
       // ===================================================
 
-      if (selectedParentId !== null) {
+      if (
+        selectedParentId !== null
+      ) {
 
         const selectedParent =
           await findUserById(
             selectedParentId
           );
-
-        // -------------------------------------------------
-        // PARENT NOT FOUND
-        // -------------------------------------------------
 
         if (!selectedParent) {
           return res.status(404).json({
@@ -449,23 +539,17 @@ export const createuserrole = async (req, res) => {
         }
 
         const parentRole =
-          Number(selectedParent.role_id);
-
-        // -------------------------------------------------
-        // IMPORTANT:
-        // DO NOT CHECK:
-        //
-        // selectedParentId === created_by
-        //
-        // Creator itself can be the parent.
-        // -------------------------------------------------
+          Number(
+            selectedParent.role_id
+          );
 
         // =================================================
         // CHECK ALLOWED PARENT ROLE
         // =================================================
 
         const allowedParents =
-          allowedParentRoles[role] || [];
+          allowedParentRoles[role] ||
+          [];
 
         if (
           !allowedParents.includes(
@@ -505,18 +589,11 @@ export const createuserrole = async (req, res) => {
       // ===================================================
       // PARENT NOT SELECTED
       // ===================================================
-      //
-      // Master Admin:
-      // parent can remain NULL.
-      //
-      // Other creators:
-      // creator automatically becomes parent.
-      //
-      // ===================================================
 
       if (
         selectedParentId === null &&
-        creatorRole !== ROLES.MASTER_ADMIN
+        creatorRole !==
+          ROLES.MASTER_ADMIN
       ) {
         selectedParentId =
           created_by;
@@ -524,7 +601,7 @@ export const createuserrole = async (req, res) => {
     }
 
     // =====================================================
-    // EMAIL CHECK
+    // EMAIL UNIQUE CHECK
     // =====================================================
 
     const existingUser =
@@ -537,6 +614,40 @@ export const createuserrole = async (req, res) => {
         success: false,
         message:
           "Email already exists",
+      });
+    }
+
+    // =====================================================
+    // PHONE UNIQUE CHECK
+    // =====================================================
+    //
+    // cleanPhone already normalized:
+    //
+    // +919876543210
+    //
+    // Isliye same number different format
+    // me bhi duplicate nahi hoga.
+    //
+    // =====================================================
+
+    const [existingPhoneRows] =
+      await db.query(
+        `
+          SELECT id
+          FROM users
+          WHERE phone = ?
+          LIMIT 1
+        `,
+        [cleanPhone]
+      );
+
+    if (
+      existingPhoneRows.length > 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Phone number already exists",
       });
     }
 
@@ -558,7 +669,9 @@ export const createuserrole = async (req, res) => {
     // RETAILER DEVICE VALIDATION
     // =====================================================
 
-    if (role === ROLES.RETAILER) {
+    if (
+      role === ROLES.RETAILER
+    ) {
 
       const deviceFields = {
         new_device,
@@ -572,7 +685,9 @@ export const createuserrole = async (req, res) => {
 
       for (
         const [field, value]
-        of Object.entries(deviceFields)
+        of Object.entries(
+          deviceFields
+        )
       ) {
 
         // -----------------------------------------------
@@ -584,7 +699,10 @@ export const createuserrole = async (req, res) => {
           value === null ||
           value === ""
         ) {
-          retailerDevices[field] = 0;
+          retailerDevices[
+            field
+          ] = 0;
+
           continue;
         }
 
@@ -607,7 +725,9 @@ export const createuserrole = async (req, res) => {
           });
         }
 
-        retailerDevices[field] =
+        retailerDevices[
+          field
+        ] =
           numericValue;
       }
     }
@@ -641,7 +761,10 @@ export const createuserrole = async (req, res) => {
         email:
           cleanEmail,
 
-        phone,
+        // IMPORTANT:
+        // normalized phone save hoga
+        phone:
+          cleanPhone,
 
         password:
           hashPassword,
@@ -712,10 +835,6 @@ export const createuserrole = async (req, res) => {
 
       data: {
 
-        // =================================================
-        // USER
-        // =================================================
-
         id:
           userId,
 
@@ -727,7 +846,9 @@ export const createuserrole = async (req, res) => {
         email:
           cleanEmail,
 
-        phone,
+        // normalized phone
+        phone:
+          cleanPhone,
 
         role_id:
           role,
@@ -740,22 +861,10 @@ export const createuserrole = async (req, res) => {
 
         city,
 
-        // =================================================
-        // CREATOR
-        // =================================================
-
         created_by,
-
-        // =================================================
-        // PARENT
-        // =================================================
 
         parent_id:
           selectedParentId,
-
-        // =================================================
-        // DEVICE PERMISSIONS
-        // =================================================
 
         new_device:
           retailerDevices.new_device,
@@ -1100,13 +1209,22 @@ export const getUsers = async (req, res) => {
 // =========================
 // User Chain Api
 // =========================
-export const getDropdownUsers = async (req, res) => {
+export const getDropdownUsers = async (
+  req,
+  res
+) => {
   try {
-    const { role_id, parent_id, search } = req.query;
+    const {
+      role_id,
+      parent_id,
+      search,
+      exclude_id,
+    } = req.query;
 
-    // =========================================
-    // VALIDATE ROLE
-    // =========================================
+    // =====================================================
+    // VALIDATE ROLE ID
+    // =====================================================
+
     if (
       role_id === undefined ||
       role_id === null ||
@@ -1114,70 +1232,129 @@ export const getDropdownUsers = async (req, res) => {
     ) {
       return res.status(400).json({
         success: false,
-        message: "role_id is required",
+        message:
+          "role_id is required",
       });
     }
 
-    const requestedRoleId = Number(role_id);
+    const requestedRoleId =
+      Number(role_id);
 
     if (
-      !Number.isInteger(requestedRoleId) ||
+      !Number.isInteger(
+        requestedRoleId
+      ) ||
       requestedRoleId < 1 ||
       requestedRoleId > 9
     ) {
       return res.status(400).json({
         success: false,
-        message: "Invalid role_id",
+        message:
+          "Invalid role_id",
       });
     }
 
-    // =========================================
+    // =====================================================
     // PARENT ID
-    // =========================================
-    let selectedParentId = null;
+    // =====================================================
+
+    let selectedParentId =
+      null;
 
     if (
       parent_id !== undefined &&
       parent_id !== null &&
       parent_id !== ""
     ) {
-      selectedParentId = Number(parent_id);
+      selectedParentId =
+        Number(parent_id);
 
       if (
-        !Number.isInteger(selectedParentId) ||
+        !Number.isInteger(
+          selectedParentId
+        ) ||
         selectedParentId <= 0
       ) {
         return res.status(400).json({
           success: false,
-          message: "Invalid parent_id",
+          message:
+            "Invalid parent_id",
         });
       }
     }
 
-    // =========================================
+    // =====================================================
+    // EXCLUDE USER
+    // =====================================================
+    //
+    // Edit ke time current user ko dropdown se
+    // remove kar sakte hain.
+    //
+    // =====================================================
+
+    let excludeUserId =
+      null;
+
+    if (
+      exclude_id !== undefined &&
+      exclude_id !== null &&
+      exclude_id !== ""
+    ) {
+      excludeUserId =
+        Number(exclude_id);
+
+      if (
+        !Number.isInteger(
+          excludeUserId
+        ) ||
+        excludeUserId <= 0
+      ) {
+        return res.status(400).json({
+          success: false,
+          message:
+            "Invalid exclude_id",
+        });
+      }
+    }
+
+    // =====================================================
     // SEARCH
-    // =========================================
+    // =====================================================
+
     const searchTerm =
       typeof search === "string"
         ? search.trim()
         : "";
 
-    // =========================================
-    // BUILD QUERY
-    // =========================================
+    // =====================================================
+    // BUILD WHERE
+    // =====================================================
+
     let whereClause = `
-      WHERE role_id = ?
+      WHERE u.role_id = ?
     `;
 
     const queryParams = [
       requestedRoleId,
     ];
 
-    // Parent selected hai to uske direct
-    // children hi dikhane hain
-    if (selectedParentId !== null) {
+    // =====================================================
+    // PARENT FILTER
+    // =====================================================
+    //
+    // Agar parent selected hai:
+    //
+    // parent_id = selected parent
+    //
+    // Sirf us parent ke direct children.
+    //
+    // =====================================================
+
+    if (
+      selectedParentId !== null
+    ) {
       whereClause += `
-        AND parent_id = ?
+        AND u.parent_id = ?
       `;
 
       queryParams.push(
@@ -1185,13 +1362,33 @@ export const getDropdownUsers = async (req, res) => {
       );
     }
 
-    // Search
+    // =====================================================
+    // EXCLUDE CURRENT EDIT USER
+    // =====================================================
+
+    if (
+      excludeUserId !== null
+    ) {
+      whereClause += `
+        AND u.id != ?
+      `;
+
+      queryParams.push(
+        excludeUserId
+      );
+    }
+
+    // =====================================================
+    // SEARCH FILTER
+    // =====================================================
+
     if (searchTerm) {
       whereClause += `
         AND (
-          name LIKE ?
-          OR email LIKE ?
-          OR phone LIKE ?
+          u.name LIKE ?
+          OR u.email LIKE ?
+          OR u.phone LIKE ?
+          OR u.organization_name LIKE ?
         )
       `;
 
@@ -1201,33 +1398,54 @@ export const getDropdownUsers = async (req, res) => {
       queryParams.push(
         searchValue,
         searchValue,
+        searchValue,
         searchValue
       );
     }
 
-    // =========================================
+    // =====================================================
     // GET USERS
-    // =========================================
-    const [rows] = await db.query(
+    // =====================================================
+
+    const [
+      rows,
+    ] = await db.query(
       `
       SELECT
-        id,
-        name,
-        email,
-        phone,
-        role_id,
-        parent_id,
-        created_by
-      FROM users
+
+        u.id,
+
+        u.organization_name,
+
+        u.name,
+
+        u.email,
+
+        u.phone,
+
+        u.role_id,
+
+        u.parent_id,
+
+        u.created_by,
+
+        u.created_at
+
+      FROM users u
+
       ${whereClause}
-      ORDER BY name ASC
+
+      ORDER BY
+        u.name ASC,
+        u.id ASC
       `,
       queryParams
     );
 
-    // =========================================
+    // =====================================================
     // RESPONSE
-    // =========================================
+    // =====================================================
+
     return res.status(200).json({
       success: true,
 
@@ -1248,6 +1466,9 @@ export const getDropdownUsers = async (req, res) => {
       search:
         searchTerm,
 
+      exclude_id:
+        excludeUserId,
+
       total:
         rows.length,
 
@@ -1256,6 +1477,7 @@ export const getDropdownUsers = async (req, res) => {
     });
 
   } catch (error) {
+
     console.error(
       "getDropdownUsers Error:",
       error
@@ -1263,8 +1485,10 @@ export const getDropdownUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message:
         "Failed to get dropdown users",
+
       error:
         error.message,
     });
@@ -1313,6 +1537,8 @@ export const updatedstaffdata = async (req, res) => {
       city,
       parent_id,
 
+      // parent_hierarchy intentionally received
+      // but NOT used for updating other users
       parent_hierarchy,
 
       new_device,
@@ -1325,6 +1551,10 @@ export const updatedstaffdata = async (req, res) => {
 
       password,
     } = req.body;
+
+    // =====================================================
+    // VALIDATE USER ID
+    // =====================================================
 
     if (!id) {
       return res.status(400).json({
@@ -1344,6 +1574,10 @@ export const updatedstaffdata = async (req, res) => {
         message: "Invalid User ID",
       });
     }
+
+    // =====================================================
+    // GET EXISTING USER
+    // =====================================================
 
     const [existingRows] =
       await connection.query(
@@ -1366,25 +1600,59 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
+    const existingUser =
+      existingRows[0];
+
+    // =====================================================
+    // ROLE ID
+    // =====================================================
+
     const currentRoleId = Number(
-      role_id ??
-        existingRows[0].role_id
+      role_id ?? existingUser.role_id
     );
 
-    let normalizedParentId =
-      existingRows[0].parent_id ?? null;
-
     if (
-      parent_id !== undefined
+      !Number.isInteger(currentRoleId) ||
+      currentRoleId < 1 ||
+      currentRoleId > 9
     ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role ID",
+      });
+    }
+
+    // =====================================================
+    // NORMALIZE PARENT ID
+    // =====================================================
+
+    let normalizedParentId =
+      existingUser.parent_id ?? null;
+
+    // Parent ID only changes when frontend sends it
+    if (parent_id !== undefined) {
+      // ---------------------------------------------------
+      // CLEAR PARENT
+      // ---------------------------------------------------
+
       if (
         parent_id === null ||
         parent_id === ""
       ) {
         normalizedParentId = null;
-      } else {
+      }
+
+      // ---------------------------------------------------
+      // SET PARENT
+      // ---------------------------------------------------
+
+      else {
         normalizedParentId =
           Number(parent_id);
+
+        // -----------------------------------------------
+        // VALIDATE PARENT ID
+        // -----------------------------------------------
 
         if (
           !Number.isInteger(
@@ -1394,14 +1662,16 @@ export const updatedstaffdata = async (req, res) => {
         ) {
           return res.status(400).json({
             success: false,
-            message:
-              "Invalid parent ID",
+            message: "Invalid parent ID",
           });
         }
 
+        // -----------------------------------------------
+        // USER CANNOT BE OWN PARENT
+        // -----------------------------------------------
+
         if (
-          normalizedParentId ===
-          userId
+          normalizedParentId === userId
         ) {
           return res.status(400).json({
             success: false,
@@ -1410,12 +1680,18 @@ export const updatedstaffdata = async (req, res) => {
           });
         }
 
+        // -----------------------------------------------
+        // CHECK PARENT EXISTS
+        // -----------------------------------------------
+
         const [parentRows] =
           await connection.query(
             `
             SELECT
               id,
-              role_id
+              role_id,
+              name,
+              organization_name
             FROM users
             WHERE id = ?
             LIMIT 1
@@ -1430,15 +1706,46 @@ export const updatedstaffdata = async (req, res) => {
               "Selected parent not found",
           });
         }
+
+        // -----------------------------------------------
+        // PARENT ROLE VALIDATION
+        // -----------------------------------------------
+
+        const selectedParentRoleId =
+          Number(
+            parentRows[0].role_id
+          );
+
+        // Parent ka role current user se
+        // upar hona chahiye
+        if (
+          selectedParentRoleId >=
+          currentRoleId
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Selected parent role is invalid",
+          });
+        }
       }
     }
 
+    // =====================================================
+    // START TRANSACTION
+    // =====================================================
+
     await connection.beginTransaction();
+
+    // =====================================================
+    // UPDATE USER
+    // =====================================================
 
     let updateQuery = `
       UPDATE users
       SET
         organization_name = ?,
+        role_id = ?,
         name = ?,
         email = ?,
         phone = ?,
@@ -1458,24 +1765,61 @@ export const updatedstaffdata = async (req, res) => {
 
     const updateValues = [
       organization_name || "",
+
+      currentRoleId,
+
       name || "",
+
       email || "",
+
       phone || "",
+
       company_address || "",
+
       country || "",
+
       state || "",
+
       city || "",
 
+      // ================================================
+      // IMPORTANT
+      // ================================================
+      // Selected direct parent ID
       normalizedParentId,
 
-      Number(new_device ?? 0),
-      Number(old_device ?? 0),
-      Number(supreme_device ?? 0),
-      Number(pro_star ?? 0),
-      Number(lite ?? 0),
-      Number(google_tv ?? 0),
-      Number(supreme_lock ?? 0),
+      Number(
+        new_device ?? 0
+      ),
+
+      Number(
+        old_device ?? 0
+      ),
+
+      Number(
+        supreme_device ?? 0
+      ),
+
+      Number(
+        pro_star ?? 0
+      ),
+
+      Number(
+        lite ?? 0
+      ),
+
+      Number(
+        google_tv ?? 0
+      ),
+
+      Number(
+        supreme_lock ?? 0
+      ),
     ];
+
+    // =====================================================
+    // PASSWORD
+    // =====================================================
 
     if (
       password !== undefined &&
@@ -1486,140 +1830,57 @@ export const updatedstaffdata = async (req, res) => {
         password = ?
       `;
 
-      updateValues.push(password);
+      updateValues.push(
+        password
+      );
     }
+
+    // =====================================================
+    // WHERE USER
+    // =====================================================
 
     updateQuery += `
       WHERE id = ?
     `;
 
-    updateValues.push(userId);
+    updateValues.push(
+      userId
+    );
+
+    // =====================================================
+    // EXECUTE UPDATE
+    // =====================================================
 
     await connection.query(
       updateQuery,
       updateValues
     );
 
-    if (
-      Array.isArray(
-        parent_hierarchy
-      )
-    ) {
-      const hierarchy = parent_hierarchy
-        .map((item) => ({
-          role_id: Number(
-            item?.role_id
-          ),
-          user_id: Number(
-            item?.user_id
-          ),
-        }))
-        .filter(
-          (item) =>
-            Number.isInteger(
-              item.role_id
-            ) &&
-            item.role_id > 0 &&
-            Number.isInteger(
-              item.user_id
-            ) &&
-            item.user_id > 0
-        );
+    // =====================================================
+    // IMPORTANT:
+    //
+    // parent_hierarchy ko yahan process NAHI karna.
+    //
+    // Pehle jo code tha:
+    //
+    // UPDATE users
+    // SET parent_id = ?
+    // WHERE id = ?
+    //
+    // wo multiple users ko update kar raha tha.
+    //
+    // Ab sirf edited user update hoga:
+    //
+    // UPDATE users
+    // SET parent_id = ?
+    // WHERE id = userId
+    //
+    // Ye already upar main UPDATE mein ho raha hai.
+    // =====================================================
 
-      for (
-        let index = 1;
-        index < hierarchy.length;
-        index++
-      ) {
-        const current =
-          hierarchy[index];
-
-        const previous =
-          hierarchy[index - 1];
-
-        if (
-          current.user_id ===
-          userId
-        ) {
-          continue;
-        }
-
-        if (
-          current.user_id ===
-          previous.user_id
-        ) {
-          continue;
-        }
-
-        const [selectedUserRows] =
-          await connection.query(
-            `
-            SELECT
-              id,
-              role_id
-            FROM users
-            WHERE id = ?
-            LIMIT 1
-            `,
-            [current.user_id]
-          );
-
-        if (
-          !selectedUserRows.length
-        ) {
-          throw new Error(
-            `Hierarchy user not found: ${current.user_id}`
-          );
-        }
-
-        const actualRoleId =
-          Number(
-            selectedUserRows[0]
-              .role_id
-          );
-
-        if (
-          actualRoleId !==
-          current.role_id
-        ) {
-          throw new Error(
-            `Role mismatch for user ${current.user_id}`
-          );
-        }
-
-        const [parentRows] =
-          await connection.query(
-            `
-            SELECT
-              id
-            FROM users
-            WHERE id = ?
-            LIMIT 1
-            `,
-            [previous.user_id]
-          );
-
-        if (!parentRows.length) {
-          throw new Error(
-            `Parent user not found: ${previous.user_id}`
-          );
-        }
-
-        await connection.query(
-          `
-          UPDATE users
-          SET parent_id = ?
-          WHERE id = ?
-          AND role_id = ?
-          `,
-          [
-            previous.user_id,
-            current.user_id,
-            current.role_id,
-          ]
-        );
-      }
-    }
+    // =====================================================
+    // GET UPDATED USER
+    // =====================================================
 
     const [updatedRows] =
       await connection.query(
@@ -1636,13 +1897,18 @@ export const updatedstaffdata = async (req, res) => {
           state,
           city,
           parent_id,
+
           new_device,
           old_device,
           supreme_device,
           pro_star,
           lite,
           google_tv,
-          supreme_lock
+          supreme_lock,
+
+          created_at,
+          updated_at
+
         FROM users
         WHERE id = ?
         LIMIT 1
@@ -1650,15 +1916,31 @@ export const updatedstaffdata = async (req, res) => {
         [userId]
       );
 
+    // =====================================================
+    // COMMIT
+    // =====================================================
+
     await connection.commit();
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,
+
       message:
         "Staff data updated successfully",
-      data: updatedRows[0],
+
+      data:
+        updatedRows[0],
     });
+
   } catch (error) {
+    // =====================================================
+    // ROLLBACK
+    // =====================================================
+
     await connection.rollback();
 
     console.error(
@@ -1668,11 +1950,19 @@ export const updatedstaffdata = async (req, res) => {
 
     return res.status(500).json({
       success: false,
+
       message:
         "Failed to update staff data",
-      error: error.message,
+
+      error:
+        error.message,
     });
+
   } finally {
+    // =====================================================
+    // RELEASE CONNECTION
+    // =====================================================
+
     connection.release();
   }
 };

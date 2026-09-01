@@ -32,92 +32,42 @@ export const findUserById = async (id) => {
 };
 
 export const createUser = async (data) => {
-
   const {
-
-    // ========================================
-    // BASIC DETAILS
-    // ========================================
-
     organization_name,
-
     name,
-
     email,
-
     phone,
-
     password,
-
     company_address,
-
     country,
-
     state,
-
     city,
-
-
-    // ========================================
-    // ROLE
-    // ========================================
-
     role_id,
-
     created_by,
-
-
-    // ========================================
-    // PARENT
-    // ========================================
-
     parent_id = null,
-
-
-    // ========================================
-    // DEVICE PERMISSIONS
-    // ========================================
-
     new_device = 0,
-
     old_device = 0,
-
     supreme_device = 0,
-
     pro_star = 0,
-
     lite = 0,
-
     google_tv = 0,
-
     supreme_lock = 0,
-
   } = data;
 
-
-  // ==========================================
-  // INSERT QUERY
-  // ==========================================
-
   const sql = `
-
-    INSERT INTO users
-    (
+    INSERT INTO users (
       organization_name,
       name,
       email,
       phone,
       password,
-
       company_address,
       country,
       state,
       city,
-
       role_id,
       created_by,
       parent_id,
-
       new_device,
       old_device,
       supreme_device,
@@ -126,95 +76,40 @@ export const createUser = async (data) => {
       google_tv,
       supreme_lock
     )
-
-    VALUES
-    (
+    VALUES (
       ?, ?, ?, ?, ?,
-
       ?, ?, ?, ?,
-
       ?, ?, ?,
-
       ?, ?, ?, ?, ?,
       ?, ?
     )
-
   `;
 
-
-  // ==========================================
-  // VALUES
-  // ==========================================
-
   const values = [
-
-    // BASIC
-
     organization_name,
-
     name,
-
     email,
-
     phone,
-
     password,
-
-
-    // LOCATION
-
     company_address,
-
     country,
-
     state,
-
     city,
-
-
-    // ROLE
-
     Number(role_id),
-
-
-    // CREATOR
-
     Number(created_by),
-
-
-    // PARENT
-
-    parent_id !== null &&
-    parent_id !== undefined
+    parent_id !== null && parent_id !== undefined
       ? Number(parent_id)
       : null,
-
-
-    // ========================================
-    // DEVICES
-    // ========================================
-
     Number(new_device ?? 0),
-
     Number(old_device ?? 0),
-
     Number(supreme_device ?? 0),
-
     Number(pro_star ?? 0),
-
     Number(lite ?? 0),
-
     Number(google_tv ?? 0),
-
     Number(supreme_lock ?? 0),
-
   ];
 
-  const [result] =
-    await db.query(
-      sql,
-      values
-    );
+  const [result] = await db.query(sql, values);
 
   return result.insertId;
 };
