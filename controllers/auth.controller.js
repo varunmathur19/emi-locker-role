@@ -1078,6 +1078,10 @@ export const loginUser = async (req, res) => {
 // =========================
 export const getUsers = async (req, res) => {
   try {
+    // =====================================================
+    // PAGINATION
+    // =====================================================
+
     const page = Math.max(
       Number(req.query.page) || 1,
       1
@@ -1089,6 +1093,10 @@ export const getUsers = async (req, res) => {
     );
 
     const offset = (page - 1) * limit;
+
+    // =====================================================
+    // ROLE ID
+    // =====================================================
 
     let role_id = null;
 
@@ -1105,6 +1113,74 @@ export const getUsers = async (req, res) => {
         });
       }
     }
+
+    // =====================================================
+    // SEARCH
+    // Name + Organization + Role
+    // =====================================================
+
+    const search =
+      req.query.search !== undefined &&
+      String(req.query.search).trim() !== ""
+        ? String(req.query.search).trim()
+        : null;
+
+    // =====================================================
+    // COUNTRY
+    // =====================================================
+
+    const country =
+      req.query.country !== undefined &&
+      String(req.query.country).trim() !== ""
+        ? String(req.query.country).trim()
+        : null;
+
+    // =====================================================
+    // STATE
+    // =====================================================
+
+    const state =
+      req.query.state !== undefined &&
+      String(req.query.state).trim() !== ""
+        ? String(req.query.state).trim()
+        : null;
+
+    // =====================================================
+    // CITY
+    // =====================================================
+
+    const city =
+      req.query.city !== undefined &&
+      String(req.query.city).trim() !== ""
+        ? String(req.query.city).trim()
+        : null;
+
+    // =====================================================
+    // STATUS
+    // =====================================================
+
+    let status = null;
+
+    if (
+      req.query.status !== undefined &&
+      req.query.status !== ""
+    ) {
+      status = Number(req.query.status);
+
+      if (
+        !Number.isInteger(status) ||
+        ![0, 1].includes(status)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status",
+        });
+      }
+    }
+
+    // =====================================================
+    // LOGGED IN USER
+    // =====================================================
 
     const loggedInUserId = Number(
       req.user?.id
@@ -1124,25 +1200,58 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    if (
-      !Number.isInteger(loggedInRoleId)
-    ) {
+    if (!Number.isInteger(loggedInRoleId)) {
       return res.status(401).json({
         success: false,
         message: "Invalid logged-in user role",
       });
     }
 
+    // =====================================================
+    // DEBUG
+    // =====================================================
+
+    console.log("==============================================");
+    console.log("GET USERS CONTROLLER");
+    console.log({
+      page,
+      limit,
+      offset,
+      role_id,
+      search,
+      country,
+      state,
+      city,
+      status,
+      loggedInUserId,
+      loggedInRoleId,
+    });
+    console.log("==============================================");
+
+    // =====================================================
+    // MODEL
+    // =====================================================
+
     const result = await getAllUsers(
       limit,
       offset,
       role_id,
       loggedInUserId,
-      loggedInRoleId
+      loggedInRoleId,
+      search,
+      country,
+      state,
+      city,
+      status
     );
+
+    // =====================================================
+    // RESPONSE
+    // =====================================================
 
     return res.status(200).json({
       success: true,
+
       pagination: {
         currentPage: page,
         totalPages: Math.ceil(
@@ -1151,8 +1260,10 @@ export const getUsers = async (req, res) => {
         limit,
         totalUsers: result.total,
       },
+
       data: result.users,
     });
+
   } catch (error) {
     console.error(
       "GET USERS ERROR:",
