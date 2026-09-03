@@ -119,14 +119,32 @@ export const getAllUsers = async (
   offset,
   role_id = null,
   loggedInUserId = null,
-  loggedInRoleId = null
+  loggedInRoleId = null,
+  search = null,
+  country = null,
+  state = null,
+  city = null,
+  status = null
 ) => {
   try {
+    // =====================================================
+    // BASIC VALUES
+    // =====================================================
+
     limit = Number(limit) || 10;
     offset = Number(offset) || 0;
 
-    loggedInUserId = Number(loggedInUserId);
-    loggedInRoleId = Number(loggedInRoleId);
+    loggedInUserId = Number(
+      loggedInUserId
+    );
+
+    loggedInRoleId = Number(
+      loggedInRoleId
+    );
+
+    // =====================================================
+    // VALIDATION
+    // =====================================================
 
     if (
       !Number.isInteger(loggedInUserId) ||
@@ -137,67 +155,55 @@ export const getAllUsers = async (
       );
     }
 
-    if (
-      !Number.isInteger(loggedInRoleId)
-    ) {
+    if (!Number.isInteger(loggedInRoleId)) {
       throw new Error(
         "Logged-in user role ID is required"
       );
     }
 
-    console.log(
-      "=============================================="
-    );
+    // =====================================================
+    // NORMALIZE
+    // =====================================================
 
-    console.log(
-      "GET ALL USERS MODEL"
-    );
+    search =
+      search !== null &&
+      search !== undefined &&
+      String(search).trim() !== ""
+        ? String(search).trim()
+        : null;
 
-    console.log(
-      "Logged In User ID:",
-      loggedInUserId
-    );
+    country =
+      country !== null &&
+      country !== undefined &&
+      String(country).trim() !== ""
+        ? String(country).trim()
+        : null;
 
-    console.log(
-      "Logged In Role ID:",
-      loggedInRoleId
-    );
+    state =
+      state !== null &&
+      state !== undefined &&
+      String(state).trim() !== ""
+        ? String(state).trim()
+        : null;
 
-    console.log(
-      "Requested Role ID:",
-      role_id
-    );
-
-    console.log(
-      "Limit:",
-      limit
-    );
-
-    console.log(
-      "Offset:",
-      offset
-    );
-
-    console.log(
-      "=============================================="
-    );
+    city =
+      city !== null &&
+      city !== undefined &&
+      String(city).trim() !== ""
+        ? String(city).trim()
+        : null;
 
     // =====================================================
     // MASTER ADMIN + ADMIN
-    // =====================================================
-    //
-    // MASTER ADMIN = 0
-    // ADMIN = 1
-    //
-    // Dono ko complete users data milega.
-    //
     // =====================================================
 
     if (
       loggedInRoleId === 0 ||
       loggedInRoleId === 1
     ) {
-      let whereCondition = "";
+      let whereCondition = `
+        WHERE 1 = 1
+      `;
 
       const queryParams = [];
 
@@ -209,12 +215,114 @@ export const getAllUsers = async (
         role_id !== null &&
         role_id !== ""
       ) {
-        whereCondition = `
-          WHERE u.role_id = ?
+        whereCondition += `
+          AND u.role_id = ?
         `;
 
         queryParams.push(
           Number(role_id)
+        );
+      }
+
+      // ===================================================
+      // SEARCH
+      // Name + Organization + Role
+      // ===================================================
+
+      if (search !== null) {
+        whereCondition += `
+          AND (
+            LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
+            OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
+            OR LOWER(
+              CASE u.role_id
+                WHEN 0 THEN 'Master Admin'
+                WHEN 1 THEN 'Admin'
+                WHEN 2 THEN 'CNF'
+                WHEN 3 THEN 'Super Distributor'
+                WHEN 4 THEN 'Distributor'
+                WHEN 5 THEN 'FOS'
+                WHEN 6 THEN 'Retailer'
+                WHEN 7 THEN 'Sub Retailer'
+                WHEN 8 THEN 'Employee'
+                WHEN 9 THEN 'Staff'
+                ELSE ''
+              END
+            ) LIKE LOWER(?)
+          )
+        `;
+
+        const searchValue = `%${search}%`;
+
+        queryParams.push(
+          searchValue,
+          searchValue,
+          searchValue
+        );
+      }
+
+      // ===================================================
+      // COUNTRY
+      // Partial Search
+      // ===================================================
+
+      if (country !== null) {
+        whereCondition += `
+          AND LOWER(TRIM(COALESCE(u.country, '')))
+              LIKE LOWER(?)
+        `;
+
+        queryParams.push(
+          `%${country}%`
+        );
+      }
+
+      // ===================================================
+      // STATE
+      // Partial Search
+      // ===================================================
+
+      if (state !== null) {
+        whereCondition += `
+          AND LOWER(TRIM(COALESCE(u.state, '')))
+              LIKE LOWER(?)
+        `;
+
+        queryParams.push(
+          `%${state}%`
+        );
+      }
+
+      // ===================================================
+      // CITY
+      // Partial Search
+      // ===================================================
+
+      if (city !== null) {
+        whereCondition += `
+          AND LOWER(TRIM(COALESCE(u.city, '')))
+              LIKE LOWER(?)
+        `;
+
+        queryParams.push(
+          `%${city}%`
+        );
+      }
+
+      // ===================================================
+      // STATUS
+      // ===================================================
+
+      if (
+        status !== null &&
+        status !== ""
+      ) {
+        whereCondition += `
+          AND u.userStatus = ?
+        `;
+
+        queryParams.push(
+          Number(status)
         );
       }
 
@@ -224,7 +332,6 @@ export const getAllUsers = async (
 
       const sql = `
         SELECT
-
           u.id,
           u.organization_name,
           u.name,
@@ -237,7 +344,6 @@ export const getAllUsers = async (
           u.role_id,
           u.created_by,
           u.parent_id,
-
           u.userStatus,
 
           CASE
@@ -283,52 +389,131 @@ export const getAllUsers = async (
         offset
       );
 
-      const [
-        users
-      ] = await db.query(
+      const [users] = await db.query(
         sql,
         queryParams
       );
 
       // ===================================================
-      // COUNT
+      // COUNT QUERY
       // ===================================================
 
-      const countSql = `
-        SELECT
-          COUNT(*) AS total
-
-        FROM users u
-
-        ${whereCondition}
+      let countWhereCondition = `
+        WHERE 1 = 1
       `;
 
-      const countParams =
+      const countParams = [];
+
+      // ROLE
+      if (
         role_id !== null &&
         role_id !== ""
-          ? [Number(role_id)]
-          : [];
+      ) {
+        countWhereCondition += `
+          AND u.role_id = ?
+        `;
 
-      const [
-        countResult
-      ] = await db.query(
+        countParams.push(
+          Number(role_id)
+        );
+      }
+
+      // SEARCH
+      if (search !== null) {
+        countWhereCondition += `
+          AND (
+            LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
+            OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
+            OR LOWER(
+              CASE u.role_id
+                WHEN 0 THEN 'Master Admin'
+                WHEN 1 THEN 'Admin'
+                WHEN 2 THEN 'CNF'
+                WHEN 3 THEN 'Super Distributor'
+                WHEN 4 THEN 'Distributor'
+                WHEN 5 THEN 'FOS'
+                WHEN 6 THEN 'Retailer'
+                WHEN 7 THEN 'Sub Retailer'
+                WHEN 8 THEN 'Employee'
+                WHEN 9 THEN 'Staff'
+                ELSE ''
+              END
+            ) LIKE LOWER(?)
+          )
+        `;
+
+        const searchValue = `%${search}%`;
+
+        countParams.push(
+          searchValue,
+          searchValue,
+          searchValue
+        );
+      }
+
+      // COUNTRY
+      if (country !== null) {
+        countWhereCondition += `
+          AND LOWER(TRIM(COALESCE(u.country, '')))
+              LIKE LOWER(?)
+        `;
+
+        countParams.push(
+          `%${country}%`
+        );
+      }
+
+      // STATE
+      if (state !== null) {
+        countWhereCondition += `
+          AND LOWER(TRIM(COALESCE(u.state, '')))
+              LIKE LOWER(?)
+        `;
+
+        countParams.push(
+          `%${state}%`
+        );
+      }
+
+      // CITY
+      if (city !== null) {
+        countWhereCondition += `
+          AND LOWER(TRIM(COALESCE(u.city, '')))
+              LIKE LOWER(?)
+        `;
+
+        countParams.push(
+          `%${city}%`
+        );
+      }
+
+      // STATUS
+      if (
+        status !== null &&
+        status !== ""
+      ) {
+        countWhereCondition += `
+          AND u.userStatus = ?
+        `;
+
+        countParams.push(
+          Number(status)
+        );
+      }
+
+      const countSql = `
+        SELECT COUNT(*) AS total
+        FROM users u
+        ${countWhereCondition}
+      `;
+
+      const [countResult] = await db.query(
         countSql,
         countParams
       );
 
-      const total =
-        Number(
-          countResult?.[0]?.total || 0
-        );
-
-      console.log(
-        "ADMIN / MASTER USERS:",
-        users.length
-      );
-
-      console.log(
-        "ADMIN / MASTER TOTAL:",
-        total
+      const total = Number(
+        countResult?.[0]?.total || 0
       );
 
       return {
@@ -339,43 +524,6 @@ export const getAllUsers = async (
 
     // =====================================================
     // NON ADMIN USERS
-    // =====================================================
-    //
-    // IMPORTANT:
-    //
-    // Yahan hierarchy parent_id ke according niklegi.
-    //
-    // Example:
-    //
-    // CNF
-    //  id = 10
-    //
-    // Super Distributor
-    //  id = 20
-    //  parent_id = 10
-    //
-    // Distributor
-    //  id = 30
-    //  parent_id = 20
-    //
-    // FOS
-    //  id = 40
-    //  parent_id = 30
-    //
-    // Retailer
-    //  id = 50
-    //  parent_id = 40
-    //
-    // Agar CNF 10 login karega:
-    //
-    // 20, 30, 40, 50
-    //
-    // Agar Super 20 login karega:
-    //
-    // 30, 40, 50
-    //
-    // Doosre CNF/Super ki chain nahi aayegi.
-    //
     // =====================================================
 
     // =====================================================
@@ -409,8 +557,7 @@ export const getAllUsers = async (
           ON child.parent_id = parent.id
       )
 
-      SELECT
-        COUNT(*) AS total
+      SELECT COUNT(*) AS total
 
       FROM users u
 
@@ -425,10 +572,7 @@ export const getAllUsers = async (
       loggedInUserId,
     ];
 
-    // =====================================================
-    // ROLE FILTER
-    // =====================================================
-
+    // ROLE
     if (
       role_id !== null &&
       role_id !== ""
@@ -442,21 +586,97 @@ export const getAllUsers = async (
       );
     }
 
-    // =====================================================
-    // COUNT EXECUTION
-    // =====================================================
+    // SEARCH
+    if (search !== null) {
+      countSql += `
+        AND (
+          LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
+          OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
+          OR LOWER(
+            CASE u.role_id
+              WHEN 0 THEN 'Master Admin'
+              WHEN 1 THEN 'Admin'
+              WHEN 2 THEN 'CNF'
+              WHEN 3 THEN 'Super Distributor'
+              WHEN 4 THEN 'Distributor'
+              WHEN 5 THEN 'FOS'
+              WHEN 6 THEN 'Retailer'
+              WHEN 7 THEN 'Sub Retailer'
+              WHEN 8 THEN 'Employee'
+              WHEN 9 THEN 'Staff'
+              ELSE ''
+            END
+          ) LIKE LOWER(?)
+        )
+      `;
 
-    const [
-      countResult
-    ] = await db.query(
+      const searchValue = `%${search}%`;
+
+      countParams.push(
+        searchValue,
+        searchValue,
+        searchValue
+      );
+    }
+
+    // COUNTRY
+    if (country !== null) {
+      countSql += `
+        AND LOWER(TRIM(COALESCE(u.country, '')))
+            LIKE LOWER(?)
+      `;
+
+      countParams.push(
+        `%${country}%`
+      );
+    }
+
+    // STATE
+    if (state !== null) {
+      countSql += `
+        AND LOWER(TRIM(COALESCE(u.state, '')))
+            LIKE LOWER(?)
+      `;
+
+      countParams.push(
+        `%${state}%`
+      );
+    }
+
+    // CITY
+    if (city !== null) {
+      countSql += `
+        AND LOWER(TRIM(COALESCE(u.city, '')))
+            LIKE LOWER(?)
+      `;
+
+      countParams.push(
+        `%${city}%`
+      );
+    }
+
+    // STATUS
+    if (
+      status !== null &&
+      status !== ""
+    ) {
+      countSql += `
+        AND u.userStatus = ?
+      `;
+
+      countParams.push(
+        Number(status)
+      );
+    }
+
+    const [countResult] = await db.query(
       countSql,
       countParams
     );
 
-    const total =
-      Number(
-        countResult?.[0]?.total || 0
-      );
+    const total = Number(
+      countResult?.[0]?.total || 0
+    );
 
     // =====================================================
     // USERS QUERY
@@ -490,7 +710,6 @@ export const getAllUsers = async (
       )
 
       SELECT
-
         u.id,
         u.organization_name,
         u.name,
@@ -503,7 +722,6 @@ export const getAllUsers = async (
         u.role_id,
         u.created_by,
         u.parent_id,
-
         u.userStatus,
 
         CASE
@@ -548,10 +766,7 @@ export const getAllUsers = async (
       loggedInUserId,
     ];
 
-    // =====================================================
-    // ROLE FILTER
-    // =====================================================
-
+    // ROLE
     if (
       role_id !== null &&
       role_id !== ""
@@ -562,6 +777,89 @@ export const getAllUsers = async (
 
       sqlParams.push(
         Number(role_id)
+      );
+    }
+
+    // SEARCH
+    if (search !== null) {
+      sql += `
+        AND (
+          LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
+          OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
+          OR LOWER(
+            CASE u.role_id
+              WHEN 0 THEN 'Master Admin'
+              WHEN 1 THEN 'Admin'
+              WHEN 2 THEN 'CNF'
+              WHEN 3 THEN 'Super Distributor'
+              WHEN 4 THEN 'Distributor'
+              WHEN 5 THEN 'FOS'
+              WHEN 6 THEN 'Retailer'
+              WHEN 7 THEN 'Sub Retailer'
+              WHEN 8 THEN 'Employee'
+              WHEN 9 THEN 'Staff'
+              ELSE ''
+            END
+          ) LIKE LOWER(?)
+        )
+      `;
+
+      const searchValue = `%${search}%`;
+
+      sqlParams.push(
+        searchValue,
+        searchValue,
+        searchValue
+      );
+    }
+
+    // COUNTRY
+    if (country !== null) {
+      sql += `
+        AND LOWER(TRIM(COALESCE(u.country, '')))
+            LIKE LOWER(?)
+      `;
+
+      sqlParams.push(
+        `%${country}%`
+      );
+    }
+
+    // STATE
+    if (state !== null) {
+      sql += `
+        AND LOWER(TRIM(COALESCE(u.state, '')))
+            LIKE LOWER(?)
+      `;
+
+      sqlParams.push(
+        `%${state}%`
+      );
+    }
+
+    // CITY
+    if (city !== null) {
+      sql += `
+        AND LOWER(TRIM(COALESCE(u.city, '')))
+            LIKE LOWER(?)
+      `;
+
+      sqlParams.push(
+        `%${city}%`
+      );
+    }
+
+    // STATUS
+    if (
+      status !== null &&
+      status !== ""
+    ) {
+      sql += `
+        AND u.userStatus = ?
+      `;
+
+      sqlParams.push(
+        Number(status)
       );
     }
 
@@ -580,12 +878,10 @@ export const getAllUsers = async (
     );
 
     // =====================================================
-    // EXECUTE USERS QUERY
+    // EXECUTE
     // =====================================================
 
-    const [
-      users
-    ] = await db.query(
+    const [users] = await db.query(
       sql,
       sqlParams
     );
@@ -604,25 +900,20 @@ export const getAllUsers = async (
       total
     );
 
-    console.log(
-      "USER DETAILS:"
-    );
-
     console.table(
-      users.map(
-        (user) => ({
-          id: user.id,
-          name: user.name,
-          role_id: user.role_id,
-          parent_id: user.parent_id,
-          created_by: user.created_by,
-        })
-      )
+      users.map((user) => ({
+        id: user.id,
+        name: user.name,
+        organization_name:
+          user.organization_name,
+        role_id: user.role_id,
+        country: user.country,
+        state: user.state,
+        city: user.city,
+        parent_id: user.parent_id,
+        created_by: user.created_by,
+      }))
     );
-
-    // =====================================================
-    // RETURN
-    // =====================================================
 
     return {
       users,
@@ -630,7 +921,6 @@ export const getAllUsers = async (
     };
 
   } catch (error) {
-
     console.error(
       "GET ALL USERS MODEL ERROR:",
       error
