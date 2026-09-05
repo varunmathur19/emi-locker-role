@@ -1163,14 +1163,21 @@ export const getUsers = async (req, res) => {
 
     if (
       req.query.status !== undefined &&
-      req.query.status !== ""
+      String(req.query.status).trim() !== ""
     ) {
-      status = Number(req.query.status);
+      const statusValue = String(req.query.status)
+        .trim()
+        .toLowerCase();
 
-      if (
-        !Number.isInteger(status) ||
-        ![0, 1].includes(status)
-      ) {
+      if (statusValue === "active") {
+        status = 1;
+      } else if (statusValue === "inactive") {
+        status = 0;
+      } else if (statusValue === "1") {
+        status = 1;
+      } else if (statusValue === "0") {
+        status = 0;
+      } else {
         return res.status(400).json({
           success: false,
           message: "Invalid status",
@@ -1207,26 +1214,7 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // DEBUG
-    // =====================================================
-
-    console.log("==============================================");
-    console.log("GET USERS CONTROLLER");
-    console.log({
-      page,
-      limit,
-      offset,
-      role_id,
-      search,
-      country,
-      state,
-      city,
-      status,
-      loggedInUserId,
-      loggedInRoleId,
-    });
-    console.log("==============================================");
+    
 
     // =====================================================
     // MODEL
