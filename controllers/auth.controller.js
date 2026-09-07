@@ -14,32 +14,22 @@ import { ROLES } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
 
+// ADD STAFF
 export const createuserrole = async (req, res) => {
   try {
-    // =====================================================
-    // REQUEST BODY
-    // =====================================================
-
     const {
       organization_name,
       role_id,
       parent_id,
-
       name,
       email,
       phone,
       password,
       confirm_password,
-
       company_address,
       country,
       state,
       city,
-
-      // ===================================================
-      // DEVICE PERMISSIONS
-      // ===================================================
-
       new_device,
       old_device,
       supreme_device,
@@ -48,10 +38,6 @@ export const createuserrole = async (req, res) => {
       google_tv,
       supreme_lock,
     } = req.body;
-
-    // =====================================================
-    // BASIC VALIDATION
-    // =====================================================
 
     if (!name || !String(name).trim()) {
       return res.status(400).json({
@@ -88,49 +74,22 @@ export const createuserrole = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // CLEAN BASIC DATA
-    // =====================================================
+    if (password !== confirm_password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password and Confirm Password not match",
+      });
+    }
 
-    const cleanName =
-      String(name).trim();
+    const cleanName = String(name).trim();
+    const cleanEmail = String(email).trim().toLowerCase();
 
-    const cleanEmail =
-      String(email)
-        .trim()
-        .toLowerCase();
-
-    // =====================================================
-    // PHONE NUMBER NORMALIZATION
-    // =====================================================
-    //
-    // Allowed:
-    //
-    // +919876543210
-    // +91 9876543210
-    // +91-9876543210
-    // 9876543210
-    //
-    // Database me:
-    //
-    // +919876543210
-    //
-    // save hoga.
-    //
-    // =====================================================
-
-    let cleanPhone =
-      String(phone)
-        .trim()
-        .replace(/[\s\-()]/g, "");
-
-    // -----------------------------------------------------
-    // +91 FORMAT
-    // -----------------------------------------------------
+    let cleanPhone = String(phone)
+      .trim()
+      .replace(/[\s\-()]/g, "");
 
     if (cleanPhone.startsWith("+91")) {
-      const indianNumber =
-        cleanPhone.substring(3);
+      const indianNumber = cleanPhone.substring(3);
 
       if (!/^[6-9]\d{9}$/.test(indianNumber)) {
         return res.status(400).json({
@@ -140,47 +99,12 @@ export const createuserrole = async (req, res) => {
         });
       }
 
-      cleanPhone =
-        `+91${indianNumber}`;
-    }
-
-    // -----------------------------------------------------
-    // 91 WITHOUT + NOT ALLOWED AS PREFIX
-    // -----------------------------------------------------
-    //
-    // Example:
-    // 919876543210
-    //
-    // Isko bhi +91 format me convert kar rahe hain.
-    //
-    // -----------------------------------------------------
-
-    else if (
-      /^91[6-9]\d{9}$/.test(cleanPhone)
-    ) {
-      const indianNumber =
-        cleanPhone.substring(2);
-
-      cleanPhone =
-        `+91${indianNumber}`;
-    }
-
-    // -----------------------------------------------------
-    // NORMAL 10 DIGIT NUMBER
-    // -----------------------------------------------------
-
-    else if (
-      /^[6-9]\d{9}$/.test(cleanPhone)
-    ) {
-      cleanPhone =
-        `+91${cleanPhone}`;
-    }
-
-    // -----------------------------------------------------
-    // INVALID PHONE
-    // -----------------------------------------------------
-
-    else {
+      cleanPhone = `+91${indianNumber}`;
+    } else if (/^91[6-9]\d{9}$/.test(cleanPhone)) {
+      cleanPhone = `+91${cleanPhone.substring(2)}`;
+    } else if (/^[6-9]\d{9}$/.test(cleanPhone)) {
+      cleanPhone = `+91${cleanPhone}`;
+    } else {
       return res.status(400).json({
         success: false,
         message:
@@ -188,82 +112,39 @@ export const createuserrole = async (req, res) => {
       });
     }
 
-    // =====================================================
-    // PASSWORD MATCH
-    // =====================================================
+    const role = Number(role_id);
 
-    if (password !== confirm_password) {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Password and Confirm Password not match",
-      });
-    }
-
-    // =====================================================
-    // ROLE VALIDATION
-    // =====================================================
-
-    const role =
-      Number(role_id);
-
-    if (!Number.isInteger(role)) {
+    if (!Number.isInteger(role) || !isValidRole(role)) {
       return res.status(400).json({
         success: false,
         message: "Invalid role_id",
       });
     }
-
-    if (!isValidRole(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role_id",
-      });
-    }
-
-    // =====================================================
-    // MASTER ADMIN CANNOT BE CREATED
-    // =====================================================
 
     if (role === ROLES.MASTER_ADMIN) {
       return res.status(403).json({
         success: false,
-        message:
-          "Master Admin cannot be created",
+        message: "Master Admin cannot be created",
       });
     }
 
-    // =====================================================
-    // LOGGED-IN USER
-    // =====================================================
-
-    if (!req.user || !req.user.id) {
+    if (!req.user?.id) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized",
       });
     }
 
-    const created_by =
-      Number(req.user.id);
+    const created_by = Number(req.user.id);
 
-    if (
-      !Number.isInteger(created_by) ||
-      created_by <= 0
-    ) {
+    if (!Number.isInteger(created_by) || created_by <= 0) {
       return res.status(401).json({
         success: false,
-        message:
-          "Invalid logged-in user",
+        message: "Invalid logged-in user",
       });
     }
 
-    // =====================================================
-    // FIND CREATOR
-    // =====================================================
-
-    const creator =
-      await findUserById(created_by);
+    const creator = await findUserById(created_by);
 
     if (!creator) {
       return res.status(404).json({
@@ -272,12 +153,7 @@ export const createuserrole = async (req, res) => {
       });
     }
 
-    const creatorRole =
-      Number(creator.role_id);
-
-    // =====================================================
-    // NORMALIZE PARENT ID
-    // =====================================================
+    const creatorRole = Number(creator.role_id);
 
     let selectedParentId = null;
 
@@ -286,8 +162,7 @@ export const createuserrole = async (req, res) => {
       parent_id !== null &&
       String(parent_id).trim() !== ""
     ) {
-      selectedParentId =
-        Number(parent_id);
+      selectedParentId = Number(parent_id);
 
       if (
         !Number.isInteger(selectedParentId) ||
@@ -295,39 +170,34 @@ export const createuserrole = async (req, res) => {
       ) {
         return res.status(400).json({
           success: false,
-          message:
-            "Invalid parent_id",
+          message: "Invalid parent_id",
         });
+      }
+
+      if (selectedParentId === created_by) {
+        if (role === ROLES.STAFF && creatorRole === ROLES.ADMIN) {
+          selectedParentId = created_by;
+        }
       }
     }
 
-    // =====================================================
-    // ALLOWED PARENT ROLES
-    // =====================================================
-
     const allowedParentRoles = {
-      [ROLES.CNF]: [
-        ROLES.ADMIN,
-      ],
-
+      [ROLES.CNF]: [ROLES.ADMIN],
       [ROLES.SUPER_DISTRIBUTOR]: [
         ROLES.ADMIN,
         ROLES.CNF,
       ],
-
       [ROLES.DISTRIBUTOR]: [
         ROLES.ADMIN,
         ROLES.CNF,
         ROLES.SUPER_DISTRIBUTOR,
       ],
-
       [ROLES.FOS]: [
         ROLES.ADMIN,
         ROLES.CNF,
         ROLES.SUPER_DISTRIBUTOR,
         ROLES.DISTRIBUTOR,
       ],
-
       [ROLES.RETAILER]: [
         ROLES.ADMIN,
         ROLES.CNF,
@@ -335,7 +205,6 @@ export const createuserrole = async (req, res) => {
         ROLES.DISTRIBUTOR,
         ROLES.FOS,
       ],
-
       [ROLES.SUB_RETAILER]: [
         ROLES.ADMIN,
         ROLES.CNF,
@@ -344,7 +213,6 @@ export const createuserrole = async (req, res) => {
         ROLES.FOS,
         ROLES.RETAILER,
       ],
-
       [ROLES.EMPLOYEE]: [
         ROLES.ADMIN,
         ROLES.CNF,
@@ -356,136 +224,36 @@ export const createuserrole = async (req, res) => {
       ],
     };
 
-    // =====================================================
-    // PARENT DISABLED FIELD MAP
-    // =====================================================
-
-    const disabledFieldMap = {
-      [ROLES.ADMIN]:
-        "parent_admin_disabled",
-
-      [ROLES.CNF]:
-        "parent_cnf_disabled",
-
-      [ROLES.SUPER_DISTRIBUTOR]:
-        "parent_super_distributor_disabled",
-
-      [ROLES.DISTRIBUTOR]:
-        "parent_distributor_disabled",
-
-      [ROLES.FOS]:
-        "parent_fos_disabled",
-
-      [ROLES.RETAILER]:
-        "parent_retailer_disabled",
-
-      [ROLES.SUB_RETAILER]:
-        "parent_sub_retailer_disabled",
-
-      [ROLES.EMPLOYEE]:
-        "parent_employee_disabled",
-
-      [ROLES.STAFF]:
-        "parent_staff_disabled",
-    };
-
-    // =====================================================
-    // STAFF
-    // =====================================================
-
     if (role === ROLES.STAFF) {
-
-      // ---------------------------------------------------
-      // ONLY ADMIN CAN CREATE STAFF
-      // ---------------------------------------------------
-
       if (creatorRole !== ROLES.ADMIN) {
         return res.status(403).json({
           success: false,
-          message:
-            "Only Admin can create Staff",
+          message: "Only Admin can create Staff",
         });
       }
 
-      // ---------------------------------------------------
-      // STAFF PARENT
-      // ---------------------------------------------------
-
       if (selectedParentId !== null) {
-
-        const selectedParent =
-          await findUserById(
-            selectedParentId
-          );
+        const selectedParent = await findUserById(
+          selectedParentId
+        );
 
         if (!selectedParent) {
           return res.status(404).json({
             success: false,
-            message:
-              "Selected parent user not found",
+            message: "Selected parent user not found",
           });
         }
 
-        const parentRole =
-          Number(
-            selectedParent.role_id
-          );
-
-        if (
-          parentRole !== ROLES.ADMIN
-        ) {
+        if (Number(selectedParent.role_id) !== ROLES.ADMIN) {
           return res.status(403).json({
             success: false,
-            message:
-              "Staff parent must be an Admin",
+            message: "Staff parent must be an Admin",
           });
         }
-
-        // -------------------------------------------------
-        // CHECK ADMIN DISABLED STAFF
-        // -------------------------------------------------
-
-        const disabledField =
-          disabledFieldMap[
-            ROLES.STAFF
-          ];
-
-        if (
-          disabledField &&
-          Number(
-            selectedParent[
-              disabledField
-            ] ?? 0
-          ) === 1
-        ) {
-          return res.status(403).json({
-            success: false,
-            message:
-              `${getRoleName(parentRole)} has disabled ${getRoleName(role)}`,
-          });
-        }
-
       } else {
-
-        // -------------------------------------------------
-        // LOGGED-IN ADMIN BECOMES PARENT
-        // -------------------------------------------------
-
-        selectedParentId =
-          created_by;
+        selectedParentId = created_by;
       }
-    }
-
-    // =====================================================
-    // NORMAL ROLES
-    // =====================================================
-
-    else {
-
-      // ===================================================
-      // EMPLOYEE / STAFF CANNOT CREATE USERS
-      // ===================================================
-
+    } else {
       if (
         creatorRole === ROLES.EMPLOYEE ||
         creatorRole === ROLES.STAFF
@@ -497,165 +265,68 @@ export const createuserrole = async (req, res) => {
         });
       }
 
-      // ===================================================
-      // CREATOR ROLE PERMISSION
-      // ===================================================
-
       if (
-        creatorRole !==
-        ROLES.MASTER_ADMIN
+        creatorRole !== ROLES.MASTER_ADMIN &&
+        role <= creatorRole
       ) {
-
-        if (
-          role <= creatorRole
-        ) {
-          return res.status(403).json({
-            success: false,
-            message:
-              `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
-          });
-        }
+        return res.status(403).json({
+          success: false,
+          message: `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
+        });
       }
 
-      // ===================================================
-      // SELECTED PARENT VALIDATION
-      // ===================================================
-
-      if (
-        selectedParentId !== null
-      ) {
-
-        const selectedParent =
-          await findUserById(
-            selectedParentId
-          );
+      if (selectedParentId !== null) {
+        const selectedParent = await findUserById(
+          selectedParentId
+        );
 
         if (!selectedParent) {
           return res.status(404).json({
             success: false,
-            message:
-              "Selected parent user not found",
+            message: "Selected parent user not found",
           });
         }
 
-        const parentRole =
-          Number(
-            selectedParent.role_id
-          );
+        const parentRole = Number(selectedParent.role_id);
+        const allowedParents = allowedParentRoles[role] || [];
 
-        // =================================================
-        // CHECK ALLOWED PARENT ROLE
-        // =================================================
-
-        const allowedParents =
-          allowedParentRoles[role] ||
-          [];
-
-        if (
-          !allowedParents.includes(
-            parentRole
-          )
-        ) {
+        if (!allowedParents.includes(parentRole)) {
           return res.status(403).json({
             success: false,
-            message:
-              `${getRoleName(parentRole)} cannot be parent of ${getRoleName(role)}`,
+            message: "Selected parent role is invalid",
           });
         }
 
-        // =================================================
-        // CHECK PARENT DISABLED THIS ROLE
-        // =================================================
-
-        const disabledField =
-          disabledFieldMap[role];
-
-        if (
-          disabledField &&
-          Number(
-            selectedParent[
-              disabledField
-            ] ?? 0
-          ) === 1
-        ) {
-          return res.status(403).json({
-            success: false,
-            message:
-              `${getRoleName(parentRole)} has disabled ${getRoleName(role)}`,
-          });
+        if (selectedParentId === created_by && role > creatorRole) {
+          selectedParentId = created_by;
         }
-      }
-
-      // ===================================================
-      // PARENT NOT SELECTED
-      // ===================================================
-
-      if (
-        selectedParentId === null &&
-        creatorRole !==
-          ROLES.MASTER_ADMIN
-      ) {
-        selectedParentId =
-          created_by;
+      } else if (creatorRole !== ROLES.MASTER_ADMIN) {
+        selectedParentId = created_by;
       }
     }
 
-    // =====================================================
-    // EMAIL UNIQUE CHECK
-    // =====================================================
-
-    const existingUser =
-      await findUserByEmail(
-        cleanEmail
-      );
+    const existingUser = await findUserByEmail(cleanEmail);
 
     if (existingUser) {
       return res.status(400).json({
         success: false,
-        message:
-          "Email already exists",
+        message: "Email already exists",
       });
     }
 
-    // =====================================================
-    // PHONE UNIQUE CHECK
-    // =====================================================
-    //
-    // cleanPhone already normalized:
-    //
-    // +919876543210
-    //
-    // Isliye same number different format
-    // me bhi duplicate nahi hoga.
-    //
-    // =====================================================
+    const existingPhone = await db("users")
+      .select("id")
+      .where("phone", cleanPhone)
+      .first();
 
-    const [existingPhoneRows] =
-      await db.query(
-        `
-          SELECT id
-          FROM users
-          WHERE phone = ?
-          LIMIT 1
-        `,
-        [cleanPhone]
-      );
-
-    if (
-      existingPhoneRows.length > 0
-    ) {
+    if (existingPhone) {
       return res.status(400).json({
         success: false,
-        message:
-          "Phone number already exists",
+        message: "Phone number already exists",
       });
     }
 
-    // =====================================================
-    // DEVICE PERMISSIONS DEFAULT
-    // =====================================================
-
-    let retailerDevices = {
+    const retailerDevices = {
       new_device: 0,
       old_device: 0,
       supreme_device: 0,
@@ -665,14 +336,7 @@ export const createuserrole = async (req, res) => {
       supreme_lock: 0,
     };
 
-    // =====================================================
-    // RETAILER DEVICE VALIDATION
-    // =====================================================
-
-    if (
-      role === ROLES.RETAILER
-    ) {
-
+    if (role === ROLES.RETAILER) {
       const deviceFields = {
         new_device,
         old_device,
@@ -683,244 +347,109 @@ export const createuserrole = async (req, res) => {
         supreme_lock,
       };
 
-      for (
-        const [field, value]
-        of Object.entries(
-          deviceFields
-        )
-      ) {
-
-        // -----------------------------------------------
-        // Missing value = 0
-        // -----------------------------------------------
-
+      for (const [field, value] of Object.entries(deviceFields)) {
         if (
           value === undefined ||
           value === null ||
           value === ""
         ) {
-          retailerDevices[
-            field
-          ] = 0;
-
           continue;
         }
 
-        const numericValue =
-          Number(value);
+        const numericValue = Number(value);
 
-        // -----------------------------------------------
-        // Only 0 / 1 allowed
-        // -----------------------------------------------
-
-        if (
-          ![0, 1].includes(
-            numericValue
-          )
-        ) {
+        if (![0, 1].includes(numericValue)) {
           return res.status(400).json({
             success: false,
-            message:
-              `${field} must be either 0 or 1`,
+            message: `${field} must be either 0 or 1`,
           });
         }
 
-        retailerDevices[
-          field
-        ] =
-          numericValue;
+        retailerDevices[field] = numericValue;
       }
     }
 
-    // =====================================================
-    // HASH PASSWORD
-    // =====================================================
+    const hashPassword = await bcrypt.hash(password, 10);
 
-    const hashPassword =
-      await bcrypt.hash(
-        password,
-        10
-      );
-
-    // =====================================================
-    // CREATE USER
-    // =====================================================
-
-    const userId =
-      await createUserModel({
-
-        // =================================================
-        // BASIC DETAILS
-        // =================================================
-
-        organization_name,
-
-        name:
-          cleanName,
-
-        email:
-          cleanEmail,
-
-        // IMPORTANT:
-        // normalized phone save hoga
-        phone:
-          cleanPhone,
-
-        password:
-          hashPassword,
-
-        company_address,
-
-        country,
-
-        state,
-
-        city,
-
-        // =================================================
-        // ROLE
-        // =================================================
-
-        role_id:
-          role,
-
-        // =================================================
-        // CREATOR
-        // =================================================
-
-        created_by,
-
-        // =================================================
-        // HIERARCHY PARENT
-        // =================================================
-
-        parent_id:
-          selectedParentId,
-
-        // =================================================
-        // DEVICE PERMISSIONS
-        // =================================================
-
-        new_device:
-          retailerDevices.new_device,
-
-        old_device:
-          retailerDevices.old_device,
-
-        supreme_device:
-          retailerDevices.supreme_device,
-
-        pro_star:
-          retailerDevices.pro_star,
-
-        lite:
-          retailerDevices.lite,
-
-        google_tv:
-          retailerDevices.google_tv,
-
-        supreme_lock:
-          retailerDevices.supreme_lock,
-      });
-
-    // =====================================================
-    // SUCCESS RESPONSE
-    // =====================================================
+    const userId = await createUserModel({
+      organization_name,
+      name: cleanName,
+      email: cleanEmail,
+      phone: cleanPhone,
+      password: hashPassword,
+      company_address,
+      country,
+      state,
+      city,
+      role_id: role,
+      created_by,
+      parent_id: selectedParentId,
+      new_device: retailerDevices.new_device,
+      old_device: retailerDevices.old_device,
+      supreme_device: retailerDevices.supreme_device,
+      pro_star: retailerDevices.pro_star,
+      lite: retailerDevices.lite,
+      google_tv: retailerDevices.google_tv,
+      supreme_lock: retailerDevices.supreme_lock,
+    });
 
     return res.status(201).json({
       success: true,
-
-      message:
-        "User Registered Successfully",
-
+      message: "User Registered Successfully",
       data: {
-
-        id:
-          userId,
-
+        id: userId,
         organization_name,
-
-        name:
-          cleanName,
-
-        email:
-          cleanEmail,
-
-        // normalized phone
-        phone:
-          cleanPhone,
-
-        role_id:
-          role,
-
+        name: cleanName,
+        email: cleanEmail,
+        phone: cleanPhone,
+        role_id: role,
         company_address,
-
         country,
-
         state,
-
         city,
-
         created_by,
-
-        parent_id:
-          selectedParentId,
-
-        new_device:
-          retailerDevices.new_device,
-
-        old_device:
-          retailerDevices.old_device,
-
-        supreme_device:
-          retailerDevices.supreme_device,
-
-        pro_star:
-          retailerDevices.pro_star,
-
-        lite:
-          retailerDevices.lite,
-
-        google_tv:
-          retailerDevices.google_tv,
-
-        supreme_lock:
-          retailerDevices.supreme_lock,
+        parent_id: selectedParentId,
+        new_device: retailerDevices.new_device,
+        old_device: retailerDevices.old_device,
+        supreme_device: retailerDevices.supreme_device,
+        pro_star: retailerDevices.pro_star,
+        lite: retailerDevices.lite,
+        google_tv: retailerDevices.google_tv,
+        supreme_lock: retailerDevices.supreme_lock,
       },
     });
-
   } catch (error) {
-
-    // =====================================================
-    // ERROR
-    // =====================================================
-
-    console.error(
-      "Create User Error:",
-      error
-    );
+    console.error("CREATE USER ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error.message ||
-        "Internal server error",
+      message: error.message || "Internal server error",
     });
   }
 };
-// =========================
+
 // Login staff
-// =========================
 export const loginUser = async (req, res) => {
   try {
-
     const { email, password } = req.body;
 
-    // ==========================================
-    // FIND USER
-    // ==========================================
+    if (!email || !String(email).trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Email is required",
+      });
+    }
 
-    const user = await findUserByEmail(email);
+    if (!password) {
+      return res.status(400).json({
+        success: false,
+        message: "Password is required",
+      });
+    }
+
+    const user = await findUserByEmail(
+      String(email).trim().toLowerCase()
+    );
 
     if (!user) {
       return res.status(404).json({
@@ -929,181 +458,83 @@ export const loginUser = async (req, res) => {
       });
     }
 
-
-    // ==========================================
-    // CHECK USER STATUS
-    // 1 = ACTIVE
-    // 0 = INACTIVE
-    // ==========================================
-
     if (Number(user.userStatus) === 0) {
-
       return res.status(403).json({
         success: false,
         message: "Your account is inactive",
       });
-
     }
 
-
-    // ==========================================
-    // CHECK PASSWORD
-    // ==========================================
-
-    const match =
-      await bcrypt.compare(
-        password,
-        user.password
-      );
+    const match = await bcrypt.compare(
+      password,
+      user.password
+    );
 
     if (!match) {
-
       return res.status(401).json({
         success: false,
         message: "Invalid password",
       });
-
     }
 
-
-    // ==========================================
-    // JWT TOKEN
-    // ==========================================
-
-    const token =
-      jwt.sign(
-        {
-          id: user.id,
-          role_id: user.role_id,
-          email: user.email,
-        },
-        process.env.JWT_SECRET,
-        {
-          expiresIn: "7d",
-        }
-      );
-
-
-    // ==========================================
-    // RESPONSE
-    // ==========================================
-
-    return res.status(200).json({
-
-      success: true,
-
-      message:
-        "Login Successful",
-
-      token,
-
-      user: {
-
-        id:
-          user.id,
-
-        name:
-          user.name,
-
-        email:
-          user.email,
-
-        role_id:
-          user.role_id,
-
-        // ======================================
-        // USER STATUS
-        // ======================================
-
-        userStatus:
-          Number(user.userStatus),
-
-        // ======================================
-        // HIERARCHY DATA
-        // ======================================
-
-        parent_id:
-          user.parent_id,
-
-        parent_admin_id:
-          user.parent_admin_id,
-
-        parent_cnf_id:
-          user.parent_cnf_id,
-
-        parent_super_distributor_id:
-          user.parent_super_distributor_id,
-
-        parent_distributor_id:
-          user.parent_distributor_id,
-
-        parent_fos_id:
-          user.parent_fos_id,
-
-        parent_retailer_id:
-          user.parent_retailer_id,
-
-        parent_employee_id:
-          user.parent_employee_id,
-
-        parent_staff_id:
-          user.parent_staff_id,
-
+    const token = jwt.sign(
+      {
+        id: user.id,
+        role_id: user.role_id,
+        email: user.email,
       },
-
-    });
-
-  }
-  catch (error) {
-
-    console.error(
-      "Login Error:",
-      error
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
     );
 
-    return res.status(500).json({
-
-      success: false,
-
-      message:
-        error.message,
-
+    return res.status(200).json({
+      success: true,
+      message: "Login Successful",
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role_id: user.role_id,
+        userStatus: Number(user.userStatus),
+        parent_id: user.parent_id,
+        parent_admin_id: user.parent_admin_id,
+        parent_cnf_id: user.parent_cnf_id,
+        parent_super_distributor_id:
+          user.parent_super_distributor_id,
+        parent_distributor_id:
+          user.parent_distributor_id,
+        parent_fos_id: user.parent_fos_id,
+        parent_retailer_id:
+          user.parent_retailer_id,
+        parent_employee_id:
+          user.parent_employee_id,
+        parent_staff_id:
+          user.parent_staff_id,
+      },
     });
+  } catch (error) {
+    console.error("LOGIN ERROR:", error);
 
+    return res.status(500).json({
+      success: false,
+      message: error.message || "Internal server error",
+    });
   }
 };
 
-// =========================
 // GET ALL USERS
-// =========================
 export const getUsers = async (req, res) => {
   try {
-    // =====================================================
-    // PAGINATION
-    // =====================================================
-
-    const page = Math.max(
-      Number(req.query.page) || 1,
-      1
-    );
-
-    const limit = Math.max(
-      Number(req.query.limit) || 10,
-      1
-    );
-
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.max(Number(req.query.limit) || 10, 1);
     const offset = (page - 1) * limit;
-
-    // =====================================================
-    // ROLE ID
-    // =====================================================
 
     let role_id = null;
 
-    if (
-      req.query.role_id !== undefined &&
-      req.query.role_id !== ""
-    ) {
+    if (req.query.role_id !== undefined && req.query.role_id !== "") {
       role_id = Number(req.query.role_id);
 
       if (!Number.isInteger(role_id)) {
@@ -1114,20 +545,11 @@ export const getUsers = async (req, res) => {
       }
     }
 
-    // =====================================================
-    // SEARCH
-    // Name + Organization + Role
-    // =====================================================
-
     const search =
       req.query.search !== undefined &&
       String(req.query.search).trim() !== ""
         ? String(req.query.search).trim()
         : null;
-
-    // =====================================================
-    // COUNTRY
-    // =====================================================
 
     const country =
       req.query.country !== undefined &&
@@ -1135,19 +557,11 @@ export const getUsers = async (req, res) => {
         ? String(req.query.country).trim()
         : null;
 
-    // =====================================================
-    // STATE
-    // =====================================================
-
     const state =
       req.query.state !== undefined &&
       String(req.query.state).trim() !== ""
         ? String(req.query.state).trim()
         : null;
-
-    // =====================================================
-    // CITY
-    // =====================================================
 
     const city =
       req.query.city !== undefined &&
@@ -1155,27 +569,17 @@ export const getUsers = async (req, res) => {
         ? String(req.query.city).trim()
         : null;
 
-    // =====================================================
-    // STATUS
-    // =====================================================
-
     let status = null;
 
     if (
       req.query.status !== undefined &&
       String(req.query.status).trim() !== ""
     ) {
-      const statusValue = String(req.query.status)
-        .trim()
-        .toLowerCase();
+      const statusValue = String(req.query.status).trim().toLowerCase();
 
-      if (statusValue === "active") {
+      if (statusValue === "active" || statusValue === "1") {
         status = 1;
-      } else if (statusValue === "inactive") {
-        status = 0;
-      } else if (statusValue === "1") {
-        status = 1;
-      } else if (statusValue === "0") {
+      } else if (statusValue === "inactive" || statusValue === "0") {
         status = 0;
       } else {
         return res.status(400).json({
@@ -1185,22 +589,10 @@ export const getUsers = async (req, res) => {
       }
     }
 
-    // =====================================================
-    // LOGGED IN USER
-    // =====================================================
+    const loggedInUserId = Number(req.user?.id);
+    const loggedInRoleId = Number(req.user?.role_id);
 
-    const loggedInUserId = Number(
-      req.user?.id
-    );
-
-    const loggedInRoleId = Number(
-      req.user?.role_id
-    );
-
-    if (
-      !Number.isInteger(loggedInUserId) ||
-      loggedInUserId <= 0
-    ) {
+    if (!Number.isInteger(loggedInUserId) || loggedInUserId <= 0) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized user",
@@ -1213,12 +605,6 @@ export const getUsers = async (req, res) => {
         message: "Invalid logged-in user role",
       });
     }
-
-    
-
-    // =====================================================
-    // MODEL
-    // =====================================================
 
     const result = await getAllUsers(
       limit,
@@ -1233,43 +619,27 @@ export const getUsers = async (req, res) => {
       status
     );
 
-    // =====================================================
-    // RESPONSE
-    // =====================================================
-
     return res.status(200).json({
       success: true,
-
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(
-          result.total / limit
-        ),
+        totalPages: Math.ceil(result.total / limit),
         limit,
         totalUsers: result.total,
       },
-
       data: result.users,
     });
-
   } catch (error) {
-    console.error(
-      "GET USERS ERROR:",
-      error
-    );
+    console.error("GET USERS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message ||
-        "Failed to get users",
+      message: error?.message || "Failed to get users",
     });
   }
 };
 
-// =========================
 // Logout api
-// =========================
   export const logoutUser = async(req,res)=>{
 
   try{
@@ -1305,299 +675,139 @@ export const getUsers = async (req, res) => {
 
   };        
 
-// =========================
 // User Chain Api
-// =========================
-export const getDropdownUsers = async (
-  req,
-  res
-) => {
+export const getDropdownUsers = async (req, res) => {
   try {
-    const {
-      role_id,
-      parent_id,
-      search,
-      exclude_id,
-    } = req.query;
+    const { role_id, parent_id, search, exclude_id } = req.query;
 
-    // =====================================================
-    // VALIDATE ROLE ID
-    // =====================================================
-
-    if (
-      role_id === undefined ||
-      role_id === null ||
-      role_id === ""
-    ) {
+    if (role_id === undefined || role_id === null || role_id === "") {
       return res.status(400).json({
         success: false,
-        message:
-          "role_id is required",
+        message: "role_id is required",
       });
     }
 
-    const requestedRoleId =
-      Number(role_id);
+    const requestedRoleId = Number(role_id);
 
     if (
-      !Number.isInteger(
-        requestedRoleId
-      ) ||
+      !Number.isInteger(requestedRoleId) ||
       requestedRoleId < 1 ||
       requestedRoleId > 9
     ) {
       return res.status(400).json({
         success: false,
-        message:
-          "Invalid role_id",
+        message: "Invalid role_id",
       });
     }
 
-    // =====================================================
-    // PARENT ID
-    // =====================================================
-
-    let selectedParentId =
-      null;
+    let selectedParentId = null;
 
     if (
       parent_id !== undefined &&
       parent_id !== null &&
       parent_id !== ""
     ) {
-      selectedParentId =
-        Number(parent_id);
+      selectedParentId = Number(parent_id);
 
       if (
-        !Number.isInteger(
-          selectedParentId
-        ) ||
+        !Number.isInteger(selectedParentId) ||
         selectedParentId <= 0
       ) {
         return res.status(400).json({
           success: false,
-          message:
-            "Invalid parent_id",
+          message: "Invalid parent_id",
         });
       }
     }
 
-    // =====================================================
-    // EXCLUDE USER
-    // =====================================================
-    //
-    // Edit ke time current user ko dropdown se
-    // remove kar sakte hain.
-    //
-    // =====================================================
-
-    let excludeUserId =
-      null;
+    let excludeUserId = null;
 
     if (
       exclude_id !== undefined &&
       exclude_id !== null &&
       exclude_id !== ""
     ) {
-      excludeUserId =
-        Number(exclude_id);
+      excludeUserId = Number(exclude_id);
 
       if (
-        !Number.isInteger(
-          excludeUserId
-        ) ||
+        !Number.isInteger(excludeUserId) ||
         excludeUserId <= 0
       ) {
         return res.status(400).json({
           success: false,
-          message:
-            "Invalid exclude_id",
+          message: "Invalid exclude_id",
         });
       }
     }
 
-    // =====================================================
-    // SEARCH
-    // =====================================================
-
     const searchTerm =
-      typeof search === "string"
-        ? search.trim()
-        : "";
+      typeof search === "string" ? search.trim() : "";
 
-    // =====================================================
-    // BUILD WHERE
-    // =====================================================
+    const query = db("users as u")
+      .select(
+        "u.id",
+        "u.organization_name",
+        "u.name",
+        "u.email",
+        "u.phone",
+        "u.role_id",
+        "u.parent_id",
+        "u.created_by",
+        "u.created_at"
+      )
+      .where("u.role_id", requestedRoleId);
 
-    let whereClause = `
-      WHERE u.role_id = ?
-    `;
-
-    const queryParams = [
-      requestedRoleId,
-    ];
-
-    // =====================================================
-    // PARENT FILTER
-    // =====================================================
-    //
-    // Agar parent selected hai:
-    //
-    // parent_id = selected parent
-    //
-    // Sirf us parent ke direct children.
-    //
-    // =====================================================
-
-    if (
-      selectedParentId !== null
-    ) {
-      whereClause += `
-        AND u.parent_id = ?
-      `;
-
-      queryParams.push(
-        selectedParentId
-      );
+    if (selectedParentId !== null) {
+      query.where("u.parent_id", selectedParentId);
     }
 
-    // =====================================================
-    // EXCLUDE CURRENT EDIT USER
-    // =====================================================
-
-    if (
-      excludeUserId !== null
-    ) {
-      whereClause += `
-        AND u.id != ?
-      `;
-
-      queryParams.push(
-        excludeUserId
-      );
+    if (excludeUserId !== null) {
+      query.whereNot("u.id", excludeUserId);
     }
-
-    // =====================================================
-    // SEARCH FILTER
-    // =====================================================
 
     if (searchTerm) {
-      whereClause += `
-        AND (
-          u.name LIKE ?
-          OR u.email LIKE ?
-          OR u.phone LIKE ?
-          OR u.organization_name LIKE ?
-        )
-      `;
+      const searchValue = `%${searchTerm}%`;
 
-      const searchValue =
-        `%${searchTerm}%`;
-
-      queryParams.push(
-        searchValue,
-        searchValue,
-        searchValue,
-        searchValue
-      );
+      query.where(function () {
+        this.where("u.name", "like", searchValue)
+          .orWhere("u.email", "like", searchValue)
+          .orWhere("u.phone", "like", searchValue)
+          .orWhere(
+            "u.organization_name",
+            "like",
+            searchValue
+          );
+      });
     }
 
-    // =====================================================
-    // GET USERS
-    // =====================================================
-
-    const [
-      rows,
-    ] = await db.query(
-      `
-      SELECT
-
-        u.id,
-
-        u.organization_name,
-
-        u.name,
-
-        u.email,
-
-        u.phone,
-
-        u.role_id,
-
-        u.parent_id,
-
-        u.created_by,
-
-        u.created_at
-
-      FROM users u
-
-      ${whereClause}
-
-      ORDER BY
-        u.name ASC,
-        u.id ASC
-      `,
-      queryParams
-    );
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
+    const rows = await query.orderBy([
+      { column: "u.name", order: "asc" },
+      { column: "u.id", order: "asc" },
+    ]);
 
     return res.status(200).json({
       success: true,
-
-      create_role_id:
-        requestedRoleId,
-
-      parent_id:
-        selectedParentId,
-
-      current_role_id:
-        requestedRoleId,
-
-      current_role_name:
-        getRoleName(
-          requestedRoleId
-        ),
-
-      search:
-        searchTerm,
-
-      exclude_id:
-        excludeUserId,
-
-      total:
-        rows.length,
-
-      data:
-        rows,
+      create_role_id: requestedRoleId,
+      parent_id: selectedParentId,
+      current_role_id: requestedRoleId,
+      current_role_name: getRoleName(requestedRoleId),
+      search: searchTerm,
+      exclude_id: excludeUserId,
+      total: rows.length,
+      data: rows,
     });
-
   } catch (error) {
-
-    console.error(
-      "getDropdownUsers Error:",
-      error
-    );
+    console.error("GET DROPDOWN USERS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-
-      message:
-        "Failed to get dropdown users",
-
-      error:
-        error.message,
+      message: "Failed to get dropdown users",
+      error: error.message,
     });
   }
 };
 
-// =====================================================
 // ROLE NAME
-// =====================================================
-
 const getRoleName = (roleId) => {
 
   const roles = {
@@ -1617,13 +827,10 @@ const getRoleName = (roleId) => {
   );
 };
 
-
+//upadte staff
 export const updatedstaffdata = async (req, res) => {
-  const connection = await db.getConnection();
-
   try {
     const { id } = req.params;
-
     const {
       organization_name,
       role_id,
@@ -1635,11 +842,7 @@ export const updatedstaffdata = async (req, res) => {
       state,
       city,
       parent_id,
-
-      // parent_hierarchy intentionally received
-      // but NOT used for updating other users
       parent_hierarchy,
-
       new_device,
       old_device,
       supreme_device,
@@ -1647,432 +850,9 @@ export const updatedstaffdata = async (req, res) => {
       lite,
       google_tv,
       supreme_lock,
-
       password,
     } = req.body;
 
-    // =====================================================
-    // VALIDATE USER ID
-    // =====================================================
-
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const userId = Number(id);
-
-    if (
-      !Number.isInteger(userId) ||
-      userId <= 0
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
-
-    // =====================================================
-    // GET EXISTING USER
-    // =====================================================
-
-    const [existingRows] =
-      await connection.query(
-        `
-        SELECT
-          id,
-          role_id,
-          parent_id
-        FROM users
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [userId]
-      );
-
-    if (!existingRows.length) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const existingUser =
-      existingRows[0];
-
-    // =====================================================
-    // ROLE ID
-    // =====================================================
-
-    const currentRoleId = Number(
-      role_id ?? existingUser.role_id
-    );
-
-    if (
-      !Number.isInteger(currentRoleId) ||
-      currentRoleId < 1 ||
-      currentRoleId > 9
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role ID",
-      });
-    }
-
-    // =====================================================
-    // NORMALIZE PARENT ID
-    // =====================================================
-
-    let normalizedParentId =
-      existingUser.parent_id ?? null;
-
-    // Parent ID only changes when frontend sends it
-    if (parent_id !== undefined) {
-      // ---------------------------------------------------
-      // CLEAR PARENT
-      // ---------------------------------------------------
-
-      if (
-        parent_id === null ||
-        parent_id === ""
-      ) {
-        normalizedParentId = null;
-      }
-
-      // ---------------------------------------------------
-      // SET PARENT
-      // ---------------------------------------------------
-
-      else {
-        normalizedParentId =
-          Number(parent_id);
-
-        // -----------------------------------------------
-        // VALIDATE PARENT ID
-        // -----------------------------------------------
-
-        if (
-          !Number.isInteger(
-            normalizedParentId
-          ) ||
-          normalizedParentId <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid parent ID",
-          });
-        }
-
-        // -----------------------------------------------
-        // USER CANNOT BE OWN PARENT
-        // -----------------------------------------------
-
-        if (
-          normalizedParentId === userId
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "User cannot be their own parent",
-          });
-        }
-
-        // -----------------------------------------------
-        // CHECK PARENT EXISTS
-        // -----------------------------------------------
-
-        const [parentRows] =
-          await connection.query(
-            `
-            SELECT
-              id,
-              role_id,
-              name,
-              organization_name
-            FROM users
-            WHERE id = ?
-            LIMIT 1
-            `,
-            [normalizedParentId]
-          );
-
-        if (!parentRows.length) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Selected parent not found",
-          });
-        }
-
-        // -----------------------------------------------
-        // PARENT ROLE VALIDATION
-        // -----------------------------------------------
-
-        const selectedParentRoleId =
-          Number(
-            parentRows[0].role_id
-          );
-
-        // Parent ka role current user se
-        // upar hona chahiye
-        if (
-          selectedParentRoleId >=
-          currentRoleId
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Selected parent role is invalid",
-          });
-        }
-      }
-    }
-
-    // =====================================================
-    // START TRANSACTION
-    // =====================================================
-
-    await connection.beginTransaction();
-
-    // =====================================================
-    // UPDATE USER
-    // =====================================================
-
-    let updateQuery = `
-      UPDATE users
-      SET
-        organization_name = ?,
-        role_id = ?,
-        name = ?,
-        email = ?,
-        phone = ?,
-        company_address = ?,
-        country = ?,
-        state = ?,
-        city = ?,
-        parent_id = ?,
-        new_device = ?,
-        old_device = ?,
-        supreme_device = ?,
-        pro_star = ?,
-        lite = ?,
-        google_tv = ?,
-        supreme_lock = ?
-    `;
-
-    const updateValues = [
-      organization_name || "",
-
-      currentRoleId,
-
-      name || "",
-
-      email || "",
-
-      phone || "",
-
-      company_address || "",
-
-      country || "",
-
-      state || "",
-
-      city || "",
-
-      // ================================================
-      // IMPORTANT
-      // ================================================
-      // Selected direct parent ID
-      normalizedParentId,
-
-      Number(
-        new_device ?? 0
-      ),
-
-      Number(
-        old_device ?? 0
-      ),
-
-      Number(
-        supreme_device ?? 0
-      ),
-
-      Number(
-        pro_star ?? 0
-      ),
-
-      Number(
-        lite ?? 0
-      ),
-
-      Number(
-        google_tv ?? 0
-      ),
-
-      Number(
-        supreme_lock ?? 0
-      ),
-    ];
-
-    // =====================================================
-    // PASSWORD
-    // =====================================================
-
-    if (
-      password !== undefined &&
-      password !== null &&
-      password !== ""
-    ) {
-      updateQuery += `,
-        password = ?
-      `;
-
-      updateValues.push(
-        password
-      );
-    }
-
-    // =====================================================
-    // WHERE USER
-    // =====================================================
-
-    updateQuery += `
-      WHERE id = ?
-    `;
-
-    updateValues.push(
-      userId
-    );
-
-    // =====================================================
-    // EXECUTE UPDATE
-    // =====================================================
-
-    await connection.query(
-      updateQuery,
-      updateValues
-    );
-
-    // =====================================================
-    // IMPORTANT:
-    //
-    // parent_hierarchy ko yahan process NAHI karna.
-    //
-    // Pehle jo code tha:
-    //
-    // UPDATE users
-    // SET parent_id = ?
-    // WHERE id = ?
-    //
-    // wo multiple users ko update kar raha tha.
-    //
-    // Ab sirf edited user update hoga:
-    //
-    // UPDATE users
-    // SET parent_id = ?
-    // WHERE id = userId
-    //
-    // Ye already upar main UPDATE mein ho raha hai.
-    // =====================================================
-
-    // =====================================================
-    // GET UPDATED USER
-    // =====================================================
-
-    const [updatedRows] =
-      await connection.query(
-        `
-        SELECT
-          id,
-          organization_name,
-          role_id,
-          name,
-          email,
-          phone,
-          company_address,
-          country,
-          state,
-          city,
-          parent_id,
-
-          new_device,
-          old_device,
-          supreme_device,
-          pro_star,
-          lite,
-          google_tv,
-          supreme_lock,
-
-          created_at,
-          updated_at
-
-        FROM users
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [userId]
-      );
-
-    // =====================================================
-    // COMMIT
-    // =====================================================
-
-    await connection.commit();
-
-    // =====================================================
-    // RESPONSE
-    // =====================================================
-
-    return res.status(200).json({
-      success: true,
-
-      message:
-        "Staff data updated successfully",
-
-      data:
-        updatedRows[0],
-    });
-
-  } catch (error) {
-    // =====================================================
-    // ROLLBACK
-    // =====================================================
-
-    await connection.rollback();
-
-    console.error(
-      "UPDATE STAFF ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-
-      message:
-        "Failed to update staff data",
-
-      error:
-        error.message,
-    });
-
-  } finally {
-    // =====================================================
-    // RELEASE CONNECTION
-    // =====================================================
-
-    connection.release();
-  }
-};
-
-export const getStaffDataById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // =========================================
-    // VALIDATE ID
-    // =========================================
     if (!id) {
       return res.status(400).json({
         success: false,
@@ -2089,60 +869,218 @@ export const getStaffDataById = async (req, res) => {
       });
     }
 
-    // =========================================
-    // GET CURRENT USER
-    // =========================================
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        organization_name,
-        role_id,
-        name,
-        email,
-        phone,
-        company_address,
-        country,
-        state,
-        city,
+    const existingUser = await db("users")
+      .select("id", "role_id", "parent_id")
+      .where("id", userId)
+      .first();
 
-        parent_id,
-
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock
-
-      FROM users
-      WHERE id = ?
-      LIMIT 1
-      `,
-      [userId]
-    );
-
-    // =========================================
-    // USER NOT FOUND
-    // =========================================
-    if (!rows || rows.length === 0) {
+    if (!existingUser) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    const user = rows[0];
+    const currentRoleId = Number(
+      role_id ?? existingUser.role_id
+    );
 
-    // =========================================
-    // GET PARENT CHAIN
-    // =========================================
+    if (
+      !Number.isInteger(currentRoleId) ||
+      currentRoleId < 1 ||
+      currentRoleId > 9
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid role ID",
+      });
+    }
+
+    let normalizedParentId = existingUser.parent_id ?? null;
+
+    if (parent_id !== undefined) {
+      if (parent_id === null || parent_id === "") {
+        normalizedParentId = null;
+      } else {
+        normalizedParentId = Number(parent_id);
+
+        if (
+          !Number.isInteger(normalizedParentId) ||
+          normalizedParentId <= 0
+        ) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid parent ID",
+          });
+        }
+
+        if (normalizedParentId === userId) {
+          return res.status(400).json({
+            success: false,
+            message: "User cannot be their own parent",
+          });
+        }
+
+        const parentUser = await db("users")
+          .select(
+            "id",
+            "role_id",
+            "name",
+            "organization_name"
+          )
+          .where("id", normalizedParentId)
+          .first();
+
+        if (!parentUser) {
+          return res.status(400).json({
+            success: false,
+            message: "Selected parent not found",
+          });
+        }
+
+        const selectedParentRoleId = Number(
+          parentUser.role_id
+        );
+
+        if (selectedParentRoleId >= currentRoleId) {
+          return res.status(400).json({
+            success: false,
+            message: "Selected parent role is invalid",
+          });
+        }
+      }
+    }
+
+    return await db.transaction(async (trx) => {
+      const updateData = {
+        organization_name: organization_name || "",
+        role_id: currentRoleId,
+        name: name || "",
+        email: email || "",
+        phone: phone || "",
+        company_address: company_address || "",
+        country: country || "",
+        state: state || "",
+        city: city || "",
+        parent_id: normalizedParentId,
+        new_device: Number(new_device ?? 0),
+        old_device: Number(old_device ?? 0),
+        supreme_device: Number(supreme_device ?? 0),
+        pro_star: Number(pro_star ?? 0),
+        lite: Number(lite ?? 0),
+        google_tv: Number(google_tv ?? 0),
+        supreme_lock: Number(supreme_lock ?? 0),
+      };
+
+      if (
+        password !== undefined &&
+        password !== null &&
+        password !== ""
+      ) {
+        updateData.password = password;
+      }
+
+      await trx("users")
+        .where("id", userId)
+        .update(updateData);
+
+      const updatedUser = await trx("users")
+        .select(
+          "id",
+          "organization_name",
+          "role_id",
+          "name",
+          "email",
+          "phone",
+          "company_address",
+          "country",
+          "state",
+          "city",
+          "parent_id",
+          "new_device",
+          "old_device",
+          "supreme_device",
+          "pro_star",
+          "lite",
+          "google_tv",
+          "supreme_lock",
+          "created_at",
+          "updated_at"
+        )
+        .where("id", userId)
+        .first();
+
+      return res.status(200).json({
+        success: true,
+        message: "Staff data updated successfully",
+        data: updatedUser,
+      });
+    });
+  } catch (error) {
+    console.error("UPDATE STAFF ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update staff data",
+      error: error.message,
+    });
+  }
+};
+
+//get staff data with id in edit 
+export const getStaffDataById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "User ID is required",
+      });
+    }
+
+    const userId = Number(id);
+
+    if (!Number.isInteger(userId) || userId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid User ID",
+      });
+    }
+
+    const user = await db("users")
+      .select(
+        "id",
+        "organization_name",
+        "role_id",
+        "name",
+        "email",
+        "phone",
+        "company_address",
+        "country",
+        "state",
+        "city",
+        "parent_id",
+        "new_device",
+        "old_device",
+        "supreme_device",
+        "pro_star",
+        "lite",
+        "google_tv",
+        "supreme_lock"
+      )
+      .where("id", userId)
+      .first();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
     const parentChain = [];
-
     let currentParentId = user.parent_id;
-
-    // Safety limit - infinite loop se bachne ke liye
     let level = 0;
     const MAX_LEVEL = 20;
 
@@ -2152,88 +1090,48 @@ export const getStaffDataById = async (req, res) => {
       Number(currentParentId) > 0 &&
       level < MAX_LEVEL
     ) {
-      const [parentRows] = await db.query(
-        `
-        SELECT
-          id,
-          organization_name,
-          role_id,
-          name,
-          email,
-          phone,
-          parent_id,
-          company_address,
-          country,
-          state,
-          city
-        FROM users
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [Number(currentParentId)]
-      );
+      const parent = await db("users")
+        .select(
+          "id",
+          "organization_name",
+          "role_id",
+          "name",
+          "email",
+          "phone",
+          "parent_id",
+          "company_address",
+          "country",
+          "state",
+          "city"
+        )
+        .where("id", Number(currentParentId))
+        .first();
 
-      // Parent nahi mila
-      if (!parentRows || parentRows.length === 0) {
+      if (!parent) {
         break;
       }
 
-      const parent = parentRows[0];
-
-      // =========================================
-      // ADD PARENT TO CHAIN
-      // =========================================
-      parentChain.push({
-        id: parent.id,
-        organization_name: parent.organization_name,
-        role_id: parent.role_id,
-        name: parent.name,
-        email: parent.email,
-        phone: parent.phone,
-        parent_id: parent.parent_id,
-        company_address: parent.company_address,
-        country: parent.country,
-        state: parent.state,
-        city: parent.city,
-      });
-
-      // =========================================
-      // MOVE TO NEXT PARENT
-      // =========================================
+      parentChain.push(parent);
       currentParentId = parent.parent_id;
-
       level++;
     }
 
-    // =========================================
-    // OPTIONAL:
-    // HIGHEST PARENT FIRST
-    // =========================================
     parentChain.reverse();
 
-    // =========================================
-    // SUCCESS RESPONSE
-    // =========================================
     return res.status(200).json({
       success: true,
       message: "Staff data fetched successfully",
-
       data: {
         ...user,
-
-        // Direct parent
         direct_parent:
           parentChain.length > 0
             ? parentChain[parentChain.length - 1]
             : null,
-
-        // Complete hierarchy
         parent_chain: parentChain,
       },
     });
-
   } catch (error) {
-    console.error("Get Staff Data Error:", error);
+    console.error("GET STAFF DATA ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -2246,16 +1144,7 @@ export const getStaffDataById = async (req, res) => {
 //Interal login
 export const loginAsUser = async (req, res) => {
   try {
-    // ==========================================
-    // CURRENT LOGGED-IN USER
-    // ==========================================
-
     const loggedInUser = req.user;
-
-    // ==========================================
-    // TARGET USER ID
-    // ==========================================
-
     const { user_id } = req.body;
 
     if (!user_id) {
@@ -2265,11 +1154,16 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // FIND TARGET USER
-    // ==========================================
-
-    const targetUser = await findUserById(user_id);
+    const targetUser = await db("users")
+      .select(
+        "id",
+        "name",
+        "email",
+        "role_id",
+        "parent_id"
+      )
+      .where("id", user_id)
+      .first();
 
     if (!targetUser) {
       return res.status(404).json({
@@ -2277,10 +1171,6 @@ export const loginAsUser = async (req, res) => {
         message: "User not found",
       });
     }
-
-    // ==========================================
-    // ORIGINAL LOGIN USER
-    // ==========================================
 
     const isCurrentlyImpersonating =
       loggedInUser.is_impersonating === true ||
@@ -2301,47 +1191,13 @@ export const loginAsUser = async (req, res) => {
         ? Number(loggedInUser.original_user_id)
         : Number(loggedInUser.id);
 
-    // ==========================================
-    // ROLE HIERARCHY
-    //
-    // 0 Master Admin
-    // 1 Admin
-    // 2 CNF
-    // 3 Super Distributor
-    // 4 Distributor
-    // 5 FOS
-    // 6 Retailer
-    // 7 Sub Retailer
-    // 8 Employee
-    // 9 Staff
-    // ==========================================
-
     const targetRoleId = Number(targetUser.role_id);
-
-    // ==========================================
-    // ORIGINAL USER KO WAPAS LOGIN ALLOW
-    // ==========================================
 
     const isOriginalUser =
       Number(targetUser.id) === Number(originalUserId);
 
-    // ==========================================
-    // SAME CURRENT USER KO BHI LOGIN ALLOW
-    //
-    // Example:
-    //
-    // Distributor -> FOS
-    // FOS -> FOS
-    //
-    // Same user hone ke wajah se block nahi hoga.
-    // ==========================================
-
     const isSameCurrentUser =
       Number(targetUser.id) === Number(loggedInUser.id);
-
-    // ==========================================
-    // LOWER LEVEL VALIDATION
-    // ==========================================
 
     if (
       !isOriginalUser &&
@@ -2350,99 +1206,39 @@ export const loginAsUser = async (req, res) => {
     ) {
       return res.status(403).json({
         success: false,
-        message:
-          "You can only login as a lower level user",
+        message: "You can only login as a lower level user",
       });
     }
 
-    // ==========================================
-    // CREATE TARGET USER TOKEN
-    // ==========================================
-
     const token = jwt.sign(
       {
-        // CURRENT / TARGET USER
         id: targetUser.id,
-
         role_id: targetRoleId,
-
         email: targetUser.email,
-
-        // ======================================
-        // ORIGINAL LOGIN USER
-        // ======================================
-
         original_user_id: originalUserId,
-
         original_role_id: originalRoleId,
-
-        // ======================================
-        // IMPERSONATION
-        // ======================================
-
         is_impersonating: true,
       },
-
       process.env.JWT_SECRET,
-
       {
         expiresIn: "7d",
       }
     );
 
-    // ==========================================
-    // RESPONSE
-    // ==========================================
-
     return res.status(200).json({
       success: true,
-
       message: "Login as user successful",
-
       token,
-
       user: {
         id: targetUser.id,
-
         name: targetUser.name,
-
         email: targetUser.email,
-
         role_id: targetRoleId,
-
-        parent_id:
-          targetUser.parent_id || null,
-
-        parent_admin_id:
-          targetUser.parent_admin_id || null,
-
-        parent_cnf_id:
-          targetUser.parent_cnf_id || null,
-
-        parent_super_distributor_id:
-          targetUser.parent_super_distributor_id || null,
-
-        parent_distributor_id:
-          targetUser.parent_distributor_id || null,
-
-        parent_fos_id:
-          targetUser.parent_fos_id || null,
-
-        parent_retailer_id:
-          targetUser.parent_retailer_id || null,
-
-        parent_employee_id:
-          targetUser.parent_employee_id || null,
-
-        parent_staff_id:
-          targetUser.parent_staff_id || null,
+        parent_id: targetUser.parent_id || null,
       },
     });
   } catch (error) {
-    console.error(
-      "Login As User Error:",
-      error
-    );
+    console.error("Login As User Error:", error);
 
     return res.status(500).json({
       success: false,
@@ -2451,89 +1247,37 @@ export const loginAsUser = async (req, res) => {
   }
 };
 
-
-// =====================================================
 // ADD MODULE
-// =====================================================
-
 export const addModule = async (req, res) => {
   try {
+    const userRole = Number(req.user?.role_id);
 
-    // =================================================
-    // ALLOWED ROLES
-    // MASTER ADMIN = 0
-    // EMPLOYEE     = 8
-    // =================================================
-
-    const userRole =
-      Number(req.user?.role_id);
-
-    if (
-      userRole !== 0 &&
-      userRole !== 8
-    ) {
-
+    if (userRole !== 0 && userRole !== 8) {
       return res.status(403).json({
         success: false,
-        message:
-          "Only Master Admin and Employee can add modules",
+        message: "Only Master Admin and Employee can add modules",
       });
-
     }
 
+    const { module, sequence } = req.body;
 
-    // =================================================
-    // GET MODULE DATA
-    // =================================================
-
-    const {
-      module,
-      sequence,
-    } = req.body;
-
-
-    // =================================================
-    // MODULE VALIDATION
-    // =================================================
-
-    if (
-      !module ||
-      typeof module !== "string"
-    ) {
-
+    if (!module || typeof module !== "string") {
       return res.status(400).json({
         success: false,
-        message:
-          "Module is required",
+        message: "Module is required",
       });
-
     }
 
-
-    const moduleName =
-      module
-        .trim()
-        .toLowerCase();
-
+    const moduleName = module.trim().toLowerCase();
 
     if (!moduleName) {
-
       return res.status(400).json({
         success: false,
-        message:
-          "Module name cannot be empty",
+        message: "Module name cannot be empty",
       });
-
     }
 
-
-    // =================================================
-    // SEQUENCE VALIDATION
-    // =================================================
-
-    const moduleSequence =
-      Number(sequence);
-
+    const moduleSequence = Number(sequence);
 
     if (
       sequence === undefined ||
@@ -2542,1023 +1286,354 @@ export const addModule = async (req, res) => {
       !Number.isInteger(moduleSequence) ||
       moduleSequence < 1
     ) {
-
       return res.status(400).json({
         success: false,
-        message:
-          "Valid sequence number is required. Example: 1, 2, 3",
+        message: "Valid sequence number is required. Example: 1, 2, 3",
       });
-
     }
-
-
-    // =================================================
-    // ICON VALIDATION
-    // =================================================
 
     if (!req.file) {
-
       return res.status(400).json({
         success: false,
-        message:
-          "PNG module icon is required",
+        message: "PNG module icon is required",
       });
-
     }
 
-
-    // =================================================
-    // PNG VALIDATION
-    // =================================================
-
-    if (
-      req.file.mimetype !==
-      "image/png"
-    ) {
-
+    if (req.file.mimetype !== "image/png") {
       return res.status(400).json({
         success: false,
-        message:
-          "Only PNG module icons are allowed",
+        message: "Only PNG module icons are allowed",
       });
-
     }
 
+    const maxIconSize = 20 * 1024;
 
-    // =================================================
-    // 20 KB ICON SIZE VALIDATION
-    // =================================================
-
-    const maxIconSize =
-      20 * 1024;
-
-
-    if (
-      req.file.size >
-      maxIconSize
-    ) {
-
+    if (req.file.size > maxIconSize) {
       return res.status(400).json({
         success: false,
-        message:
-          "PNG module icon must not exceed 20 KB",
+        message: "PNG module icon must not exceed 20 KB",
       });
-
     }
 
-
-    // =================================================
-    // GET MASTER ADMIN
-    // =================================================
-
-    const [rows] =
-      await db.query(
-        `
-        SELECT
-          id,
-          modules
-        FROM users
-        WHERE role_id = 0
-        LIMIT 1
-        `
-      );
-
-
-    if (!rows.length) {
-
-      return res.status(404).json({
-        success: false,
-        message:
-          "Master Admin not found",
-      });
-
-    }
-
-
-    const masterAdmin =
-      rows[0];
-
-
-    // =================================================
-    // GET EXISTING MODULES
-    // =================================================
-
-    let modules = [];
-
-
-    if (masterAdmin.modules) {
-
-      try {
-
-        modules =
-          typeof masterAdmin.modules ===
-          "string"
-            ? JSON.parse(
-                masterAdmin.modules
-              )
-            : masterAdmin.modules;
-
-      } catch (error) {
-
-        console.error(
-          "Modules JSON Parse Error:",
-          error
-        );
-
-        modules = [];
-
-      }
-
-    }
-
-
-    // =================================================
-    // SAFETY
-    // =================================================
-
-    if (
-      !Array.isArray(modules)
-    ) {
-
-      modules = [];
-
-    }
-
-
-    // =================================================
-    // CONVERT OLD MODULE FORMAT
-    // =================================================
-
-    modules =
-      modules.map(
-        (item, index) => {
-
-          // ===========================================
-          // OLD STRING FORMAT
-          // ===========================================
-
-          if (
-            typeof item === "string"
-          ) {
-
-            return {
-
-              name:
-                item,
-
-              icon:
-                null,
-
-              sequence:
-                index + 1,
-
-              status:
-                1,
-
-            };
-
-          }
-
-
-          // ===========================================
-          // OBJECT FORMAT
-          // ===========================================
-
-          return {
-
-            ...item,
-
-            sequence:
-              Number(
-                item?.sequence
-              ) ||
-              index + 1,
-
-            status:
-              Number(
-                item?.status
-              ) === 0
-                ? 0
-                : 1,
-
-          };
-
-        }
-      );
-
-
-    // =================================================
-    // DUPLICATE MODULE CHECK
-    // =================================================
-
-    const alreadyExists =
-      modules.some(
-        (item) => {
-
-          return (
-            String(
-              item?.name || ""
-            )
-              .trim()
-              .toLowerCase() ===
-            moduleName
-          );
-
-        }
-      );
-
-
-    // =================================================
-    // DUPLICATE MODULE
-    // =================================================
-
-    if (alreadyExists) {
-
-      return res.status(409).json({
-        success: false,
-        message:
-          "Module already exists",
-        modules,
-      });
-
-    }
-
-
-    // =================================================
-    // DUPLICATE SEQUENCE CHECK
-    // =================================================
-
-    const sequenceExists =
-      modules.some(
-        (item) => {
-
-          return (
-            Number(
-              item?.sequence
-            ) ===
-            moduleSequence
-          );
-
-        }
-      );
-
-
-    if (sequenceExists) {
-
-      return res.status(422).json({
-        success: false,
-        message:
-          `Sequence ${moduleSequence} is already used`,
-        modules,
-      });
-
-    }
-
-
-    // =================================================
-    // ICON PATH
-    // =================================================
-
-    const iconPath =
-      `/uploads/modules/${req.file.filename}`;
-
-
-    // =================================================
-    // NEW MODULE
-    // =================================================
-
-    const newModule = {
-
-      name:
-        moduleName,
-
-      icon:
-        iconPath,
-
-      sequence:
-        moduleSequence,
-
-      // 1 = Active
-      // 0 = Inactive
-      status:
-        1,
-
-    };
-
-
-    // =================================================
-    // ADD MODULE
-    // =================================================
-
-    modules.push(
-      newModule
-    );
-
-
-    // =================================================
-    // SORT MODULES BY SEQUENCE
-    // =================================================
-
-    modules.sort(
-      (a, b) =>
-        Number(
-          a?.sequence ?? 999999
-        ) -
-        Number(
-          b?.sequence ?? 999999
-        )
-    );
-
-
-    // =================================================
-    // UPDATE MASTER ADMIN
-    // =================================================
-
-    await db.query(
-      `
-      UPDATE users
-      SET modules = ?
-      WHERE id = ?
-      AND role_id = 0
-      `,
-      [
-        JSON.stringify(
-          modules
-        ),
-
-        masterAdmin.id,
-      ]
-    );
-
-
-    // =================================================
-    // SUCCESS RESPONSE
-    // =================================================
-
-    return res.status(201).json({
-
-      success:
-        true,
-
-      message:
-        "Module added successfully",
-
-      module:
-        newModule,
-
-      modules:
-        modules,
-
-    });
-
-
-  } catch (error) {
-
-    // =================================================
-    // ERROR
-    // =================================================
-
-    console.error(
-      "Add Module Error:",
-      error
-    );
-
-
-    return res.status(500).json({
-
-      success:
-        false,
-
-      message:
-        "Internal server error",
-
-      error:
-        error.message,
-
-    });
-
-  }
-};
-
-// =====================================================
-// GET MODULES
-// =====================================================
-
-export const getModules = async (
-  req,
-  res
-) => {
-
-  try {
-
-    // =================================================
-    // GET MASTER ADMIN
-    // =================================================
-
-    const [
-      rows,
-    ] = await db.query(
-      `
-      SELECT
-        id,
-        modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-      `
-    );
-
-
-    // =================================================
-    // MASTER ADMIN NOT FOUND
-    // =================================================
-
-    if (
-      !rows.length
-    ) {
-
-      return res.status(404).json({
-
-        success: false,
-
-        message:
-          "Master Admin not found",
-
-      });
-
-    }
-
-
-    const masterAdmin =
-      rows[0];
-
-
-    // =================================================
-    // PARSE MODULES
-    // =================================================
-
-    let modules = [];
-
-
-    if (
-      masterAdmin.modules
-    ) {
-
-      try {
-
-        modules =
-          typeof masterAdmin.modules ===
-          "string"
-
-            ? JSON.parse(
-                masterAdmin.modules
-              )
-
-            : masterAdmin.modules;
-
-      }
-      catch (error) {
-
-        console.error(
-          "MODULES JSON PARSE ERROR:",
-          error
-        );
-
-        return res.status(500).json({
-
-          success: false,
-
-          message:
-            "Invalid modules data",
-
-        });
-
-      }
-
-    }
-
-
-    // =================================================
-    // SAFETY CHECK
-    // =================================================
-
-    if (
-      !Array.isArray(
-        modules
-      )
-    ) {
-
-      modules = [];
-
-    }
-
-
-    // =================================================
-    // CONVERT / NORMALIZE MODULES
-    // =================================================
-
-    modules =
-      modules.map(
-        (item, index) => {
-
-          // ===========================================
-          // OLD STRING FORMAT
-          // ===========================================
-
-          if (
-            typeof item === "string"
-          ) {
-
-            return {
-
-              name:
-                item,
-
-              icon:
-                null,
-
-              sequence:
-                index + 1,
-
-              // OLD MODULES DEFAULT ACTIVE
-              status:
-                1,
-
-            };
-
-          }
-
-
-          // ===========================================
-          // OBJECT FORMAT
-          // ===========================================
-
-          const sequence =
-            Number(
-              item?.sequence
-            );
-
-
-          const status =
-            Number(
-              item?.status
-            );
-
-
-          return {
-
-            name:
-              item?.name ||
-              "",
-
-            icon:
-              item?.icon ||
-              null,
-
-            sequence:
-              Number.isInteger(
-                sequence
-              ) &&
-              sequence > 0
-
-                ? sequence
-
-                : index + 1,
-
-            // =========================================
-            // STATUS
-            //
-            // 1 = ACTIVE / SHOW
-            // 0 = INACTIVE / HIDE
-            //
-            // Agar purane record me status nahi hai
-            // toh default 1
-            // =========================================
-
-            status:
-              status === 0
-                ? 0
-                : 1,
-
-          };
-
-        }
-      );
-
-
-    // =================================================
-    // SORT BY SEQUENCE
-    // =================================================
-
-    modules.sort(
-      (a, b) => {
-
-        return (
-          Number(
-            a?.sequence ?? 999999
-          ) -
-          Number(
-            b?.sequence ?? 999999
-          )
-        );
-
-      }
-    );
-
-
-    // =================================================
-    // ACTIVE / INACTIVE COUNT
-    // =================================================
-
-    const activeModules =
-      modules.filter(
-        (item) =>
-          Number(
-            item?.status
-          ) === 1
-      );
-
-
-    const inactiveModules =
-      modules.filter(
-        (item) =>
-          Number(
-            item?.status
-          ) === 0
-      );
-
-
-    // =================================================
-    // SUCCESS
-    // =================================================
-
-    return res.status(200).json({
-
-      success: true,
-
-      count:
-        modules.length,
-
-      activeCount:
-        activeModules.length,
-
-      inactiveCount:
-        inactiveModules.length,
-
-      modules,
-
-    });
-
-
-  }
-  catch (error) {
-
-    // =================================================
-    // ERROR
-    // =================================================
-
-    console.error(
-      "GET MODULES ERROR:",
-      error
-    );
-
-
-    return res.status(500).json({
-
-      success: false,
-
-      message:
-        "Failed to get modules",
-
-      error:
-        error?.message,
-
-    });
-
-  }
-
-};
-
-
-
-export const deleteModule = async (req, res) => {
-  try {
-
-    console.log(
-      "DELETE MODULE BODY:",
-      req.body
-    );
-
-    const { module } = req.body || {};
-
-    // =================================================
-    // VALIDATION
-    // =================================================
-
-    if (!module || typeof module !== "string") {
-
-      return res.status(400).json({
-        success: false,
-        message: "Module name is required",
-      });
-
-    }
-
-    const moduleName =
-      module.trim().toLowerCase();
-
-
-    if (!moduleName) {
-
-      return res.status(400).json({
-        success: false,
-        message: "Module name cannot be empty",
-      });
-
-    }
-
-
-    // =================================================
-    // GET MASTER ADMIN
-    // =================================================
-
-    const [rows] = await db.query(
-      `
-      SELECT
-        id,
-        modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-      `
-    );
-
-
-    if (!rows.length) {
-
+    const masterAdmin = await db("users")
+      .select("id", "modules")
+      .where("role_id", 0)
+      .first();
+
+    if (!masterAdmin) {
       return res.status(404).json({
         success: false,
         message: "Master Admin not found",
       });
-
     }
-
-
-    const masterAdmin =
-      rows[0];
-
-
-    // =================================================
-    // GET MODULES
-    // =================================================
 
     let modules = [];
 
-
     if (masterAdmin.modules) {
-
       try {
-
         modules =
           typeof masterAdmin.modules === "string"
             ? JSON.parse(masterAdmin.modules)
             : masterAdmin.modules;
-
       } catch (error) {
-
-        console.error(
-          "MODULE JSON PARSE ERROR:",
-          error
-        );
-
+        console.error("Modules JSON Parse Error:", error);
         modules = [];
-
       }
-
     }
-
-
-    // =================================================
-    // SAFETY
-    // =================================================
 
     if (!Array.isArray(modules)) {
-
       modules = [];
-
     }
 
+    modules = modules.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          name: item,
+          icon: null,
+          sequence: index + 1,
+          status: 1,
+        };
+      }
 
-    console.log(
-      "OLD MODULES:",
-      modules
+      return {
+        ...item,
+        sequence: Number(item?.sequence) || index + 1,
+        status: Number(item?.status) === 0 ? 0 : 1,
+      };
+    });
+
+    const alreadyExists = modules.some(
+      (item) =>
+        String(item?.name || "").trim().toLowerCase() === moduleName
     );
 
+    if (alreadyExists) {
+      return res.status(409).json({
+        success: false,
+        message: "Module already exists",
+        modules,
+      });
+    }
 
-    // =================================================
-    // FIND MODULE
-    // =================================================
+    const sequenceExists = modules.some(
+      (item) => Number(item?.sequence) === moduleSequence
+    );
 
-    const moduleExists =
-      modules.some((item) => {
+    if (sequenceExists) {
+      return res.status(422).json({
+        success: false,
+        message: `Sequence ${moduleSequence} is already used`,
+        modules,
+      });
+    }
 
-        // New format:
-        // {
-        //   name: "varunn",
-        //   icon: "/uploads/modules/abc.png"
-        // }
+    const iconPath = `/uploads/modules/${req.file.filename}`;
 
-        if (
-          typeof item === "object" &&
-          item !== null
-        ) {
+    const newModule = {
+      name: moduleName,
+      icon: iconPath,
+      sequence: moduleSequence,
+      status: 1,
+    };
 
-          return (
-            String(item?.name || "")
-              .trim()
-              .toLowerCase() === moduleName
-          );
+    modules.push(newModule);
 
-        }
+    modules.sort(
+      (a, b) =>
+        Number(a?.sequence ?? 999999) -
+        Number(b?.sequence ?? 999999)
+    );
 
-
-        // Old format:
-        // "varunn"
-
-        return (
-          String(item || "")
-            .trim()
-            .toLowerCase() === moduleName
-        );
-
+    await db("users")
+      .where("id", masterAdmin.id)
+      .where("role_id", 0)
+      .update({
+        modules: JSON.stringify(modules),
       });
 
+    return res.status(201).json({
+      success: true,
+      message: "Module added successfully",
+      module: newModule,
+      modules,
+    });
+  } catch (error) {
+    console.error("Add Module Error:", error);
 
-    if (!moduleExists) {
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
 
+// GET MODULES
+export const getModules = async (req, res) => {
+  try {
+    const masterAdmin = await db("users")
+      .select("id", "modules")
+      .where("role_id", 0)
+      .first();
+
+    if (!masterAdmin) {
+      return res.status(404).json({
+        success: false,
+        message: "Master Admin not found",
+      });
+    }
+
+    let modules = [];
+
+    if (masterAdmin.modules) {
+      try {
+        modules =
+          typeof masterAdmin.modules === "string"
+            ? JSON.parse(masterAdmin.modules)
+            : masterAdmin.modules;
+      } catch (error) {
+        console.error("MODULES JSON PARSE ERROR:", error);
+
+        return res.status(500).json({
+          success: false,
+          message: "Invalid modules data",
+        });
+      }
+    }
+
+    if (!Array.isArray(modules)) {
+      modules = [];
+    }
+
+    modules = modules.map((item, index) => {
+      if (typeof item === "string") {
+        return {
+          name: item,
+          icon: null,
+          sequence: index + 1,
+          status: 1,
+        };
+      }
+
+      const sequence = Number(item?.sequence);
+      const status = Number(item?.status);
+
+      return {
+        name: item?.name || "",
+        icon: item?.icon || null,
+        sequence:
+          Number.isInteger(sequence) && sequence > 0
+            ? sequence
+            : index + 1,
+        status: status === 0 ? 0 : 1,
+      };
+    });
+
+    modules.sort(
+      (a, b) =>
+        Number(a?.sequence ?? 999999) -
+        Number(b?.sequence ?? 999999)
+    );
+
+    const activeCount = modules.filter(
+      (item) => Number(item?.status) === 1
+    ).length;
+
+    const inactiveCount = modules.filter(
+      (item) => Number(item?.status) === 0
+    ).length;
+
+    return res.status(200).json({
+      success: true,
+      count: modules.length,
+      activeCount,
+      inactiveCount,
+      modules,
+    });
+  } catch (error) {
+    console.error("GET MODULES ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to get modules",
+      error: error?.message,
+    });
+  }
+};
+
+// DELETE MODULES
+export const deleteModule = async (req, res) => {
+  try {
+    const { module } = req.body || {};
+
+    if (!module || typeof module !== "string") {
+      return res.status(400).json({
+        success: false,
+        message: "Module name is required",
+      });
+    }
+
+    const moduleName = module.trim().toLowerCase();
+
+    if (!moduleName) {
+      return res.status(400).json({
+        success: false,
+        message: "Module name cannot be empty",
+      });
+    }
+
+    const masterAdmin = await db("users")
+      .select("id", "modules")
+      .where("role_id", 0)
+      .first();
+
+    if (!masterAdmin) {
+      return res.status(404).json({
+        success: false,
+        message: "Master Admin not found",
+      });
+    }
+
+    let modules = [];
+
+    if (masterAdmin.modules) {
+      try {
+        modules =
+          typeof masterAdmin.modules === "string"
+            ? JSON.parse(masterAdmin.modules)
+            : masterAdmin.modules;
+      } catch (error) {
+        console.error("MODULE JSON PARSE ERROR:", error);
+        modules = [];
+      }
+    }
+
+    if (!Array.isArray(modules)) {
+      modules = [];
+    }
+
+    const getModuleName = (item) => {
+      if (typeof item === "object" && item !== null) {
+        return String(item?.name || "").trim().toLowerCase();
+      }
+
+      return String(item || "").trim().toLowerCase();
+    };
+
+    const deletedModule = modules.find(
+      (item) => getModuleName(item) === moduleName
+    );
+
+    if (!deletedModule) {
       return res.status(404).json({
         success: false,
         message: `Module "${module}" not found`,
       });
-
     }
 
+    const updatedModules = modules.filter(
+      (item) => getModuleName(item) !== moduleName
+    );
 
-    // =================================================
-    // GET MODULE ICON BEFORE DELETE
-    // =================================================
-
-    const deletedModule =
-      modules.find((item) => {
-
-        if (
-          typeof item === "object" &&
-          item !== null
-        ) {
-
-          return (
-            String(item?.name || "")
-              .trim()
-              .toLowerCase() === moduleName
-          );
-
-        }
-
-        return (
-          String(item || "")
-            .trim()
-            .toLowerCase() === moduleName
-        );
-
+    await db("users")
+      .where("id", masterAdmin.id)
+      .where("role_id", 0)
+      .update({
+        modules: JSON.stringify(updatedModules),
       });
-
-
-    console.log(
-      "DELETED MODULE:",
-      deletedModule
-    );
-
-
-    // =================================================
-    // DELETE MODULE
-    // =================================================
-
-    const updatedModules =
-      modules.filter((item) => {
-
-        if (
-          typeof item === "object" &&
-          item !== null
-        ) {
-
-          return (
-            String(item?.name || "")
-              .trim()
-              .toLowerCase() !== moduleName
-          );
-
-        }
-
-        return (
-          String(item || "")
-            .trim()
-            .toLowerCase() !== moduleName
-        );
-
-      });
-
-
-    console.log(
-      "UPDATED MODULES:",
-      updatedModules
-    );
-
-
-    // =================================================
-    // UPDATE DATABASE
-    // =================================================
-
-    const [result] =
-      await db.query(
-        `
-        UPDATE users
-        SET modules = ?
-        WHERE id = ?
-        AND role_id = 0
-        `,
-        [
-          JSON.stringify(
-            updatedModules
-          ),
-          masterAdmin.id,
-        ]
-      );
-
-
-    console.log(
-      "DELETE UPDATE RESULT:",
-      result
-    );
-
-
-    // =================================================
-    // SUCCESS
-    // =================================================
 
     return res.status(200).json({
-
       success: true,
-
-      message:
-        `Module "${module}" deleted successfully`,
-
-      deletedModule:
-        deletedModule,
-
-      modules:
-        updatedModules,
-
+      message: `Module "${module}" deleted successfully`,
+      deletedModule,
+      modules: updatedModules,
     });
-
-
   } catch (error) {
-
-    console.error(
-      "DELETE MODULE ERROR:",
-      error
-    );
-
+    console.error("DELETE MODULE ERROR:", error);
 
     return res.status(500).json({
-
       success: false,
-
-      message:
-        "Failed to delete module",
-
-      error:
-        error.message,
-
+      message: "Failed to delete module",
+      error: error.message,
     });
-
   }
-
 };
 
-
+// UPADTE MODULES
 export const updateModule = async (req, res) => {
   try {
-    if (Number(req.user?.role_id) !== 0) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
+    const removeUploadedFile = () => {
+      if (!req.file) return;
 
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
+      const filePath = path.join(uploadDir, req.file.filename);
+
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
       }
+    };
+
+    if (Number(req.user?.role_id) !== 0) {
+      removeUploadedFile();
 
       return res.status(403).json({
         success: false,
@@ -3573,20 +1648,8 @@ export const updateModule = async (req, res) => {
       status,
     } = req.body;
 
-    if (
-      typeof oldModule !== "string" ||
-      !oldModule.trim()
-    ) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-      }
+    if (typeof oldModule !== "string" || !oldModule.trim()) {
+      removeUploadedFile();
 
       return res.status(400).json({
         success: false,
@@ -3595,8 +1658,7 @@ export const updateModule = async (req, res) => {
     }
 
     const hasNewModule =
-      typeof newModule === "string" &&
-      newModule.trim() !== "";
+      typeof newModule === "string" && newModule.trim() !== "";
 
     const hasNewSequence =
       newSequence !== undefined &&
@@ -3608,7 +1670,7 @@ export const updateModule = async (req, res) => {
       status !== null &&
       String(status).trim() !== "";
 
-    const hasNewIcon = !!req.file;
+    const hasNewIcon = Boolean(req.file);
 
     if (
       !hasNewModule &&
@@ -3616,16 +1678,7 @@ export const updateModule = async (req, res) => {
       !hasNewStatus &&
       !hasNewIcon
     ) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-      }
+      removeUploadedFile();
 
       return res.status(400).json({
         success: false,
@@ -3638,20 +1691,8 @@ export const updateModule = async (req, res) => {
     if (hasNewSequence) {
       sequence = Number(newSequence);
 
-      if (
-        !Number.isInteger(sequence) ||
-        sequence < 1
-      ) {
-        if (req.file) {
-          const uploadedFilePath = path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-        }
+      if (!Number.isInteger(sequence) || sequence < 1) {
+        removeUploadedFile();
 
         return res.status(400).json({
           success: false,
@@ -3665,20 +1706,8 @@ export const updateModule = async (req, res) => {
     if (hasNewStatus) {
       moduleStatus = Number(status);
 
-      if (
-        moduleStatus !== 0 &&
-        moduleStatus !== 1
-      ) {
-        if (req.file) {
-          const uploadedFilePath = path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-        }
+      if (moduleStatus !== 0 && moduleStatus !== 1) {
+        removeUploadedFile();
 
         return res.status(400).json({
           success: false,
@@ -3687,42 +1716,25 @@ export const updateModule = async (req, res) => {
       }
     }
 
-    const oldModuleName = oldModule
-      .trim()
-      .toLowerCase();
+    const oldModuleName = oldModule.trim().toLowerCase();
 
     const newModuleName = hasNewModule
       ? newModule.trim().toLowerCase()
       : null;
 
-    const [rows] = await db.query(`
-      SELECT
-        id,
-        modules
-      FROM users
-      WHERE role_id = 0
-      LIMIT 1
-    `);
+    const masterAdmin = await db("users")
+      .select("id", "modules")
+      .where("role_id", 0)
+      .first();
 
-    if (!rows.length) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-      }
+    if (!masterAdmin) {
+      removeUploadedFile();
 
       return res.status(404).json({
         success: false,
         message: "Master Admin not found",
       });
     }
-
-    const masterAdmin = rows[0];
 
     let modules = masterAdmin.modules;
 
@@ -3732,16 +1744,7 @@ export const updateModule = async (req, res) => {
       try {
         modules = JSON.parse(modules);
       } catch (error) {
-        if (req.file) {
-          const uploadedFilePath = path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-        }
+        removeUploadedFile();
 
         return res.status(500).json({
           success: false,
@@ -3751,16 +1754,7 @@ export const updateModule = async (req, res) => {
     }
 
     if (!Array.isArray(modules)) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-      }
+      removeUploadedFile();
 
       return res.status(500).json({
         success: false,
@@ -3781,34 +1775,18 @@ export const updateModule = async (req, res) => {
       return {
         name: item?.name || "",
         icon: item?.icon || null,
-        sequence: Number(
-          item?.sequence ?? index + 1
-        ),
-        status:
-          Number(item?.status ?? 1) === 0
-            ? 0
-            : 1,
+        sequence: Number(item?.sequence ?? index + 1),
+        status: Number(item?.status ?? 1) === 0 ? 0 : 1,
       };
     });
 
     const moduleIndex = modules.findIndex(
       (item) =>
-        String(item?.name || "")
-          .trim()
-          .toLowerCase() === oldModuleName
+        String(item?.name || "").trim().toLowerCase() === oldModuleName
     );
 
     if (moduleIndex === -1) {
-      if (req.file) {
-        const uploadedFilePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
-
-        if (fs.existsSync(uploadedFilePath)) {
-          fs.unlinkSync(uploadedFilePath);
-        }
-      }
+      removeUploadedFile();
 
       return res.status(404).json({
         success: false,
@@ -3820,30 +1798,13 @@ export const updateModule = async (req, res) => {
 
     if (hasNewModule) {
       const duplicateModule = modules.some(
-        (item, index) => {
-          if (index === moduleIndex) {
-            return false;
-          }
-
-          return (
-            String(item?.name || "")
-              .trim()
-              .toLowerCase() === newModuleName
-          );
-        }
+        (item, index) =>
+          index !== moduleIndex &&
+          String(item?.name || "").trim().toLowerCase() === newModuleName
       );
 
       if (duplicateModule) {
-        if (req.file) {
-          const uploadedFilePath = path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-        }
+        removeUploadedFile();
 
         return res.status(409).json({
           success: false,
@@ -3854,28 +1815,13 @@ export const updateModule = async (req, res) => {
 
     if (hasNewSequence) {
       const duplicateSequence = modules.some(
-        (item, index) => {
-          if (index === moduleIndex) {
-            return false;
-          }
-
-          return (
-            Number(item?.sequence) === sequence
-          );
-        }
+        (item, index) =>
+          index !== moduleIndex &&
+          Number(item?.sequence) === sequence
       );
 
       if (duplicateSequence) {
-        if (req.file) {
-          const uploadedFilePath = path.join(
-            uploadDir,
-            req.file.filename
-          );
-
-          if (fs.existsSync(uploadedFilePath)) {
-            fs.unlinkSync(uploadedFilePath);
-          }
-        }
+        removeUploadedFile();
 
         return res.status(422).json({
           success: false,
@@ -3892,28 +1838,19 @@ export const updateModule = async (req, res) => {
 
     const finalSequence = hasNewSequence
       ? sequence
-      : Number(
-          currentModule?.sequence ||
-          moduleIndex + 1
-        );
+      : Number(currentModule?.sequence || moduleIndex + 1);
 
     const finalStatus = hasNewStatus
       ? moduleStatus
-      : Number(
-          currentModule?.status ?? 1
-        ) === 0
+      : Number(currentModule?.status ?? 1) === 0
         ? 0
         : 1;
 
-    let finalIcon = currentModule?.icon || null;
+    const finalIcon = hasNewIcon
+      ? `/uploads/modules/${req.file.filename}`
+      : currentModule?.icon || null;
 
-    if (hasNewIcon) {
-      finalIcon = `/uploads/modules/${req.file.filename}`;
-    }
-
-    const previousStatus = Number(
-      currentModule?.status ?? 1
-    );
+    const previousStatus = Number(currentModule?.status ?? 1);
 
     modules[moduleIndex] = {
       name: finalName,
@@ -3924,8 +1861,8 @@ export const updateModule = async (req, res) => {
 
     modules.sort(
       (a, b) =>
-        Number(a.sequence) -
-        Number(b.sequence)
+        Number(a?.sequence ?? 999999) -
+        Number(b?.sequence ?? 999999)
     );
 
     if (
@@ -3946,59 +1883,35 @@ export const updateModule = async (req, res) => {
         staff: 9,
       };
 
-      const inactiveRoleId =
-        roleMap[oldModuleName];
+      const inactiveRoleId = roleMap[oldModuleName];
 
       if (inactiveRoleId) {
-        const [inactiveUsers] = await db.query(
-          `
-          SELECT
-            id,
-            parent_id
-          FROM users
-          WHERE role_id = ?
-          `,
-          [inactiveRoleId]
-        );
+        const inactiveUsers = await db("users")
+          .select("id", "parent_id")
+          .where("role_id", inactiveRoleId);
 
         for (const inactiveUser of inactiveUsers) {
           if (!inactiveUser.parent_id) {
             continue;
           }
 
-          await db.query(
-            `
-            UPDATE users
-            SET parent_id = ?
-            WHERE parent_id = ?
-            `,
-            [
-              inactiveUser.parent_id,
-              inactiveUser.id,
-            ]
-          );
+          await db("users")
+            .where("parent_id", inactiveUser.id)
+            .update({
+              parent_id: inactiveUser.parent_id,
+            });
         }
       }
     }
 
-    await db.query(
-      `
-      UPDATE users
-      SET modules = ?
-      WHERE id = ?
-      AND role_id = 0
-      `,
-      [
-        JSON.stringify(modules),
-        masterAdmin.id,
-      ]
-    );
+    await db("users")
+      .where("id", masterAdmin.id)
+      .where("role_id", 0)
+      .update({
+        modules: JSON.stringify(modules),
+      });
 
-    if (
-      hasNewIcon &&
-      oldIcon &&
-      oldIcon !== finalIcon
-    ) {
+    if (hasNewIcon && oldIcon && oldIcon !== finalIcon) {
       try {
         const oldIconPath = path.join(
           process.cwd(),
@@ -4029,189 +1942,85 @@ export const updateModule = async (req, res) => {
       modules,
     });
   } catch (error) {
-    console.error(
-      "UPDATE MODULE ERROR:",
-      error
-    );
+    console.error("UPDATE MODULE ERROR:", error);
 
     if (req.file) {
       try {
-        const filePath = path.join(
-          uploadDir,
-          req.file.filename
-        );
+        const filePath = path.join(uploadDir, req.file.filename);
 
         if (fs.existsSync(filePath)) {
           fs.unlinkSync(filePath);
         }
       } catch (fileError) {
-        console.error(
-          "FILE DELETE ERROR:",
-          fileError
-        );
+        console.error("FILE DELETE ERROR:", fileError);
       }
     }
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message ||
-        "Failed to update module",
+      message: error?.message || "Failed to update module",
     });
   }
 };
 
+// UPADTE USER ACTIVE / INACTIVE
 export const updateUserStatus = async (req, res) => {
   try {
-
-    // =====================================================
-    // GET DATA
-    // =====================================================
-
-    const {
-      user_id,
-      userStatus,
-    } = req.body;
-
-
-    // =====================================================
-    // VALIDATION
-    // =====================================================
+    const { user_id, userStatus } = req.body;
 
     if (!user_id) {
-
       return res.status(400).json({
         success: false,
         message: "User ID is required",
       });
-
     }
 
+    const status = Number(userStatus);
 
-    // =====================================================
-    // BOOLEAN VALIDATION
-    // 0 = INACTIVE
-    // 1 = ACTIVE
-    // =====================================================
-
-    if (
-      Number(userStatus) !== 0 &&
-      Number(userStatus) !== 1
-    ) {
-
+    if (status !== 0 && status !== 1) {
       return res.status(400).json({
         success: false,
-        message:
-          "userStatus must be 0 (Inactive) or 1 (Active)",
+        message: "userStatus must be 0 (Inactive) or 1 (Active)",
       });
-
     }
 
+    const user = await db("users")
+      .select("id", "name", "userStatus")
+      .where("id", user_id)
+      .first();
 
-    const status =
-      Number(userStatus);
-
-
-    // =====================================================
-    // CHECK USER
-    // =====================================================
-
-    const [users] =
-      await db.query(
-        `
-        SELECT
-          id,
-          name,
-          userStatus
-        FROM users
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [user_id]
-      );
-
-
-    if (!users.length) {
-
+    if (!user) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
-
     }
 
+    await db("users")
+      .where("id", user_id)
+      .update({
+        userStatus: status,
+      });
 
-    // =====================================================
-    // UPDATE STATUS
-    // =====================================================
-
-    await db.query(
-      `
-      UPDATE users
-      SET userStatus = ?
-      WHERE id = ?
-      `,
-      [
-        status,
-        user_id,
-      ]
-    );
-
-
-    // =====================================================
-    // RESPONSE STATUS
-    // =====================================================
-
-    const statusText =
-      status === 1
-        ? "Active"
-        : "Inactive";
-
-
-    // =====================================================
-    // SUCCESS
-    // =====================================================
+    const statusText = status === 1 ? "Active" : "Inactive";
 
     return res.status(200).json({
-
       success: true,
-
-      message:
-        `User status updated to ${statusText}`,
-
+      message: `User status updated to ${statusText}`,
       user: {
-        id: users[0].id,
-
-        name:
-          users[0].name,
-
-        userStatus:
-          status,
-
-        status:
-          statusText,
+        id: user.id,
+        name: user.name,
+        userStatus: status,
+        status: statusText,
       },
-
     });
-
   } catch (error) {
-
-    console.error(
-      "UPDATE USER STATUS ERROR:",
-      error
-    );
+    console.error("UPDATE USER STATUS ERROR:", error);
 
     return res.status(500).json({
-
       success: false,
-
-      message:
-        "Failed to update user status",
-
-      error:
-        error.message,
-
+      message: "Failed to update user status",
+      error: error.message,
     });
-
   }
 };

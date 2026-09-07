@@ -1,36 +1,22 @@
 import db from "../config/db.js";
-import pool from "../config/db.js";
+// import pool from "../config/db.js";
 
 export const findUserByEmail = async (email) => {
-  const [rows] = await db.query(
-    "SELECT * FROM users WHERE email=?",
-    [email]
-  );
-
-  return rows[0];
+  return await db("users")
+    .select("id", "name", "email", "password", "role_id")
+    .where("email", email)
+    .first();
 };
 
 export const findUserById = async (id) => {
-
-  const [rows] = await db.query(
-
-    `
-    SELECT 
-    id,
-    name,
-    role_id
-    FROM users
-    WHERE id=?
-    `,
-    [id]
-
-  );
-
-
-  return rows[0];
-
+  return await db("users")
+    .select("id", "name", "role_id")
+    .where("id", id)
+    //unique honi chahiye 
+    .first();
 };
 
+//add-staff
 export const createUser = async (data) => {
   const {
     organization_name,
@@ -54,38 +40,7 @@ export const createUser = async (data) => {
     supreme_lock = 0,
   } = data;
 
-  const sql = `
-    INSERT INTO users (
-      organization_name,
-      name,
-      email,
-      phone,
-      password,
-      company_address,
-      country,
-      state,
-      city,
-      role_id,
-      created_by,
-      parent_id,
-      new_device,
-      old_device,
-      supreme_device,
-      pro_star,
-      lite,
-      google_tv,
-      supreme_lock
-    )
-    VALUES (
-      ?, ?, ?, ?, ?,
-      ?, ?, ?, ?,
-      ?, ?, ?,
-      ?, ?, ?, ?, ?,
-      ?, ?
-    )
-  `;
-
-  const values = [
+  const [userId] = await db("users").insert({
     organization_name,
     name,
     email,
@@ -95,25 +50,154 @@ export const createUser = async (data) => {
     country,
     state,
     city,
-    Number(role_id),
-    Number(created_by),
-    parent_id !== null && parent_id !== undefined
-      ? Number(parent_id)
-      : null,
-    Number(new_device ?? 0),
-    Number(old_device ?? 0),
-    Number(supreme_device ?? 0),
-    Number(pro_star ?? 0),
-    Number(lite ?? 0),
-    Number(google_tv ?? 0),
-    Number(supreme_lock ?? 0),
-  ];
+    role_id: Number(role_id),
+    created_by: Number(created_by),
+    parent_id:
+      parent_id !== null && parent_id !== undefined
+        ? Number(parent_id)
+        : null,
+    new_device: Number(new_device ?? 0),
+    old_device: Number(old_device ?? 0),
+    supreme_device: Number(supreme_device ?? 0),
+    pro_star: Number(pro_star ?? 0),
+    lite: Number(lite ?? 0),
+    google_tv: Number(google_tv ?? 0),
+    supreme_lock: Number(supreme_lock ?? 0),
+  });
 
-  const [result] = await db.query(sql, values);
-
-  return result.insertId;
+  return userId;
 };
+
 // Get All Users
+const roleNameCase = db.raw(`
+  CASE u.role_id
+    WHEN 0 THEN 'Master Admin'
+    WHEN 1 THEN 'Admin'
+    WHEN 2 THEN 'CNF'
+    WHEN 3 THEN 'Super Distributor'
+    WHEN 4 THEN 'Distributor'
+    WHEN 5 THEN 'FOS'
+    WHEN 6 THEN 'Retailer'
+    WHEN 7 THEN 'Sub Retailer'
+    WHEN 8 THEN 'Employee'
+    WHEN 9 THEN 'Staff'
+    ELSE ''
+  END
+`);
+
+const selectUserFields = [
+  "u.id",
+  "u.organization_name",
+  "u.name",
+  "u.email",
+  "u.phone",
+  "u.company_address",
+  "u.country",
+  "u.state",
+  "u.city",
+  "u.role_id",
+  "u.created_by",
+  "u.parent_id",
+  "u.userStatus",
+  db.raw(`
+    CASE
+      WHEN u.role_id = 1 THEN creator.name
+      ELSE parent.name
+    END AS parent_name
+  `),
+  db.raw(`
+    CASE
+      WHEN u.role_id = 1 THEN creator.organization_name
+      ELSE parent.organization_name
+    END AS parent_organization_name
+  `),
+  "u.new_device",
+  "u.old_device",
+  "u.supreme_device",
+  "u.pro_star",
+  "u.lite",
+  "u.google_tv",
+  "u.supreme_lock",
+  "u.created_at",
+  "u.updated_at",
+];
+
+const applyFilters = (
+  query,
+  {
+    role_id,
+    search,
+    country,
+    state,
+    city,
+    status,
+  }
+) => {
+  if (role_id !== null && role_id !== "") {
+    query.where("u.role_id", Number(role_id));
+  }
+
+  if (search !== null) {
+    const searchValue = `%${search}%`;
+
+    query.where(function () {
+      this.whereRaw(
+        "LOWER(COALESCE(u.name, '')) LIKE LOWER(?)",
+        [searchValue]
+      )
+        .orWhereRaw(
+          "LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)",
+          [searchValue]
+        )
+        .orWhereRaw(
+          `LOWER(
+            CASE u.role_id
+              WHEN 0 THEN 'Master Admin'
+              WHEN 1 THEN 'Admin'
+              WHEN 2 THEN 'CNF'
+              WHEN 3 THEN 'Super Distributor'
+              WHEN 4 THEN 'Distributor'
+              WHEN 5 THEN 'FOS'
+              WHEN 6 THEN 'Retailer'
+              WHEN 7 THEN 'Sub Retailer'
+              WHEN 8 THEN 'Employee'
+              WHEN 9 THEN 'Staff'
+              ELSE ''
+            END
+          ) LIKE LOWER(?)`,
+          [searchValue]
+        );
+    });
+  }
+
+  if (country !== null) {
+    query.whereRaw(
+      "LOWER(TRIM(COALESCE(u.country, ''))) LIKE LOWER(?)",
+      [`%${country}%`]
+    );
+  }
+
+  if (state !== null) {
+    query.whereRaw(
+      "LOWER(TRIM(COALESCE(u.state, ''))) LIKE LOWER(?)",
+      [`%${state}%`]
+    );
+  }
+
+  if (city !== null) {
+    query.whereRaw(
+      "LOWER(TRIM(COALESCE(u.city, ''))) LIKE LOWER(?)",
+      [`%${city}%`]
+    );
+  }
+
+  if (status !== null && status !== "") {
+    query.where("u.userStatus", Number(status));
+  }
+
+  return query;
+};
+
 export const getAllUsers = async (
   limit,
   offset,
@@ -127,43 +211,22 @@ export const getAllUsers = async (
   status = null
 ) => {
   try {
-    // =====================================================
-    // BASIC VALUES
-    // =====================================================
-
     limit = Number(limit) || 10;
     offset = Number(offset) || 0;
 
-    loggedInUserId = Number(
-      loggedInUserId
-    );
-
-    loggedInRoleId = Number(
-      loggedInRoleId
-    );
-
-    // =====================================================
-    // VALIDATION
-    // =====================================================
+    loggedInUserId = Number(loggedInUserId);
+    loggedInRoleId = Number(loggedInRoleId);
 
     if (
       !Number.isInteger(loggedInUserId) ||
       loggedInUserId <= 0
     ) {
-      throw new Error(
-        "Logged-in user ID is required"
-      );
+      throw new Error("Logged-in user ID is required");
     }
 
     if (!Number.isInteger(loggedInRoleId)) {
-      throw new Error(
-        "Logged-in user role ID is required"
-      );
+      throw new Error("Logged-in user role ID is required");
     }
-
-    // =====================================================
-    // NORMALIZE
-    // =====================================================
 
     search =
       search !== null &&
@@ -193,328 +256,46 @@ export const getAllUsers = async (
         ? String(city).trim()
         : null;
 
-    // =====================================================
-    // MASTER ADMIN + ADMIN
-    // =====================================================
+    const filters = {
+      role_id,
+      search,
+      country,
+      state,
+      city,
+      status,
+    };
 
-    if (
-      loggedInRoleId === 0 ||
-      loggedInRoleId === 1
-    ) {
-      let whereCondition = `
-        WHERE 1 = 1
-      `;
+    if (loggedInRoleId === 0 || loggedInRoleId === 1) {
+      let usersQuery = db
+        .from({ u: "users" })
+        .leftJoin(
+          { parent: "users" },
+          "parent.id",
+          "u.parent_id"
+        )
+        .leftJoin(
+          { creator: "users" },
+          "creator.id",
+          "u.created_by"
+        )
+        .select(selectUserFields)
+        .orderBy("u.id", "desc")
+        .limit(limit)
+        .offset(offset);
 
-      const queryParams = [];
+      applyFilters(usersQuery, filters);
 
-      // ===================================================
-      // ROLE FILTER
-      // ===================================================
+      const users = await usersQuery;
 
-      if (
-        role_id !== null &&
-        role_id !== ""
-      ) {
-        whereCondition += `
-          AND u.role_id = ?
-        `;
+      let countQuery = db
+        .from({ u: "users" })
+        .count("* as total");
 
-        queryParams.push(
-          Number(role_id)
-        );
-      }
+      applyFilters(countQuery, filters);
 
-      // ===================================================
-      // SEARCH
-      // Name + Organization + Role
-      // ===================================================
+      const countResult = await countQuery.first();
 
-      if (search !== null) {
-        whereCondition += `
-          AND (
-            LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
-            OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
-            OR LOWER(
-              CASE u.role_id
-                WHEN 0 THEN 'Master Admin'
-                WHEN 1 THEN 'Admin'
-                WHEN 2 THEN 'CNF'
-                WHEN 3 THEN 'Super Distributor'
-                WHEN 4 THEN 'Distributor'
-                WHEN 5 THEN 'FOS'
-                WHEN 6 THEN 'Retailer'
-                WHEN 7 THEN 'Sub Retailer'
-                WHEN 8 THEN 'Employee'
-                WHEN 9 THEN 'Staff'
-                ELSE ''
-              END
-            ) LIKE LOWER(?)
-          )
-        `;
-
-        const searchValue = `%${search}%`;
-
-        queryParams.push(
-          searchValue,
-          searchValue,
-          searchValue
-        );
-      }
-
-      // ===================================================
-      // COUNTRY
-      // Partial Search
-      // ===================================================
-
-      if (country !== null) {
-        whereCondition += `
-          AND LOWER(TRIM(COALESCE(u.country, '')))
-              LIKE LOWER(?)
-        `;
-
-        queryParams.push(
-          `%${country}%`
-        );
-      }
-
-      // ===================================================
-      // STATE
-      // Partial Search
-      // ===================================================
-
-      if (state !== null) {
-        whereCondition += `
-          AND LOWER(TRIM(COALESCE(u.state, '')))
-              LIKE LOWER(?)
-        `;
-
-        queryParams.push(
-          `%${state}%`
-        );
-      }
-
-      // ===================================================
-      // CITY
-      // Partial Search
-      // ===================================================
-
-      if (city !== null) {
-        whereCondition += `
-          AND LOWER(TRIM(COALESCE(u.city, '')))
-              LIKE LOWER(?)
-        `;
-
-        queryParams.push(
-          `%${city}%`
-        );
-      }
-
-      // ===================================================
-      // STATUS
-      // ===================================================
-
-      if (
-        status !== null &&
-        status !== ""
-      ) {
-        whereCondition += `
-          AND u.userStatus = ?
-        `;
-
-        queryParams.push(
-          Number(status)
-        );
-      }
-
-      // ===================================================
-      // USERS QUERY
-      // ===================================================
-
-      const sql = `
-        SELECT
-          u.id,
-          u.organization_name,
-          u.name,
-          u.email,
-          u.phone,
-          u.company_address,
-          u.country,
-          u.state,
-          u.city,
-          u.role_id,
-          u.created_by,
-          u.parent_id,
-          u.userStatus,
-
-          CASE
-            WHEN u.role_id = 1
-              THEN creator.name
-            ELSE parent.name
-          END AS parent_name,
-
-          CASE
-            WHEN u.role_id = 1
-              THEN creator.organization_name
-            ELSE parent.organization_name
-          END AS parent_organization_name,
-
-          u.new_device,
-          u.old_device,
-          u.supreme_device,
-          u.pro_star,
-          u.lite,
-          u.google_tv,
-          u.supreme_lock,
-
-          u.created_at,
-          u.updated_at
-
-        FROM users u
-
-        LEFT JOIN users parent
-          ON parent.id = u.parent_id
-
-        LEFT JOIN users creator
-          ON creator.id = u.created_by
-
-        ${whereCondition}
-
-        ORDER BY u.id DESC
-
-        LIMIT ? OFFSET ?
-      `;
-
-      queryParams.push(
-        limit,
-        offset
-      );
-
-      const [users] = await db.query(
-        sql,
-        queryParams
-      );
-
-      // ===================================================
-      // COUNT QUERY
-      // ===================================================
-
-      let countWhereCondition = `
-        WHERE 1 = 1
-      `;
-
-      const countParams = [];
-
-      // ROLE
-      if (
-        role_id !== null &&
-        role_id !== ""
-      ) {
-        countWhereCondition += `
-          AND u.role_id = ?
-        `;
-
-        countParams.push(
-          Number(role_id)
-        );
-      }
-
-      // SEARCH
-      if (search !== null) {
-        countWhereCondition += `
-          AND (
-            LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
-            OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
-            OR LOWER(
-              CASE u.role_id
-                WHEN 0 THEN 'Master Admin'
-                WHEN 1 THEN 'Admin'
-                WHEN 2 THEN 'CNF'
-                WHEN 3 THEN 'Super Distributor'
-                WHEN 4 THEN 'Distributor'
-                WHEN 5 THEN 'FOS'
-                WHEN 6 THEN 'Retailer'
-                WHEN 7 THEN 'Sub Retailer'
-                WHEN 8 THEN 'Employee'
-                WHEN 9 THEN 'Staff'
-                ELSE ''
-              END
-            ) LIKE LOWER(?)
-          )
-        `;
-
-        const searchValue = `%${search}%`;
-
-        countParams.push(
-          searchValue,
-          searchValue,
-          searchValue
-        );
-      }
-
-      // COUNTRY
-      if (country !== null) {
-        countWhereCondition += `
-          AND LOWER(TRIM(COALESCE(u.country, '')))
-              LIKE LOWER(?)
-        `;
-
-        countParams.push(
-          `%${country}%`
-        );
-      }
-
-      // STATE
-      if (state !== null) {
-        countWhereCondition += `
-          AND LOWER(TRIM(COALESCE(u.state, '')))
-              LIKE LOWER(?)
-        `;
-
-        countParams.push(
-          `%${state}%`
-        );
-      }
-
-      // CITY
-      if (city !== null) {
-        countWhereCondition += `
-          AND LOWER(TRIM(COALESCE(u.city, '')))
-              LIKE LOWER(?)
-        `;
-
-        countParams.push(
-          `%${city}%`
-        );
-      }
-
-      // STATUS
-      if (
-        status !== null &&
-        status !== ""
-      ) {
-        countWhereCondition += `
-          AND u.userStatus = ?
-        `;
-
-        countParams.push(
-          Number(status)
-        );
-      }
-
-      const countSql = `
-        SELECT COUNT(*) AS total
-        FROM users u
-        ${countWhereCondition}
-      `;
-
-      const [countResult] = await db.query(
-        countSql,
-        countParams
-      );
-
-      const total = Number(
-        countResult?.[0]?.total || 0
-      );
+      const total = Number(countResult?.total || 0);
 
       return {
         users,
@@ -522,452 +303,127 @@ export const getAllUsers = async (
       };
     }
 
-    // =====================================================
-    // NON ADMIN USERS
-    // =====================================================
+    const buildUserChain = () =>
+      db.withRecursive(
+        "user_chain",
+        ["id", "parent_id", "created_by", "role_id"],
+        (query) => {
+          query
+            .select(
+              "id",
+              "parent_id",
+              "created_by",
+              "role_id"
+            )
+            .from("users")
+            .where("id", loggedInUserId)
+            .unionAll((query) => {
+              query
+                .select(
+                  "child.id",
+                  "child.parent_id",
+                  "child.created_by",
+                  "child.role_id"
+                )
+                .from({ child: "users" })
+                .join(
+                  { parent: "user_chain" },
+                  "child.parent_id",
+                  "parent.id"
+                );
+            });
+        }
+      );
 
-    // =====================================================
-    // COUNT QUERY
-    // =====================================================
-
-    let countSql = `
-      WITH RECURSIVE user_chain AS (
-
-        SELECT
-          u.id,
-          u.parent_id,
-          u.created_by,
-          u.role_id
-
-        FROM users u
-
-        WHERE u.id = ?
-
-        UNION ALL
-
-        SELECT
-          child.id,
-          child.parent_id,
-          child.created_by,
-          child.role_id
-
-        FROM users child
-
-        INNER JOIN user_chain parent
-          ON child.parent_id = parent.id
+    let countQuery = buildUserChain()
+      .from({ u: "users" })
+      .join(
+        { uc: "user_chain" },
+        "uc.id",
+        "u.id"
       )
+      .whereNot("u.id", loggedInUserId)
+      .count("* as total");
 
-      SELECT COUNT(*) AS total
+    applyFilters(countQuery, filters);
 
-      FROM users u
+    const countResult = await countQuery.first();
 
-      INNER JOIN user_chain uc
-        ON uc.id = u.id
+    const total = Number(countResult?.total || 0);
 
-      WHERE u.id != ?
-    `;
-
-    const countParams = [
-      loggedInUserId,
-      loggedInUserId,
-    ];
-
-    // ROLE
-    if (
-      role_id !== null &&
-      role_id !== ""
-    ) {
-      countSql += `
-        AND u.role_id = ?
-      `;
-
-      countParams.push(
-        Number(role_id)
-      );
-    }
-
-    // SEARCH
-    if (search !== null) {
-      countSql += `
-        AND (
-          LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
-          OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
-          OR LOWER(
-            CASE u.role_id
-              WHEN 0 THEN 'Master Admin'
-              WHEN 1 THEN 'Admin'
-              WHEN 2 THEN 'CNF'
-              WHEN 3 THEN 'Super Distributor'
-              WHEN 4 THEN 'Distributor'
-              WHEN 5 THEN 'FOS'
-              WHEN 6 THEN 'Retailer'
-              WHEN 7 THEN 'Sub Retailer'
-              WHEN 8 THEN 'Employee'
-              WHEN 9 THEN 'Staff'
-              ELSE ''
-            END
-          ) LIKE LOWER(?)
-        )
-      `;
-
-      const searchValue = `%${search}%`;
-
-      countParams.push(
-        searchValue,
-        searchValue,
-        searchValue
-      );
-    }
-
-    // COUNTRY
-    if (country !== null) {
-      countSql += `
-        AND LOWER(TRIM(COALESCE(u.country, '')))
-            LIKE LOWER(?)
-      `;
-
-      countParams.push(
-        `%${country}%`
-      );
-    }
-
-    // STATE
-    if (state !== null) {
-      countSql += `
-        AND LOWER(TRIM(COALESCE(u.state, '')))
-            LIKE LOWER(?)
-      `;
-
-      countParams.push(
-        `%${state}%`
-      );
-    }
-
-    // CITY
-    if (city !== null) {
-      countSql += `
-        AND LOWER(TRIM(COALESCE(u.city, '')))
-            LIKE LOWER(?)
-      `;
-
-      countParams.push(
-        `%${city}%`
-      );
-    }
-
-    // STATUS
-    if (
-      status !== null &&
-      status !== ""
-    ) {
-      countSql += `
-        AND u.userStatus = ?
-      `;
-
-      countParams.push(
-        Number(status)
-      );
-    }
-
-    const [countResult] = await db.query(
-      countSql,
-      countParams
-    );
-
-    const total = Number(
-      countResult?.[0]?.total || 0
-    );
-
-    // =====================================================
-    // USERS QUERY
-    // =====================================================
-
-    let sql = `
-      WITH RECURSIVE user_chain AS (
-
-        SELECT
-          u.id,
-          u.parent_id,
-          u.created_by,
-          u.role_id
-
-        FROM users u
-
-        WHERE u.id = ?
-
-        UNION ALL
-
-        SELECT
-          child.id,
-          child.parent_id,
-          child.created_by,
-          child.role_id
-
-        FROM users child
-
-        INNER JOIN user_chain parent
-          ON child.parent_id = parent.id
+    let usersQuery = buildUserChain()
+      .from({ u: "users" })
+      .join(
+        { uc: "user_chain" },
+        "uc.id",
+        "u.id"
       )
+      .leftJoin(
+        { parent: "users" },
+        "parent.id",
+        "u.parent_id"
+      )
+      .leftJoin(
+        { creator: "users" },
+        "creator.id",
+        "u.created_by"
+      )
+      .select(selectUserFields)
+      .whereNot("u.id", loggedInUserId)
+      .orderBy("u.id", "desc")
+      .limit(limit)
+      .offset(offset);
 
-      SELECT
-        u.id,
-        u.organization_name,
-        u.name,
-        u.email,
-        u.phone,
-        u.company_address,
-        u.country,
-        u.state,
-        u.city,
-        u.role_id,
-        u.created_by,
-        u.parent_id,
-        u.userStatus,
+    applyFilters(usersQuery, filters);
 
-        CASE
-          WHEN u.role_id = 1
-            THEN creator.name
-          ELSE parent.name
-        END AS parent_name,
-
-        CASE
-          WHEN u.role_id = 1
-            THEN creator.organization_name
-          ELSE parent.organization_name
-        END AS parent_organization_name,
-
-        u.new_device,
-        u.old_device,
-        u.supreme_device,
-        u.pro_star,
-        u.lite,
-        u.google_tv,
-        u.supreme_lock,
-
-        u.created_at,
-        u.updated_at
-
-      FROM users u
-
-      INNER JOIN user_chain uc
-        ON uc.id = u.id
-
-      LEFT JOIN users parent
-        ON parent.id = u.parent_id
-
-      LEFT JOIN users creator
-        ON creator.id = u.created_by
-
-      WHERE u.id != ?
-    `;
-
-    const sqlParams = [
-      loggedInUserId,
-      loggedInUserId,
-    ];
-
-    // ROLE
-    if (
-      role_id !== null &&
-      role_id !== ""
-    ) {
-      sql += `
-        AND u.role_id = ?
-      `;
-
-      sqlParams.push(
-        Number(role_id)
-      );
-    }
-
-    // SEARCH
-    if (search !== null) {
-      sql += `
-        AND (
-          LOWER(COALESCE(u.name, '')) LIKE LOWER(?)
-          OR LOWER(COALESCE(u.organization_name, '')) LIKE LOWER(?)
-          OR LOWER(
-            CASE u.role_id
-              WHEN 0 THEN 'Master Admin'
-              WHEN 1 THEN 'Admin'
-              WHEN 2 THEN 'CNF'
-              WHEN 3 THEN 'Super Distributor'
-              WHEN 4 THEN 'Distributor'
-              WHEN 5 THEN 'FOS'
-              WHEN 6 THEN 'Retailer'
-              WHEN 7 THEN 'Sub Retailer'
-              WHEN 8 THEN 'Employee'
-              WHEN 9 THEN 'Staff'
-              ELSE ''
-            END
-          ) LIKE LOWER(?)
-        )
-      `;
-
-      const searchValue = `%${search}%`;
-
-      sqlParams.push(
-        searchValue,
-        searchValue,
-        searchValue
-      );
-    }
-
-    // COUNTRY
-    if (country !== null) {
-      sql += `
-        AND LOWER(TRIM(COALESCE(u.country, '')))
-            LIKE LOWER(?)
-      `;
-
-      sqlParams.push(
-        `%${country}%`
-      );
-    }
-
-    // STATE
-    if (state !== null) {
-      sql += `
-        AND LOWER(TRIM(COALESCE(u.state, '')))
-            LIKE LOWER(?)
-      `;
-
-      sqlParams.push(
-        `%${state}%`
-      );
-    }
-
-    // CITY
-    if (city !== null) {
-      sql += `
-        AND LOWER(TRIM(COALESCE(u.city, '')))
-            LIKE LOWER(?)
-      `;
-
-      sqlParams.push(
-        `%${city}%`
-      );
-    }
-
-    // STATUS
-    if (
-      status !== null &&
-      status !== ""
-    ) {
-      sql += `
-        AND u.userStatus = ?
-      `;
-
-      sqlParams.push(
-        Number(status)
-      );
-    }
-
-    // =====================================================
-    // PAGINATION
-    // =====================================================
-
-    sql += `
-      ORDER BY u.id DESC
-      LIMIT ? OFFSET ?
-    `;
-
-    sqlParams.push(
-      limit,
-      offset
-    );
-
-    // =====================================================
-    // EXECUTE
-    // =====================================================
-
-    const [users] = await db.query(
-      sql,
-      sqlParams
-    );
-
-    // =====================================================
-    // DEBUG
-    // =====================================================
-
-    console.log(
-      "NON ADMIN USERS FOUND:",
-      users.length
-    );
-
-    console.log(
-      "NON ADMIN TOTAL:",
-      total
-    );
-
-    console.table(
-      users.map((user) => ({
-        id: user.id,
-        name: user.name,
-        organization_name:
-          user.organization_name,
-        role_id: user.role_id,
-        country: user.country,
-        state: user.state,
-        city: user.city,
-        parent_id: user.parent_id,
-        created_by: user.created_by,
-      }))
-    );
+    const users = await usersQuery;
 
     return {
       users,
       total,
     };
-
   } catch (error) {
-    console.error(
-      "GET ALL USERS MODEL ERROR:",
-      error
-    );
-
+    console.error("GET ALL USERS MODEL ERROR:", error);
     throw error;
   }
 };
 
 //get getAllHierarchyUsers 
 export const getAllHierarchyUsers = async () => {
-    try {
-        const [rows] = await db.query(`
-            SELECT
-                id,
-                organization_name,
-                role_id,
-                name,
-                email,
-                phone,
-                company_address,
-                country,
-                state,
-                city,
-                created_by,
-                created_at,
-                parent_id,
+  try {
+    const rows = await db("users")
+      .select(
+        "id",
+        "organization_name",
+        "role_id",
+        "name",
+        "email",
+        "phone",
+        "company_address",
+        "country",
+        "state",
+        "city",
+        "created_by",
+        "created_at",
+        "parent_id",
+        "new_device",
+        "old_device",
+        "supreme_device",
+        "pro_star",
+        "lite",
+        "google_tv",
+        "supreme_lock"
+      )
+      .orderBy("id", "asc");
 
-                new_device,
-                old_device,
-                supreme_device,
-                pro_star,
-                lite,
-                google_tv,
-                supreme_lock
+    return rows;
+  } catch (error) {
+    console.error(
+      "Error fetching hierarchy users:",
+      error
+    );
 
-            FROM users
-
-            ORDER BY id ASC
-        `);
-
-        return rows;
-
-    } catch (error) {
-        console.error("Error fetching hierarchy users:", error);
-        throw error;
-    }
+    throw error;
+  }
 };
-
 
