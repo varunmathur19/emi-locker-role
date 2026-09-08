@@ -222,13 +222,18 @@ router.get(
   getModules
 );
 
+// router.delete(
+//   "/delete-module",
+//   deleteModule
+// );
 router.delete(
-  "/delete-module",
+  "/delete-module/:id",
+  authMiddleware,
   deleteModule
 );
 
 router.put(
-  "/update-module",
+  "/update-module/:id",
   authMiddleware,
   uploadModuleNewIcon,
   updateModule

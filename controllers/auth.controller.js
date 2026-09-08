@@ -1247,718 +1247,222 @@ export const loginAsUser = async (req, res) => {
   }
 };
 
-// ADD MODULE
+
 export const addModule = async (req, res) => {
   try {
-    const userRole = Number(req.user?.role_id);
+    const {
+      name,
+      slug,
+      icon,
+      sequence,
+      status
+    } = req.body;
 
-    if (userRole !== 0 && userRole !== 8) {
-      return res.status(403).json({
-        success: false,
-        message: "Only Master Admin and Employee can add modules",
-      });
-    }
-
-    const { module, sequence } = req.body;
-
-    if (!module || typeof module !== "string") {
+    if (!name || !slug) {
       return res.status(400).json({
         success: false,
-        message: "Module is required",
+        message: "Name and slug are required"
       });
     }
 
-    const moduleName = module.trim().toLowerCase();
-
-    if (!moduleName) {
-      return res.status(400).json({
-        success: false,
-        message: "Module name cannot be empty",
-      });
-    }
-
-    const moduleSequence = Number(sequence);
-
-    if (
-      sequence === undefined ||
-      sequence === null ||
-      sequence === "" ||
-      !Number.isInteger(moduleSequence) ||
-      moduleSequence < 1
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Valid sequence number is required. Example: 1, 2, 3",
-      });
-    }
-
-    if (!req.file) {
-      return res.status(400).json({
-        success: false,
-        message: "PNG module icon is required",
-      });
-    }
-
-    if (req.file.mimetype !== "image/png") {
-      return res.status(400).json({
-        success: false,
-        message: "Only PNG module icons are allowed",
-      });
-    }
-
-    const maxIconSize = 20 * 1024;
-
-    if (req.file.size > maxIconSize) {
-      return res.status(400).json({
-        success: false,
-        message: "PNG module icon must not exceed 20 KB",
-      });
-    }
-
-    const masterAdmin = await db("users")
-      .select("id", "modules")
-      .where("role_id", 0)
+    const existingModule = await db("modules")
+      .where("slug", slug)
       .first();
 
-    if (!masterAdmin) {
-      return res.status(404).json({
-        success: false,
-        message: "Master Admin not found",
-      });
-    }
-
-    let modules = [];
-
-    if (masterAdmin.modules) {
-      try {
-        modules =
-          typeof masterAdmin.modules === "string"
-            ? JSON.parse(masterAdmin.modules)
-            : masterAdmin.modules;
-      } catch (error) {
-        console.error("Modules JSON Parse Error:", error);
-        modules = [];
-      }
-    }
-
-    if (!Array.isArray(modules)) {
-      modules = [];
-    }
-
-    modules = modules.map((item, index) => {
-      if (typeof item === "string") {
-        return {
-          name: item,
-          icon: null,
-          sequence: index + 1,
-          status: 1,
-        };
-      }
-
-      return {
-        ...item,
-        sequence: Number(item?.sequence) || index + 1,
-        status: Number(item?.status) === 0 ? 0 : 1,
-      };
-    });
-
-    const alreadyExists = modules.some(
-      (item) =>
-        String(item?.name || "").trim().toLowerCase() === moduleName
-    );
-
-    if (alreadyExists) {
+    if (existingModule) {
       return res.status(409).json({
         success: false,
-        message: "Module already exists",
-        modules,
+        message: "Module with this slug already exists"
       });
     }
 
-    const sequenceExists = modules.some(
-      (item) => Number(item?.sequence) === moduleSequence
-    );
+    const [moduleId] = await db("modules").insert({
+      name,
+      slug,
+      icon: icon || null,
+      sequence: sequence ?? 0,
+      status: status ?? 1
+    });
 
-    if (sequenceExists) {
-      return res.status(422).json({
-        success: false,
-        message: `Sequence ${moduleSequence} is already used`,
-        modules,
-      });
-    }
-
-    const iconPath = `/uploads/modules/${req.file.filename}`;
-
-    const newModule = {
-      name: moduleName,
-      icon: iconPath,
-      sequence: moduleSequence,
-      status: 1,
-    };
-
-    modules.push(newModule);
-
-    modules.sort(
-      (a, b) =>
-        Number(a?.sequence ?? 999999) -
-        Number(b?.sequence ?? 999999)
-    );
-
-    await db("users")
-      .where("id", masterAdmin.id)
-      .where("role_id", 0)
-      .update({
-        modules: JSON.stringify(modules),
-      });
+    const module = await db("modules")
+      .where("id", moduleId)
+      .first();
 
     return res.status(201).json({
       success: true,
-      message: "Module added successfully",
-      module: newModule,
-      modules,
+      message: "Module created successfully",
+      data: module
     });
   } catch (error) {
-    console.error("Add Module Error:", error);
+    console.error("Create Module Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error"
+    });
+  }
+};
+
+
+
+
+export const getModules = async (req, res) => {
+    try {
+        const { search, status } = req.query;
+
+        let query = db("modules").select(
+            "id",
+            "name",
+            "slug",
+            "icon",
+            "sequence",
+            "status",
+            "created_at",
+            "updated_at"
+        );
+
+        if (search) {
+            query = query.where(function () {
+                this.where("name", "like", `%${search}%`)
+                    .orWhere("slug", "like", `%${search}%`);
+            });
+        }
+
+        if (status !== undefined && status !== "") {
+            query = query.where("status", status);
+        }
+
+        const rows = await query
+            .orderBy("sequence", "asc")
+            .orderBy("id", "asc");
+
+        return res.status(200).json({
+            success: true,
+            count: rows.length,
+            data: rows
+        });
+    } catch (error) {
+        console.error("Get Modules Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+export const updateModule = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, slug, icon, sequence, status } = req.body;
+
+        if (!name || !slug) {
+            return res.status(400).json({
+                success: false,
+                message: "Name and slug are required"
+            });
+        }
+
+        const existing = await db("modules")
+            .select("id")
+            .where("id", id)
+            .first();
+
+        if (!existing) {
+            return res.status(404).json({
+                success: false,
+                message: "Module not found"
+            });
+        }
+
+        const duplicate = await db("modules")
+            .select("id")
+            .where("slug", slug)
+            .whereNot("id", id)
+            .first();
+
+        if (duplicate) {
+            return res.status(409).json({
+                success: false,
+                message: "Module with this slug already exists"
+            });
+        }
+
+        await db("modules")
+            .where("id", id)
+            .update({
+                name,
+                slug,
+                icon: icon || null,
+                sequence: sequence ?? 0,
+                status: status ?? 1
+            });
+
+        const updatedModule = await db("modules")
+            .where("id", id)
+            .first();
+
+        return res.status(200).json({
+            success: true,
+            message: "Module updated successfully",
+            data: updatedModule
+        });
+    } catch (error) {
+        console.error("Update Module Error:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+
+
+
+export const deleteModule = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const existing = await db("modules")
+      .select(
+        "id",
+        "name",
+        "slug",
+        "icon",
+        "sequence",
+        "status",
+        "created_at",
+        "updated_at"
+      )
+      .where("id", id)
+      .first();
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: "Module not found",
+        data: null,
+      });
+    }
+
+    await db("modules")
+      .where("id", id)
+      .del();
+
+    return res.status(200).json({
+      success: true,
+      message: "Module deleted successfully",
+      data: existing,
+    });
+  } catch (error) {
+    console.error("Delete Module Error:", error);
 
     return res.status(500).json({
       success: false,
       message: "Internal server error",
-      error: error.message,
-    });
-  }
-};
-
-// GET MODULES
-export const getModules = async (req, res) => {
-  try {
-    const masterAdmin = await db("users")
-      .select("id", "modules")
-      .where("role_id", 0)
-      .first();
-
-    if (!masterAdmin) {
-      return res.status(404).json({
-        success: false,
-        message: "Master Admin not found",
-      });
-    }
-
-    let modules = [];
-
-    if (masterAdmin.modules) {
-      try {
-        modules =
-          typeof masterAdmin.modules === "string"
-            ? JSON.parse(masterAdmin.modules)
-            : masterAdmin.modules;
-      } catch (error) {
-        console.error("MODULES JSON PARSE ERROR:", error);
-
-        return res.status(500).json({
-          success: false,
-          message: "Invalid modules data",
-        });
-      }
-    }
-
-    if (!Array.isArray(modules)) {
-      modules = [];
-    }
-
-    modules = modules.map((item, index) => {
-      if (typeof item === "string") {
-        return {
-          name: item,
-          icon: null,
-          sequence: index + 1,
-          status: 1,
-        };
-      }
-
-      const sequence = Number(item?.sequence);
-      const status = Number(item?.status);
-
-      return {
-        name: item?.name || "",
-        icon: item?.icon || null,
-        sequence:
-          Number.isInteger(sequence) && sequence > 0
-            ? sequence
-            : index + 1,
-        status: status === 0 ? 0 : 1,
-      };
-    });
-
-    modules.sort(
-      (a, b) =>
-        Number(a?.sequence ?? 999999) -
-        Number(b?.sequence ?? 999999)
-    );
-
-    const activeCount = modules.filter(
-      (item) => Number(item?.status) === 1
-    ).length;
-
-    const inactiveCount = modules.filter(
-      (item) => Number(item?.status) === 0
-    ).length;
-
-    return res.status(200).json({
-      success: true,
-      count: modules.length,
-      activeCount,
-      inactiveCount,
-      modules,
-    });
-  } catch (error) {
-    console.error("GET MODULES ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to get modules",
-      error: error?.message,
-    });
-  }
-};
-
-// DELETE MODULES
-export const deleteModule = async (req, res) => {
-  try {
-    const { module } = req.body || {};
-
-    if (!module || typeof module !== "string") {
-      return res.status(400).json({
-        success: false,
-        message: "Module name is required",
-      });
-    }
-
-    const moduleName = module.trim().toLowerCase();
-
-    if (!moduleName) {
-      return res.status(400).json({
-        success: false,
-        message: "Module name cannot be empty",
-      });
-    }
-
-    const masterAdmin = await db("users")
-      .select("id", "modules")
-      .where("role_id", 0)
-      .first();
-
-    if (!masterAdmin) {
-      return res.status(404).json({
-        success: false,
-        message: "Master Admin not found",
-      });
-    }
-
-    let modules = [];
-
-    if (masterAdmin.modules) {
-      try {
-        modules =
-          typeof masterAdmin.modules === "string"
-            ? JSON.parse(masterAdmin.modules)
-            : masterAdmin.modules;
-      } catch (error) {
-        console.error("MODULE JSON PARSE ERROR:", error);
-        modules = [];
-      }
-    }
-
-    if (!Array.isArray(modules)) {
-      modules = [];
-    }
-
-    const getModuleName = (item) => {
-      if (typeof item === "object" && item !== null) {
-        return String(item?.name || "").trim().toLowerCase();
-      }
-
-      return String(item || "").trim().toLowerCase();
-    };
-
-    const deletedModule = modules.find(
-      (item) => getModuleName(item) === moduleName
-    );
-
-    if (!deletedModule) {
-      return res.status(404).json({
-        success: false,
-        message: `Module "${module}" not found`,
-      });
-    }
-
-    const updatedModules = modules.filter(
-      (item) => getModuleName(item) !== moduleName
-    );
-
-    await db("users")
-      .where("id", masterAdmin.id)
-      .where("role_id", 0)
-      .update({
-        modules: JSON.stringify(updatedModules),
-      });
-
-    return res.status(200).json({
-      success: true,
-      message: `Module "${module}" deleted successfully`,
-      deletedModule,
-      modules: updatedModules,
-    });
-  } catch (error) {
-    console.error("DELETE MODULE ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to delete module",
-      error: error.message,
-    });
-  }
-};
-
-// UPADTE MODULES
-export const updateModule = async (req, res) => {
-  try {
-    const removeUploadedFile = () => {
-      if (!req.file) return;
-
-      const filePath = path.join(uploadDir, req.file.filename);
-
-      if (fs.existsSync(filePath)) {
-        fs.unlinkSync(filePath);
-      }
-    };
-
-    if (Number(req.user?.role_id) !== 0) {
-      removeUploadedFile();
-
-      return res.status(403).json({
-        success: false,
-        message: "Only Master Admin can update module",
-      });
-    }
-
-    const {
-      oldModule,
-      newModule,
-      newSequence,
-      status,
-    } = req.body;
-
-    if (typeof oldModule !== "string" || !oldModule.trim()) {
-      removeUploadedFile();
-
-      return res.status(400).json({
-        success: false,
-        message: "Old module name is required",
-      });
-    }
-
-    const hasNewModule =
-      typeof newModule === "string" && newModule.trim() !== "";
-
-    const hasNewSequence =
-      newSequence !== undefined &&
-      newSequence !== null &&
-      String(newSequence).trim() !== "";
-
-    const hasNewStatus =
-      status !== undefined &&
-      status !== null &&
-      String(status).trim() !== "";
-
-    const hasNewIcon = Boolean(req.file);
-
-    if (
-      !hasNewModule &&
-      !hasNewSequence &&
-      !hasNewStatus &&
-      !hasNewIcon
-    ) {
-      removeUploadedFile();
-
-      return res.status(400).json({
-        success: false,
-        message: "At least one field is required to update",
-      });
-    }
-
-    let sequence = null;
-
-    if (hasNewSequence) {
-      sequence = Number(newSequence);
-
-      if (!Number.isInteger(sequence) || sequence < 1) {
-        removeUploadedFile();
-
-        return res.status(400).json({
-          success: false,
-          message: "Valid sequence number is required",
-        });
-      }
-    }
-
-    let moduleStatus = null;
-
-    if (hasNewStatus) {
-      moduleStatus = Number(status);
-
-      if (moduleStatus !== 0 && moduleStatus !== 1) {
-        removeUploadedFile();
-
-        return res.status(400).json({
-          success: false,
-          message: "Status must be either 0 or 1",
-        });
-      }
-    }
-
-    const oldModuleName = oldModule.trim().toLowerCase();
-
-    const newModuleName = hasNewModule
-      ? newModule.trim().toLowerCase()
-      : null;
-
-    const masterAdmin = await db("users")
-      .select("id", "modules")
-      .where("role_id", 0)
-      .first();
-
-    if (!masterAdmin) {
-      removeUploadedFile();
-
-      return res.status(404).json({
-        success: false,
-        message: "Master Admin not found",
-      });
-    }
-
-    let modules = masterAdmin.modules;
-
-    if (!modules) {
-      modules = [];
-    } else if (typeof modules === "string") {
-      try {
-        modules = JSON.parse(modules);
-      } catch (error) {
-        removeUploadedFile();
-
-        return res.status(500).json({
-          success: false,
-          message: "Invalid modules data",
-        });
-      }
-    }
-
-    if (!Array.isArray(modules)) {
-      removeUploadedFile();
-
-      return res.status(500).json({
-        success: false,
-        message: "Modules data must be an array",
-      });
-    }
-
-    modules = modules.map((item, index) => {
-      if (typeof item === "string") {
-        return {
-          name: item,
-          icon: null,
-          sequence: index + 1,
-          status: 1,
-        };
-      }
-
-      return {
-        name: item?.name || "",
-        icon: item?.icon || null,
-        sequence: Number(item?.sequence ?? index + 1),
-        status: Number(item?.status ?? 1) === 0 ? 0 : 1,
-      };
-    });
-
-    const moduleIndex = modules.findIndex(
-      (item) =>
-        String(item?.name || "").trim().toLowerCase() === oldModuleName
-    );
-
-    if (moduleIndex === -1) {
-      removeUploadedFile();
-
-      return res.status(404).json({
-        success: false,
-        message: `Old module "${oldModule}" not found`,
-      });
-    }
-
-    const currentModule = modules[moduleIndex];
-
-    if (hasNewModule) {
-      const duplicateModule = modules.some(
-        (item, index) =>
-          index !== moduleIndex &&
-          String(item?.name || "").trim().toLowerCase() === newModuleName
-      );
-
-      if (duplicateModule) {
-        removeUploadedFile();
-
-        return res.status(409).json({
-          success: false,
-          message: `Module "${newModule}" already exists`,
-        });
-      }
-    }
-
-    if (hasNewSequence) {
-      const duplicateSequence = modules.some(
-        (item, index) =>
-          index !== moduleIndex &&
-          Number(item?.sequence) === sequence
-      );
-
-      if (duplicateSequence) {
-        removeUploadedFile();
-
-        return res.status(422).json({
-          success: false,
-          message: `Sequence ${sequence} is already used`,
-        });
-      }
-    }
-
-    const oldIcon = currentModule?.icon || null;
-
-    const finalName = hasNewModule
-      ? newModuleName
-      : currentModule?.name || "";
-
-    const finalSequence = hasNewSequence
-      ? sequence
-      : Number(currentModule?.sequence || moduleIndex + 1);
-
-    const finalStatus = hasNewStatus
-      ? moduleStatus
-      : Number(currentModule?.status ?? 1) === 0
-        ? 0
-        : 1;
-
-    const finalIcon = hasNewIcon
-      ? `/uploads/modules/${req.file.filename}`
-      : currentModule?.icon || null;
-
-    const previousStatus = Number(currentModule?.status ?? 1);
-
-    modules[moduleIndex] = {
-      name: finalName,
-      icon: finalIcon,
-      sequence: finalSequence,
-      status: finalStatus,
-    };
-
-    modules.sort(
-      (a, b) =>
-        Number(a?.sequence ?? 999999) -
-        Number(b?.sequence ?? 999999)
-    );
-
-    if (
-      hasNewStatus &&
-      previousStatus === 1 &&
-      finalStatus === 0
-    ) {
-      const roleMap = {
-        admin: 1,
-        cnf: 2,
-        "super distributor": 3,
-        "super distributer": 3,
-        distributor: 4,
-        fos: 5,
-        retailer: 6,
-        "sub retailer": 7,
-        employee: 8,
-        staff: 9,
-      };
-
-      const inactiveRoleId = roleMap[oldModuleName];
-
-      if (inactiveRoleId) {
-        const inactiveUsers = await db("users")
-          .select("id", "parent_id")
-          .where("role_id", inactiveRoleId);
-
-        for (const inactiveUser of inactiveUsers) {
-          if (!inactiveUser.parent_id) {
-            continue;
-          }
-
-          await db("users")
-            .where("parent_id", inactiveUser.id)
-            .update({
-              parent_id: inactiveUser.parent_id,
-            });
-        }
-      }
-    }
-
-    await db("users")
-      .where("id", masterAdmin.id)
-      .where("role_id", 0)
-      .update({
-        modules: JSON.stringify(modules),
-      });
-
-    if (hasNewIcon && oldIcon && oldIcon !== finalIcon) {
-      try {
-        const oldIconPath = path.join(
-          process.cwd(),
-          oldIcon.replace(/^\/+/, "")
-        );
-
-        if (fs.existsSync(oldIconPath)) {
-          fs.unlinkSync(oldIconPath);
-        }
-      } catch (iconDeleteError) {
-        console.error(
-          "OLD ICON DELETE ERROR:",
-          iconDeleteError
-        );
-      }
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Module updated successfully",
-      module: {
-        oldModule: oldModuleName,
-        newModule: finalName,
-        icon: finalIcon,
-        sequence: finalSequence,
-        status: finalStatus,
-      },
-      modules,
-    });
-  } catch (error) {
-    console.error("UPDATE MODULE ERROR:", error);
-
-    if (req.file) {
-      try {
-        const filePath = path.join(uploadDir, req.file.filename);
-
-        if (fs.existsSync(filePath)) {
-          fs.unlinkSync(filePath);
-        }
-      } catch (fileError) {
-        console.error("FILE DELETE ERROR:", fileError);
-      }
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: error?.message || "Failed to update module",
+      data: null,
     });
   }
 };
