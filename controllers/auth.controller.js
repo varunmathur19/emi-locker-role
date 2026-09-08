@@ -1428,7 +1428,7 @@ export const deleteModule = async (req, res) => {
     const existing = await db("modules")
       .select(
         "id",
-        "name",
+        "name", 
         "slug",
         "icon",
         "sequence",
