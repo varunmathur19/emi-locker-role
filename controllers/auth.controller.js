@@ -1560,10 +1560,11 @@ export const deleteSubModule = async (req, res) => {
 
 
 //edit submoule
+
 export const updateSubModule = async (req, res) => {
     try {
         const { id } = req.params;
-        const { module_id, name, icon, status } = req.body;
+        const { status } = req.body;
 
         if (!id) {
             return res.status(400).json({
@@ -1572,10 +1573,10 @@ export const updateSubModule = async (req, res) => {
             });
         }
 
-        if (!module_id || !name) {
+        if (status === undefined || status === null) {
             return res.status(400).json({
                 success: false,
-                message: "Module ID and name are required"
+                message: "Status is required"
             });
         }
 
@@ -1590,39 +1591,10 @@ export const updateSubModule = async (req, res) => {
             });
         }
 
-        const parentModule = await db("modules")
-            .select("id")
-            .where("id", module_id)
-            .first();
-
-        if (!parentModule) {
-            return res.status(404).json({
-                success: false,
-                message: "Parent module not found"
-            });
-        }
-
-        const existingSubModule = await db("sub_modules")
-            .select("id")
-            .where("module_id", module_id)
-            .where("name", name.trim())
-            .whereNot("id", id)
-            .first();
-
-        if (existingSubModule) {
-            return res.status(409).json({
-                success: false,
-                message: "Sub module already exists under this module"
-            });
-        }
-
         await db("sub_modules")
             .where("id", id)
             .update({
-                module_id: Number(module_id),
-                name: name.trim(),
-                icon: icon || null,
-                status: status ?? 1
+                status: Number(status)
             });
 
         const updatedSubModule = await db("sub_modules")
@@ -1631,11 +1603,11 @@ export const updateSubModule = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Sub module updated successfully",
+            message: "Sub module status updated successfully",
             data: updatedSubModule
         });
     } catch (error) {
-        console.error("UPDATE SUB MODULE ERROR:", error);
+        console.error("UPDATE SUB MODULE STATUS ERROR:", error);
 
         return res.status(500).json({
             success: false,
@@ -1643,6 +1615,7 @@ export const updateSubModule = async (req, res) => {
         });
     }
 };
+
 
 
 //role-permissions

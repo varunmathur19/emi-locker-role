@@ -14,9 +14,7 @@ import {
     updateModule,
     updateUserStatus,
     updateRolePermissions,
-    createSubModule,
     getAllSubModules,
-    deleteSubModule,
     updateSubModule
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
@@ -234,11 +232,8 @@ router.patch(
   updateUserStatus
 );
 
-router.post("/sub-modules", authMiddleware,createSubModule);
 
 router.get("/sub-modules", authMiddleware,getAllSubModules);
-
-router.delete("/sub-modules/:id", deleteSubModule);
 
 router.put("/sub-modules/:id", updateSubModule);
 
