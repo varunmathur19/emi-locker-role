@@ -15,6 +15,11 @@ import {
     deleteModule,
     updateModule,
     updateUserStatus,
+    updateRolePermissions,
+    createSubModule,
+    getAllSubModules,
+    deleteSubModule,
+    updateSubModule
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -244,5 +249,21 @@ router.patch(
   authMiddleware,
   updateUserStatus
 );
+
+router.post("/sub-modules", createSubModule);
+
+router.get("/sub-modules", getAllSubModules);
+
+router.delete("/sub-modules/:id", deleteSubModule);
+
+router.put("/sub-modules/:id", updateSubModule);
+
+
+
+
+router.post("/role-permissions/:userId", updateRolePermissions);
+
+
+
 
 export default router;

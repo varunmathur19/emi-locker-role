@@ -1418,9 +1418,6 @@ export const updateModule = async (req, res) => {
 };
 
 
-
-
-
 export const deleteModule = async (req, res) => {
   try {
     const { id } = req.params;
@@ -1527,4 +1524,305 @@ export const updateUserStatus = async (req, res) => {
       error: error.message,
     });
   }
+};
+
+
+//add submodule
+export const createSubModule = async (req, res) => {
+    try {
+        const { module_id, name, icon, status } = req.body;
+
+        if (!module_id || !name) {
+            return res.status(400).json({
+                success: false,
+                message: "Module ID and name are required"
+            });
+        }
+
+        const parentModule = await db("modules")
+            .select("id")
+            .where("id", module_id)
+            .first();
+
+        if (!parentModule) {
+            return res.status(404).json({
+                success: false,
+                message: "Parent module not found"
+            });
+        }
+
+        const existingSubModule = await db("sub_modules")
+            .select("id")
+            .where("module_id", module_id)
+            .where("name", name)
+            .first();
+
+        if (existingSubModule) {
+            return res.status(409).json({
+                success: false,
+                message: "Sub module already exists under this module"
+            });
+        }
+
+        const [id] = await db("sub_modules").insert({
+            module_id: Number(module_id),
+            name: name.trim(),
+            icon: icon || null,
+            status: status ?? 1
+        });
+
+        const subModule = await db("sub_modules")
+            .where("id", id)
+            .first();
+
+        return res.status(201).json({
+            success: true,
+            message: "Sub module created successfully",
+            data: subModule
+        });
+    } catch (error) {
+        console.error("CREATE SUB MODULE ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+// get submodule
+export const getAllSubModules = async (req, res) => {
+    try {
+        const subModules = await db("sub_modules as sm")
+            .leftJoin("modules as m", "sm.module_id", "m.id")
+            .select(
+                "sm.id",
+                "sm.module_id",
+                "m.name as module_name",
+                "sm.name",
+                "sm.icon",
+                "sm.status",
+                "sm.created_at",
+                "sm.updated_at"
+            )
+            .orderBy("sm.module_id", "asc")
+            .orderBy("sm.id", "asc");
+
+        return res.status(200).json({
+            success: true,
+            data: subModules
+        });
+    } catch (error) {
+        console.error("GET ALL SUB MODULES ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+//delete submodule
+export const deleteSubModule = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Sub module ID is required"
+            });
+        }
+
+        const subModule = await db("sub_modules")
+            .where("id", id)
+            .first();
+
+        if (!subModule) {
+            return res.status(404).json({
+                success: false,
+                message: "Sub module not found"
+            });
+        }
+
+        await db("sub_modules")
+            .where("id", id)
+            .del();
+
+        return res.status(200).json({
+            success: true,
+            message: "Sub module deleted successfully",
+            data: subModule
+        });
+    } catch (error) {
+        console.error("DELETE SUB MODULE ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+//edit submoule
+export const updateSubModule = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { module_id, name, icon, status } = req.body;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Sub module ID is required"
+            });
+        }
+
+        if (!module_id || !name) {
+            return res.status(400).json({
+                success: false,
+                message: "Module ID and name are required"
+            });
+        }
+
+        const subModule = await db("sub_modules")
+            .where("id", id)
+            .first();
+
+        if (!subModule) {
+            return res.status(404).json({
+                success: false,
+                message: "Sub module not found"
+            });
+        }
+
+        const parentModule = await db("modules")
+            .select("id")
+            .where("id", module_id)
+            .first();
+
+        if (!parentModule) {
+            return res.status(404).json({
+                success: false,
+                message: "Parent module not found"
+            });
+        }
+
+        const existingSubModule = await db("sub_modules")
+            .select("id")
+            .where("module_id", module_id)
+            .where("name", name.trim())
+            .whereNot("id", id)
+            .first();
+
+        if (existingSubModule) {
+            return res.status(409).json({
+                success: false,
+                message: "Sub module already exists under this module"
+            });
+        }
+
+        await db("sub_modules")
+            .where("id", id)
+            .update({
+                module_id: Number(module_id),
+                name: name.trim(),
+                icon: icon || null,
+                status: status ?? 1
+            });
+
+        const updatedSubModule = await db("sub_modules")
+            .where("id", id)
+            .first();
+
+        return res.status(200).json({
+            success: true,
+            message: "Sub module updated successfully",
+            data: updatedSubModule
+        });
+    } catch (error) {
+        console.error("UPDATE SUB MODULE ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+//role-permissions
+export const updateRolePermissions = async (req, res) => {
+    try {
+        const { userId } = req.params;
+        const { permissions } = req.body;
+
+        if (!userId) {
+            return res.status(400).json({
+                success: false,
+                message: "User ID is required"
+            });
+        }
+
+        if (!Array.isArray(permissions)) {
+            return res.status(400).json({
+                success: false,
+                message: "Permissions must be an array"
+            });
+        }
+
+        const user = await db("users")
+            .select("id", "role_id")
+            .where("id", userId)
+            .first();
+
+        if (!user) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found"
+            });
+        }
+
+        const formattedPermissions = permissions.map((permission) => ({
+            module: String(permission?.module || "").trim().toLowerCase(),
+            view: Number(permission?.view) === 1 ? 1 : 0,
+            create: Number(permission?.create) === 1 ? 1 : 0,
+            edit: Number(permission?.edit) === 1 ? 1 : 0,
+            delete: Number(permission?.delete) === 1 ? 1 : 0
+        }));
+
+        const invalidModule = formattedPermissions.some(
+            (permission) => !permission.module
+        );
+
+        if (invalidModule) {
+            return res.status(400).json({
+                success: false,
+                message: "Module name is required"
+            });
+        }
+
+        await db("users")
+            .where("id", userId)
+            .update({
+                role_permission: JSON.stringify(formattedPermissions)
+            });
+
+        return res.status(200).json({
+            success: true,
+            message: "Role permissions updated successfully",
+            data: {
+                user_id: Number(userId),
+                role_id: user.role_id,
+                role_permission: formattedPermissions
+            }
+        });
+    } catch (error) {
+        console.error("UPDATE ROLE PERMISSIONS ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error"
+        });
+    }
 };
