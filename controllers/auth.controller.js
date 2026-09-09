@@ -1248,61 +1248,6 @@ export const loginAsUser = async (req, res) => {
 };
 
 
-export const addModule = async (req, res) => {
-  try {
-    const {
-      name,
-      slug,
-      icon,
-      sequence,
-      status
-    } = req.body;
-
-    if (!name || !slug) {
-      return res.status(400).json({
-        success: false,
-        message: "Name and slug are required"
-      });
-    }
-
-    const existingModule = await db("modules")
-      .where("slug", slug)
-      .first();
-
-    if (existingModule) {
-      return res.status(409).json({
-        success: false,
-        message: "Module with this slug already exists"
-      });
-    }
-
-    const [moduleId] = await db("modules").insert({
-      name,
-      slug,
-      icon: icon || null,
-      sequence: sequence ?? 0,
-      status: status ?? 1
-    });
-
-    const module = await db("modules")
-      .where("id", moduleId)
-      .first();
-
-    return res.status(201).json({
-      success: true,
-      message: "Module created successfully",
-      data: module
-    });
-  } catch (error) {
-    console.error("Create Module Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error"
-    });
-  }
-};
-
 
 
 
@@ -1351,15 +1296,23 @@ export const getModules = async (req, res) => {
     }
 };
 
+
 export const updateModule = async (req, res) => {
     try {
         const { id } = req.params;
-        const { name, slug, icon, sequence, status } = req.body;
+        const { status } = req.body;
 
-        if (!name || !slug) {
+        if (!id) {
             return res.status(400).json({
                 success: false,
-                message: "Name and slug are required"
+                message: "Module ID is required"
+            });
+        }
+
+        if (status === undefined || status === null) {
+            return res.status(400).json({
+                success: false,
+                message: "Status is required"
             });
         }
 
@@ -1375,27 +1328,10 @@ export const updateModule = async (req, res) => {
             });
         }
 
-        const duplicate = await db("modules")
-            .select("id")
-            .where("slug", slug)
-            .whereNot("id", id)
-            .first();
-
-        if (duplicate) {
-            return res.status(409).json({
-                success: false,
-                message: "Module with this slug already exists"
-            });
-        }
-
         await db("modules")
             .where("id", id)
             .update({
-                name,
-                slug,
-                icon: icon || null,
-                sequence: sequence ?? 0,
-                status: status ?? 1
+                status: Number(status)
             });
 
         const updatedModule = await db("modules")
@@ -1404,11 +1340,11 @@ export const updateModule = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: "Module updated successfully",
+            message: "Module status updated successfully",
             data: updatedModule
         });
     } catch (error) {
-        console.error("Update Module Error:", error);
+        console.error("UPDATE MODULE STATUS ERROR:", error);
 
         return res.status(500).json({
             success: false,
@@ -1418,51 +1354,9 @@ export const updateModule = async (req, res) => {
 };
 
 
-export const deleteModule = async (req, res) => {
-  try {
-    const { id } = req.params;
 
-    const existing = await db("modules")
-      .select(
-        "id",
-        "name", 
-        "slug",
-        "icon",
-        "sequence",
-        "status",
-        "created_at",
-        "updated_at"
-      )
-      .where("id", id)
-      .first();
 
-    if (!existing) {
-      return res.status(404).json({
-        success: false,
-        message: "Module not found",
-        data: null,
-      });
-    }
 
-    await db("modules")
-      .where("id", id)
-      .del();
-
-    return res.status(200).json({
-      success: true,
-      message: "Module deleted successfully",
-      data: existing,
-    });
-  } catch (error) {
-    console.error("Delete Module Error:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Internal server error",
-      data: null,
-    });
-  }
-};
 
 // UPADTE USER ACTIVE / INACTIVE
 export const updateUserStatus = async (req, res) => {

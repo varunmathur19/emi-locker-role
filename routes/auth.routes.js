@@ -10,9 +10,7 @@ import {
     updatedstaffdata,
     getStaffDataById,
     loginAsUser,
-    addModule,
     getModules,
-    deleteModule,
     updateModule,
     updateUserStatus,
     updateRolePermissions,
@@ -213,13 +211,8 @@ router.get(
 //internal login
 router.post("/login-as-user", authMiddleware, loginAsUser);
 
-//Add module
-router.post(
-  "/add-module",
-  authMiddleware,
-  uploadModuleIcon,
-  addModule
-);
+
+
 
 router.get(
   "/modules",
@@ -227,15 +220,6 @@ router.get(
   getModules
 );
 
-// router.delete(
-//   "/delete-module",
-//   deleteModule
-// );
-router.delete(
-  "/delete-module/:id",
-  authMiddleware,
-  deleteModule
-);
 
 router.put(
   "/update-module/:id",
@@ -250,9 +234,9 @@ router.patch(
   updateUserStatus
 );
 
-router.post("/sub-modules", createSubModule);
+router.post("/sub-modules", authMiddleware,createSubModule);
 
-router.get("/sub-modules", getAllSubModules);
+router.get("/sub-modules", authMiddleware,getAllSubModules);
 
 router.delete("/sub-modules/:id", deleteSubModule);
 
