@@ -42,65 +42,96 @@ export const createuserrole = async (req, res) => {
             lite,
             google_tv,
             supreme_lock,
-            role_permission
+            role_permission,
         } = req.body;
 
-        if (!name || !email || !phone || !password || !confirm_password) {
+        // --------------------------------------------------
+        // REQUIRED FIELDS
+        // --------------------------------------------------
+        if (
+            !name ||
+            !email ||
+            !phone ||
+            !password ||
+            !confirm_password
+        ) {
             return res.status(400).json({
                 success: false,
-                message: "Name, email, phone, password and confirm password are required"
+                message:
+                    "Name, email, phone, password and confirm password are required",
             });
         }
 
+        // --------------------------------------------------
+        // PASSWORD MATCH
+        // --------------------------------------------------
         if (password !== confirm_password) {
             return res.status(400).json({
                 success: false,
-                message: "Password and confirm password do not match"
+                message: "Password and confirm password do not match",
             });
         }
 
-        const phoneValue = String(phone).trim().replace(/\s+/g, "");
+        // --------------------------------------------------
+        // NORMALIZE PHONE
+        // --------------------------------------------------
+        const phoneValue = String(phone)
+            .trim()
+            .replace(/\s+/g, "");
 
         let normalizedPhone = phoneValue;
 
         if (phoneValue.startsWith("+91")) {
             normalizedPhone = phoneValue.slice(3);
-        } else if (phoneValue.startsWith("91") && phoneValue.length === 12) {
+        } else if (
+            phoneValue.startsWith("91") &&
+            phoneValue.length === 12
+        ) {
             normalizedPhone = phoneValue.slice(2);
         }
 
         if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid phone number"
+                message: "Invalid phone number",
             });
         }
 
+        // --------------------------------------------------
+        // ROLE VALIDATION
+        // --------------------------------------------------
         const requestedRoleId = Number(role_id);
 
         if (Number.isNaN(requestedRoleId)) {
             return res.status(400).json({
                 success: false,
-                message: "Valid role_id is required"
+                message: "Valid role_id is required",
             });
         }
 
+        // Master Admin cannot be created
         if (requestedRoleId === 0) {
             return res.status(403).json({
                 success: false,
-                message: "Master Admin cannot be created"
+                message: "Master Admin cannot be created",
             });
         }
 
+        // --------------------------------------------------
+        // AUTH USER
+        // --------------------------------------------------
         if (!req.user || !req.user.id) {
             return res.status(401).json({
                 success: false,
-                message: "Unauthorized"
+                message: "Unauthorized",
             });
         }
 
         const created_by = Number(req.user.id);
 
+        // --------------------------------------------------
+        // GET CREATOR
+        // --------------------------------------------------
         const creator = await db("users")
             .where("id", created_by)
             .first();
@@ -108,19 +139,25 @@ export const createuserrole = async (req, res) => {
         if (!creator) {
             return res.status(404).json({
                 success: false,
-                message: "Creator not found"
+                message: "Creator not found",
             });
         }
 
         const creatorRole = Number(creator.role_id);
 
+        // --------------------------------------------------
+        // CREATOR ROLE PERMISSION
+        // --------------------------------------------------
         if (requestedRoleId <= creatorRole) {
             return res.status(403).json({
                 success: false,
-                message: "You are not allowed to create this role"
+                message: "You are not allowed to create this role",
             });
         }
 
+        // --------------------------------------------------
+        // PARENT ROLE CONFIGURATION
+        // --------------------------------------------------
         const parentRoles = {
             2: [1],
             3: [2],
@@ -129,31 +166,67 @@ export const createuserrole = async (req, res) => {
             6: [2, 3, 4, 5],
             7: [2, 3, 4, 5, 6],
             8: [2, 3, 4, 5, 6, 7],
-            9: [1]
+            9: [1],
         };
 
+        // --------------------------------------------------
+        // STAFF ONLY ADMIN CAN CREATE
+        // --------------------------------------------------
         if (requestedRoleId === 9 && creatorRole !== 1) {
             return res.status(403).json({
                 success: false,
-                message: "Only Admin can create Staff"
+                message: "Only Admin can create Staff",
             });
         }
 
+        // --------------------------------------------------
+        // EMPLOYEE & STAFF CANNOT CREATE USERS
+        // --------------------------------------------------
         if (creatorRole === 8 || creatorRole === 9) {
             return res.status(403).json({
                 success: false,
-                message: "Employee and Staff cannot create users"
+                message: "Employee and Staff cannot create users",
             });
         }
 
-        const allowedParentRoles = parentRoles[requestedRoleId] || [];
+        // --------------------------------------------------
+        // ALLOWED PARENT ROLES
+        // --------------------------------------------------
+        const allowedParentRoles =
+            parentRoles[requestedRoleId] || [];
 
-        const finalParentId =
+        // --------------------------------------------------
+        // OPTIONAL PARENT ID
+        // --------------------------------------------------
+        let finalParentId = null;
+
+        if (
             parent_id !== undefined &&
             parent_id !== null &&
-            parent_id !== ""
-                ? Number(parent_id)
-                : null;
+            String(parent_id).trim() !== ""
+        ) {
+            const parsedParentId = Number(parent_id);
+
+            if (
+                !Number.isNaN(parsedParentId) &&
+                parsedParentId > 0
+            ) {
+                finalParentId = parsedParentId;
+            }
+        }
+
+        // --------------------------------------------------
+        // OPTIONAL PARENT VALIDATION
+        // --------------------------------------------------
+        // Parent select nahi kiya -> parent_id = null
+        // -> user normally create hoga.
+        //
+        // Parent select kiya:
+        // - Parent valid hai -> save hoga
+        // - Parent nahi mila -> parent null
+        // - Parent role invalid hai -> parent null
+        //
+        // Isliye parent ki wajah se user creation block nahi hogi.
 
         if (finalParentId !== null) {
             const parentUser = await db("users")
@@ -161,20 +234,20 @@ export const createuserrole = async (req, res) => {
                 .first();
 
             if (!parentUser) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Parent user not found"
-                });
-            }
-
-            if (!allowedParentRoles.includes(Number(parentUser.role_id))) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid parent role"
-                });
+                finalParentId = null;
+            } else if (
+                allowedParentRoles.length > 0 &&
+                !allowedParentRoles.includes(
+                    Number(parentUser.role_id)
+                )
+            ) {
+                finalParentId = null;
             }
         }
 
+        // --------------------------------------------------
+        // EMAIL CHECK
+        // --------------------------------------------------
         const existingEmail = await db("users")
             .where("email", email)
             .first();
@@ -182,10 +255,13 @@ export const createuserrole = async (req, res) => {
         if (existingEmail) {
             return res.status(409).json({
                 success: false,
-                message: "Email already exists"
+                message: "Email already exists",
             });
         }
 
+        // --------------------------------------------------
+        // PHONE CHECK
+        // --------------------------------------------------
         const existingPhone = await db("users")
             .where("phone", normalizedPhone)
             .first();
@@ -193,10 +269,13 @@ export const createuserrole = async (req, res) => {
         if (existingPhone) {
             return res.status(409).json({
                 success: false,
-                message: "Phone number already exists"
+                message: "Phone number already exists",
             });
         }
 
+        // --------------------------------------------------
+        // RETAILER DEVICE VALIDATION
+        // --------------------------------------------------
         if (requestedRoleId === 6) {
             const deviceFields = [
                 new_device,
@@ -205,21 +284,25 @@ export const createuserrole = async (req, res) => {
                 pro_star,
                 lite,
                 google_tv,
-                supreme_lock
+                supreme_lock,
             ];
 
             const hasDevicePermission = deviceFields.some(
-                value => Number(value) === 1
+                (value) => Number(value) === 1
             );
 
             if (!hasDevicePermission) {
                 return res.status(400).json({
                     success: false,
-                    message: "At least one device permission is required for Retailer"
+                    message:
+                        "At least one device permission is required for Retailer",
                 });
             }
         }
 
+        // --------------------------------------------------
+        // ROLE PERMISSION
+        // --------------------------------------------------
         let parsedRolePermission = [];
 
         if (
@@ -235,36 +318,44 @@ export const createuserrole = async (req, res) => {
             } catch (error) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid role_permission format"
+                    message: "Invalid role_permission format",
                 });
             }
 
             if (!Array.isArray(parsedRolePermission)) {
-                parsedRolePermission = [parsedRolePermission];
+                parsedRolePermission = [
+                    parsedRolePermission,
+                ];
             }
 
             const moduleMap = new Map();
 
-            parsedRolePermission.forEach(item => {
+            parsedRolePermission.forEach((item) => {
                 if (!item || !item.module_id) {
                     return;
                 }
 
                 const moduleId = Number(item.module_id);
 
+                if (Number.isNaN(moduleId)) {
+                    return;
+                }
+
                 if (!moduleMap.has(moduleId)) {
                     moduleMap.set(moduleId, {
                         module_id: moduleId,
+
                         sub_modules: {
                             manage: 0,
                             edit: 0,
                             view: 0,
                             add: 0,
-                            delete: 0
+                            delete: 0,
                         },
+
                         given_by: created_by,
                         given_by_role: creatorRole,
-                        given_at: new Date().toISOString()
+                        given_at: new Date().toISOString(),
                     });
                 }
 
@@ -293,60 +384,122 @@ export const createuserrole = async (req, res) => {
                 }
             });
 
-            parsedRolePermission = Array.from(moduleMap.values());
+            parsedRolePermission =
+                Array.from(moduleMap.values());
         }
 
-        const hashedPassword = await bcrypt.hash(password, 10);
+        // --------------------------------------------------
+        // HASH PASSWORD
+        // --------------------------------------------------
+        const hashedPassword = await bcrypt.hash(
+            password,
+            10
+        );
 
+        // --------------------------------------------------
+        // USER DATA
+        // --------------------------------------------------
         const userData = {
-            organization_name: organization_name || null,
+            organization_name:
+                organization_name || null,
+
             role_id: requestedRoleId,
+
+            // Parent optional hai
             parent_id: finalParentId,
+
             name,
+
             email,
+
             phone: normalizedPhone,
+
             password: hashedPassword,
-            company_address: company_address || null,
+
+            company_address:
+                company_address || null,
+
             country: country || null,
+
             state: state || null,
+
             city: city || null,
+
             new_device: Number(new_device) || 0,
+
             old_device: Number(old_device) || 0,
-            supreme_device: Number(supreme_device) || 0,
+
+            supreme_device:
+                Number(supreme_device) || 0,
+
             pro_star: Number(pro_star) || 0,
+
             lite: Number(lite) || 0,
+
             google_tv: Number(google_tv) || 0,
-            supreme_lock: Number(supreme_lock) || 0,
+
+            supreme_lock:
+                Number(supreme_lock) || 0,
+
             created_by,
-            role_permission: parsedRolePermission
+
+            role_permission:
+                parsedRolePermission,
         };
 
-        const userId = await createUserModel(userData);
+        // --------------------------------------------------
+        // CREATE USER
+        // --------------------------------------------------
+        const userId = await createUserModel(
+            userData
+        );
 
+        // --------------------------------------------------
+        // SUCCESS RESPONSE
+        // --------------------------------------------------
         return res.status(201).json({
             success: true,
+
             message: "User created successfully",
+
             data: {
                 id: userId,
-                organization_name: organization_name || null,
+
+                organization_name:
+                    organization_name || null,
+
                 role_id: requestedRoleId,
+
                 parent_id: finalParentId,
+
                 name,
+
                 email,
+
                 phone: normalizedPhone,
-                company_address: company_address || null,
+
+                company_address:
+                    company_address || null,
+
                 country: country || null,
+
                 state: state || null,
+
                 city: city || null,
-                role_permission: parsedRolePermission
-            }
+
+                role_permission:
+                    parsedRolePermission,
+            },
         });
     } catch (error) {
-        console.error("CREATE USER ROLE ERROR:", error);
+        console.error(
+            "CREATE USER ROLE ERROR:",
+            error
+        );
 
         return res.status(500).json({
             success: false,
-            message: "Internal server error"
+            message: "Internal server error",
         });
     }
 };
