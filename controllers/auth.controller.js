@@ -784,9 +784,11 @@ const getRoleName = (roleId) => {
 export const updatedstaffdata = async (req, res) => {
   try {
     const { id } = req.params;
+
     const {
       organization_name,
       role_id,
+      role_permission,
       name,
       email,
       phone,
@@ -822,8 +824,14 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
+    // Get existing user
     const existingUser = await db("users")
-      .select("id", "role_id", "parent_id")
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "role_permission"
+      )
       .where("id", userId)
       .first();
 
@@ -834,6 +842,7 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
+    // Current role
     const currentRoleId = Number(
       role_id ?? existingUser.role_id
     );
@@ -849,6 +858,7 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
+    // Parent handling
     let normalizedParentId = existingUser.parent_id ?? null;
 
     if (parent_id !== undefined) {
@@ -905,9 +915,43 @@ export const updatedstaffdata = async (req, res) => {
     }
 
     return await db.transaction(async (trx) => {
+      // -----------------------------------------
+      // ROLE PERMISSION
+      // -----------------------------------------
+      let normalizedRolePermission =
+        existingUser.role_permission ?? null;
+
+      if (role_permission !== undefined) {
+        if (
+          role_permission === null ||
+          role_permission === ""
+        ) {
+          normalizedRolePermission = null;
+        } else if (typeof role_permission === "string") {
+          // Already JSON string
+          try {
+            JSON.parse(role_permission);
+            normalizedRolePermission = role_permission;
+          } catch (error) {
+            return res.status(400).json({
+              success: false,
+              message: "Invalid role_permission JSON",
+            });
+          }
+        } else {
+          // Array / Object -> JSON string
+          normalizedRolePermission =
+            JSON.stringify(role_permission);
+        }
+      }
+
       const updateData = {
         organization_name: organization_name || "",
         role_id: currentRoleId,
+
+        // ✅ FIXED ROLE PERMISSION
+        role_permission: normalizedRolePermission,
+
         name: name || "",
         email: email || "",
         phone: phone || "",
@@ -916,6 +960,7 @@ export const updatedstaffdata = async (req, res) => {
         state: state || "",
         city: city || "",
         parent_id: normalizedParentId,
+
         new_device: Number(new_device ?? 0),
         old_device: Number(old_device ?? 0),
         supreme_device: Number(supreme_device ?? 0),
@@ -925,6 +970,7 @@ export const updatedstaffdata = async (req, res) => {
         supreme_lock: Number(supreme_lock ?? 0),
       };
 
+      // Password only update if provided
       if (
         password !== undefined &&
         password !== null &&
@@ -933,15 +979,18 @@ export const updatedstaffdata = async (req, res) => {
         updateData.password = password;
       }
 
+      // Update user
       await trx("users")
         .where("id", userId)
         .update(updateData);
 
+      // Get updated user
       const updatedUser = await trx("users")
         .select(
           "id",
           "organization_name",
           "role_id",
+          "role_permission",
           "name",
           "email",
           "phone",
@@ -963,10 +1012,32 @@ export const updatedstaffdata = async (req, res) => {
         .where("id", userId)
         .first();
 
+      // Convert role_permission back to array/object
+      let parsedRolePermission = [];
+
+      if (updatedUser?.role_permission) {
+        try {
+          parsedRolePermission =
+            typeof updatedUser.role_permission === "string"
+              ? JSON.parse(updatedUser.role_permission)
+              : updatedUser.role_permission;
+        } catch (error) {
+          console.error(
+            "ROLE PERMISSION PARSE ERROR:",
+            error
+          );
+
+          parsedRolePermission = [];
+        }
+      }
+
       return res.status(200).json({
         success: true,
         message: "Staff data updated successfully",
-        data: updatedUser,
+        data: {
+          ...updatedUser,
+          role_permission: parsedRolePermission,
+        },
       });
     });
   } catch (error) {
@@ -1006,6 +1077,7 @@ export const getStaffDataById = async (req, res) => {
         "id",
         "organization_name",
         "role_id",
+        "role_permission", // ✅ ADD THIS
         "name",
         "email",
         "phone",

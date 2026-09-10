@@ -203,6 +203,7 @@ router.patch("/update-staff-data/:id",updatedstaffdata)
 //get the data for updated user-staff
 router.get(
   "/staff-data/:id",
+  authMiddleware,
   getStaffDataById
 );
 
