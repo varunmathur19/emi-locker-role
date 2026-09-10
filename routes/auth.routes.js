@@ -10,11 +10,12 @@ import {
     updatedstaffdata,
     getStaffDataById,
     loginAsUser,
-    addModule,
     getModules,
-    deleteModule,
     updateModule,
     updateUserStatus,
+    updateRolePermissions,
+    getAllSubModules,
+    updateSubModule
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -202,19 +203,15 @@ router.patch("/update-staff-data/:id",updatedstaffdata)
 //get the data for updated user-staff
 router.get(
   "/staff-data/:id",
+  authMiddleware,
   getStaffDataById
 );
 
 //internal login
 router.post("/login-as-user", authMiddleware, loginAsUser);
 
-//Add module
-router.post(
-  "/add-module",
-  authMiddleware,
-  uploadModuleIcon,
-  addModule
-);
+
+
 
 router.get(
   "/modules",
@@ -222,13 +219,9 @@ router.get(
   getModules
 );
 
-router.delete(
-  "/delete-module",
-  deleteModule
-);
 
 router.put(
-  "/update-module",
+  "/update-module/:id",
   authMiddleware,
   uploadModuleNewIcon,
   updateModule
@@ -239,5 +232,17 @@ router.patch(
   authMiddleware,
   updateUserStatus
 );
+
+
+router.get("/sub-modules", authMiddleware,getAllSubModules);
+
+router.put("/sub-modules/:id", authMiddleware, updateSubModule);
+
+
+
+router.post("/role-permissions/:userId",authMiddleware, updateRolePermissions);
+
+
+
 
 export default router;
