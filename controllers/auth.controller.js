@@ -351,12 +351,6 @@ export const createuserrole = async (req, res) => {
     }
 };
 
-
-
-
-
-
-
 // Login staff
 export const loginUser = async (req, res) => {
   try {
@@ -461,9 +455,15 @@ export const getUsers = async (req, res) => {
     const limit = Math.max(Number(req.query.limit) || 10, 1);
     const offset = (page - 1) * limit;
 
+    // -----------------------------
+    // ROLE FILTER
+    // -----------------------------
     let role_id = null;
 
-    if (req.query.role_id !== undefined && req.query.role_id !== "") {
+    if (
+      req.query.role_id !== undefined &&
+      String(req.query.role_id).trim() !== ""
+    ) {
       role_id = Number(req.query.role_id);
 
       if (!Number.isInteger(role_id)) {
@@ -474,12 +474,18 @@ export const getUsers = async (req, res) => {
       }
     }
 
+    // -----------------------------
+    // SEARCH
+    // -----------------------------
     const search =
       req.query.search !== undefined &&
       String(req.query.search).trim() !== ""
         ? String(req.query.search).trim()
         : null;
 
+    // -----------------------------
+    // LOCATION FILTERS
+    // -----------------------------
     const country =
       req.query.country !== undefined &&
       String(req.query.country).trim() !== ""
@@ -498,17 +504,25 @@ export const getUsers = async (req, res) => {
         ? String(req.query.city).trim()
         : null;
 
+    // -----------------------------
+    // STATUS FILTER
+    // -----------------------------
     let status = null;
 
     if (
       req.query.status !== undefined &&
       String(req.query.status).trim() !== ""
     ) {
-      const statusValue = String(req.query.status).trim().toLowerCase();
+      const statusValue = String(req.query.status)
+        .trim()
+        .toLowerCase();
 
       if (statusValue === "active" || statusValue === "1") {
         status = 1;
-      } else if (statusValue === "inactive" || statusValue === "0") {
+      } else if (
+        statusValue === "inactive" ||
+        statusValue === "0"
+      ) {
         status = 0;
       } else {
         return res.status(400).json({
@@ -518,10 +532,16 @@ export const getUsers = async (req, res) => {
       }
     }
 
+    // -----------------------------
+    // LOGGED-IN USER
+    // -----------------------------
     const loggedInUserId = Number(req.user?.id);
     const loggedInRoleId = Number(req.user?.role_id);
 
-    if (!Number.isInteger(loggedInUserId) || loggedInUserId <= 0) {
+    if (
+      !Number.isInteger(loggedInUserId) ||
+      loggedInUserId <= 0
+    ) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized user",
@@ -535,6 +555,9 @@ export const getUsers = async (req, res) => {
       });
     }
 
+    // -----------------------------
+    // GET USERS
+    // -----------------------------
     const result = await getAllUsers(
       limit,
       offset,
@@ -548,30 +571,85 @@ export const getUsers = async (req, res) => {
       status
     );
 
-    const users = result.users.map(user => {
-      let role_permission = [];
+    // -----------------------------
+    // GET PARENT DATA FOR CNF
+    // -----------------------------
+    const users = await Promise.all(
+      result.users.map(async (user) => {
+        let role_permission = [];
 
-      if (user.role_permission) {
-        try {
-          role_permission =
-            typeof user.role_permission === "string"
-              ? JSON.parse(user.role_permission)
-              : user.role_permission;
+        // -----------------------------
+        // ROLE PERMISSION
+        // -----------------------------
+        if (user.role_permission) {
+          try {
+            role_permission =
+              typeof user.role_permission === "string"
+                ? JSON.parse(user.role_permission)
+                : user.role_permission;
 
-          if (!Array.isArray(role_permission)) {
+            if (!Array.isArray(role_permission)) {
+              role_permission = [];
+            }
+          } catch (error) {
             role_permission = [];
           }
-        } catch (error) {
-          role_permission = [];
         }
-      }
 
-      return {
-        ...user,
-        role_permission,
-      };
-    });
+        // -----------------------------
+        // DEFAULT USER DATA
+        // -----------------------------
+        let parent_name = user.parent_name || null;
+        let parent_organization_name =
+          user.parent_organization_name || null;
 
+        // -----------------------------
+        // CNF PARENT
+        // CNF ROLE = 2
+        // CNF PARENT = ADMIN
+        // -----------------------------
+        if (
+          Number(user.role_id) === 2 &&
+          user.parent_id
+        ) {
+          try {
+            const parentUser = await db("users")
+              .select(
+                "name",
+                "organization_name"
+              )
+              .where("id", Number(user.parent_id))
+              .first();
+
+            if (parentUser) {
+              parent_name = parentUser.name || null;
+
+              parent_organization_name =
+                parentUser.organization_name || null;
+            }
+          } catch (parentError) {
+            console.error(
+              "CNF PARENT FETCH ERROR:",
+              parentError
+            );
+          }
+        }
+
+        // -----------------------------
+        // FINAL USER
+        // -----------------------------
+        return {
+          ...user,
+          parent_name,
+          parent_organization_name,
+          role_permission,
+        };
+      })
+    );
+
+    // -----------------------------
+    // RESPONSE
+    // -----------------------------
     return res.status(200).json({
       success: true,
       pagination: {
