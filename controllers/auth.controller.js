@@ -1273,9 +1273,6 @@ export const loginAsUser = async (req, res) => {
 };
 
 
-
-
-
 export const getModules = async (req, res) => {
     try {
         const { search, status } = req.query;
@@ -1325,19 +1322,12 @@ export const getModules = async (req, res) => {
 export const updateModule = async (req, res) => {
     try {
         const { id } = req.params;
-        const { status } = req.body;
+        const { status, action } = req.body;
 
         if (!id) {
             return res.status(400).json({
                 success: false,
                 message: "Module ID is required"
-            });
-        }
-
-        if (status === undefined || status === null) {
-            return res.status(400).json({
-                success: false,
-                message: "Status is required"
             });
         }
 
@@ -1350,6 +1340,26 @@ export const updateModule = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: "Module not found"
+            });
+        }
+
+        // DELETE MODULE
+        if (action === "delete") {
+            await db("modules")
+                .where("id", id)
+                .del();
+
+            return res.status(200).json({
+                success: true,
+                message: "Module deleted successfully"
+            });
+        }
+
+        // UPDATE STATUS
+        if (status === undefined || status === null) {
+            return res.status(400).json({
+                success: false,
+                message: "Status is required"
             });
         }
 
@@ -1368,8 +1378,9 @@ export const updateModule = async (req, res) => {
             message: "Module status updated successfully",
             data: updatedModule
         });
+
     } catch (error) {
-        console.error("UPDATE MODULE STATUS ERROR:", error);
+        console.error("UPDATE MODULE ERROR:", error);
 
         return res.status(500).json({
             success: false,
@@ -1377,11 +1388,6 @@ export const updateModule = async (req, res) => {
         });
     }
 };
-
-
-
-
-
 
 // UPADTE USER ACTIVE / INACTIVE
 export const updateUserStatus = async (req, res) => {
@@ -1444,7 +1450,6 @@ export const updateUserStatus = async (req, res) => {
     });
   }
 };
-
 
 //add submodule
 export const createSubModule = async (req, res) => {
@@ -1579,9 +1584,7 @@ export const deleteSubModule = async (req, res) => {
     }
 };
 
-
 //edit submoule
-
 export const updateSubModule = async (req, res) => {
     try {
         const { id } = req.params;
@@ -1714,3 +1717,4 @@ export const updateRolePermissions = async (req, res) => {
         });
     }
 };
+

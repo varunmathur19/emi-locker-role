@@ -236,12 +236,11 @@ router.patch(
 
 router.get("/sub-modules", authMiddleware,getAllSubModules);
 
-router.put("/sub-modules/:id", updateSubModule);
+router.put("/sub-modules/:id", authMiddleware, updateSubModule);
 
 
 
-
-router.post("/role-permissions/:userId", updateRolePermissions);
+router.post("/role-permissions/:userId",authMiddleware, updateRolePermissions);
 
 
 
