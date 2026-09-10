@@ -1,4 +1,5 @@
 import db from "../config/db.js";
+
 // import pool from "../config/db.js";
 
 export const findUserByEmail = async (email) => {
@@ -18,55 +19,60 @@ export const findUserById = async (id) => {
 
 //add-staff
 export const createUser = async (data) => {
-  const {
-    organization_name,
-    name,
-    email,
-    phone,
-    password,
-    company_address,
-    country,
-    state,
-    city,
-    role_id,
-    created_by,
-    parent_id = null,
-    new_device = 0,
-    old_device = 0,
-    supreme_device = 0,
-    pro_star = 0,
-    lite = 0,
-    google_tv = 0,
-    supreme_lock = 0,
-  } = data;
+    const {
+        organization_name,
+        name,
+        email,
+        phone,
+        password,
+        company_address,
+        country,
+        state,
+        city,
+        role_id,
+        created_by,
+        parent_id = null,
+        new_device = 0,
+        old_device = 0,
+        supreme_device = 0,
+        pro_star = 0,
+        lite = 0,
+        google_tv = 0,
+        supreme_lock = 0,
+        role_permission = []
+    } = data;
 
-  const [userId] = await db("users").insert({
-    organization_name,
-    name,
-    email,
-    phone,
-    password,
-    company_address,
-    country,
-    state,
-    city,
-    role_id: Number(role_id),
-    created_by: Number(created_by),
-    parent_id:
-      parent_id !== null && parent_id !== undefined
-        ? Number(parent_id)
-        : null,
-    new_device: Number(new_device ?? 0),
-    old_device: Number(old_device ?? 0),
-    supreme_device: Number(supreme_device ?? 0),
-    pro_star: Number(pro_star ?? 0),
-    lite: Number(lite ?? 0),
-    google_tv: Number(google_tv ?? 0),
-    supreme_lock: Number(supreme_lock ?? 0),
-  });
+    const [userId] = await db("users").insert({
+        organization_name,
+        name,
+        email,
+        phone,
+        password,
+        company_address,
+        country,
+        state,
+        city,
+        role_id: Number(role_id),
+        created_by: Number(created_by),
+        parent_id:
+            parent_id !== null && parent_id !== undefined
+                ? Number(parent_id)
+                : null,
+        new_device: Number(new_device ?? 0),
+        old_device: Number(old_device ?? 0),
+        supreme_device: Number(supreme_device ?? 0),
+        pro_star: Number(pro_star ?? 0),
+        lite: Number(lite ?? 0),
+        google_tv: Number(google_tv ?? 0),
+        supreme_lock: Number(supreme_lock ?? 0),
+        role_permission:
+            typeof role_permission === "string"
+                ? role_permission
+                : JSON.stringify(role_permission)
+    });
 
-  return userId;
-};
+    return userId;
+};  
 
 // Get All Users
 const roleNameCase = db.raw(`
@@ -99,6 +105,7 @@ const selectUserFields = [
   "u.created_by",
   "u.parent_id",
   "u.userStatus",
+  "u.role_permission",
   db.raw(`
     CASE
       WHEN u.role_id = 1 THEN creator.name
@@ -121,6 +128,7 @@ const selectUserFields = [
   "u.created_at",
   "u.updated_at",
 ];
+
 
 const applyFilters = (
   query,
@@ -307,7 +315,7 @@ export const getAllUsers = async (
       db.withRecursive(
         "user_chain",
         ["id", "parent_id", "created_by", "role_id"],
-        (query) => {
+        query => {
           query
             .select(
               "id",
@@ -317,7 +325,7 @@ export const getAllUsers = async (
             )
             .from("users")
             .where("id", loggedInUserId)
-            .unionAll((query) => {
+            .unionAll(query => {
               query
                 .select(
                   "child.id",

@@ -15,418 +15,347 @@ import fs from "fs";
 import path from "path";
 
 // ADD STAFF
+
+
+
+
+
 export const createuserrole = async (req, res) => {
-  try {
-    const {
-      organization_name,
-      role_id,
-      parent_id,
-      name,
-      email,
-      phone,
-      password,
-      confirm_password,
-      company_address,
-      country,
-      state,
-      city,
-      new_device,
-      old_device,
-      supreme_device,
-      pro_star,
-      lite,
-      google_tv,
-      supreme_lock,
-    } = req.body;
+    try {
+        const {
+            organization_name,
+            role_id,
+            parent_id,
+            name,
+            email,
+            phone,
+            password,
+            confirm_password,
+            company_address,
+            country,
+            state,
+            city,
+            new_device,
+            old_device,
+            supreme_device,
+            pro_star,
+            lite,
+            google_tv,
+            supreme_lock,
+            role_permission
+        } = req.body;
 
-    if (!name || !String(name).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Name is required",
-      });
-    }
-
-    if (!email || !String(email).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Email is required",
-      });
-    }
-
-    if (!phone || !String(phone).trim()) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number is required",
-      });
-    }
-
-    if (!password) {
-      return res.status(400).json({
-        success: false,
-        message: "Password is required",
-      });
-    }
-
-    if (!confirm_password) {
-      return res.status(400).json({
-        success: false,
-        message: "Confirm Password is required",
-      });
-    }
-
-    if (password !== confirm_password) {
-      return res.status(400).json({
-        success: false,
-        message: "Password and Confirm Password not match",
-      });
-    }
-
-    const cleanName = String(name).trim();
-    const cleanEmail = String(email).trim().toLowerCase();
-
-    let cleanPhone = String(phone)
-      .trim()
-      .replace(/[\s\-()]/g, "");
-
-    if (cleanPhone.startsWith("+91")) {
-      const indianNumber = cleanPhone.substring(3);
-
-      if (!/^[6-9]\d{9}$/.test(indianNumber)) {
-        return res.status(400).json({
-          success: false,
-          message:
-            "Invalid phone number. +91 ke baad 10 digit valid mobile number enter karein",
-        });
-      }
-
-      cleanPhone = `+91${indianNumber}`;
-    } else if (/^91[6-9]\d{9}$/.test(cleanPhone)) {
-      cleanPhone = `+91${cleanPhone.substring(2)}`;
-    } else if (/^[6-9]\d{9}$/.test(cleanPhone)) {
-      cleanPhone = `+91${cleanPhone}`;
-    } else {
-      return res.status(400).json({
-        success: false,
-        message:
-          "Invalid phone number. Valid 10 digit mobile number ya +91 ke saath number enter karein",
-      });
-    }
-
-    const role = Number(role_id);
-
-    if (!Number.isInteger(role) || !isValidRole(role)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role_id",
-      });
-    }
-
-    if (role === ROLES.MASTER_ADMIN) {
-      return res.status(403).json({
-        success: false,
-        message: "Master Admin cannot be created",
-      });
-    }
-
-    if (!req.user?.id) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
-
-    const created_by = Number(req.user.id);
-
-    if (!Number.isInteger(created_by) || created_by <= 0) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid logged-in user",
-      });
-    }
-
-    const creator = await findUserById(created_by);
-
-    if (!creator) {
-      return res.status(404).json({
-        success: false,
-        message: "Creator not found",
-      });
-    }
-
-    const creatorRole = Number(creator.role_id);
-
-    let selectedParentId = null;
-
-    if (
-      parent_id !== undefined &&
-      parent_id !== null &&
-      String(parent_id).trim() !== ""
-    ) {
-      selectedParentId = Number(parent_id);
-
-      if (
-        !Number.isInteger(selectedParentId) ||
-        selectedParentId <= 0
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid parent_id",
-        });
-      }
-
-      if (selectedParentId === created_by) {
-        if (role === ROLES.STAFF && creatorRole === ROLES.ADMIN) {
-          selectedParentId = created_by;
-        }
-      }
-    }
-
-    const allowedParentRoles = {
-      [ROLES.CNF]: [ROLES.ADMIN],
-      [ROLES.SUPER_DISTRIBUTOR]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-      ],
-      [ROLES.DISTRIBUTOR]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-        ROLES.SUPER_DISTRIBUTOR,
-      ],
-      [ROLES.FOS]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-        ROLES.SUPER_DISTRIBUTOR,
-        ROLES.DISTRIBUTOR,
-      ],
-      [ROLES.RETAILER]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-        ROLES.SUPER_DISTRIBUTOR,
-        ROLES.DISTRIBUTOR,
-        ROLES.FOS,
-      ],
-      [ROLES.SUB_RETAILER]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-        ROLES.SUPER_DISTRIBUTOR,
-        ROLES.DISTRIBUTOR,
-        ROLES.FOS,
-        ROLES.RETAILER,
-      ],
-      [ROLES.EMPLOYEE]: [
-        ROLES.ADMIN,
-        ROLES.CNF,
-        ROLES.SUPER_DISTRIBUTOR,
-        ROLES.DISTRIBUTOR,
-        ROLES.FOS,
-        ROLES.RETAILER,
-        ROLES.SUB_RETAILER,
-      ],
-    };
-
-    if (role === ROLES.STAFF) {
-      if (creatorRole !== ROLES.ADMIN) {
-        return res.status(403).json({
-          success: false,
-          message: "Only Admin can create Staff",
-        });
-      }
-
-      if (selectedParentId !== null) {
-        const selectedParent = await findUserById(
-          selectedParentId
-        );
-
-        if (!selectedParent) {
-          return res.status(404).json({
-            success: false,
-            message: "Selected parent user not found",
-          });
+        if (!name || !email || !phone || !password || !confirm_password) {
+            return res.status(400).json({
+                success: false,
+                message: "Name, email, phone, password and confirm password are required"
+            });
         }
 
-        if (Number(selectedParent.role_id) !== ROLES.ADMIN) {
-          return res.status(403).json({
-            success: false,
-            message: "Staff parent must be an Admin",
-          });
-        }
-      } else {
-        selectedParentId = created_by;
-      }
-    } else {
-      if (
-        creatorRole === ROLES.EMPLOYEE ||
-        creatorRole === ROLES.STAFF
-      ) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "You do not have permission to create users",
-        });
-      }
-
-      if (
-        creatorRole !== ROLES.MASTER_ADMIN &&
-        role <= creatorRole
-      ) {
-        return res.status(403).json({
-          success: false,
-          message: `You cannot create this role. Creator role: ${creatorRole}, Requested role: ${role}`,
-        });
-      }
-
-      if (selectedParentId !== null) {
-        const selectedParent = await findUserById(
-          selectedParentId
-        );
-
-        if (!selectedParent) {
-          return res.status(404).json({
-            success: false,
-            message: "Selected parent user not found",
-          });
+        if (password !== confirm_password) {
+            return res.status(400).json({
+                success: false,
+                message: "Password and confirm password do not match"
+            });
         }
 
-        const parentRole = Number(selectedParent.role_id);
-        const allowedParents = allowedParentRoles[role] || [];
+        const phoneValue = String(phone).trim().replace(/\s+/g, "");
 
-        if (!allowedParents.includes(parentRole)) {
-          return res.status(403).json({
-            success: false,
-            message: "Selected parent role is invalid",
-          });
+        let normalizedPhone = phoneValue;
+
+        if (phoneValue.startsWith("+91")) {
+            normalizedPhone = phoneValue.slice(3);
+        } else if (phoneValue.startsWith("91") && phoneValue.length === 12) {
+            normalizedPhone = phoneValue.slice(2);
         }
 
-        if (selectedParentId === created_by && role > creatorRole) {
-          selectedParentId = created_by;
+        if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid phone number"
+            });
         }
-      } else if (creatorRole !== ROLES.MASTER_ADMIN) {
-        selectedParentId = created_by;
-      }
-    }
 
-    const existingUser = await findUserByEmail(cleanEmail);
+        const requestedRoleId = Number(role_id);
 
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: "Email already exists",
-      });
-    }
+        if (Number.isNaN(requestedRoleId)) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid role_id is required"
+            });
+        }
 
-    const existingPhone = await db("users")
-      .select("id")
-      .where("phone", cleanPhone)
-      .first();
+        if (requestedRoleId === 0) {
+            return res.status(403).json({
+                success: false,
+                message: "Master Admin cannot be created"
+            });
+        }
 
-    if (existingPhone) {
-      return res.status(400).json({
-        success: false,
-        message: "Phone number already exists",
-      });
-    }
+        if (!req.user || !req.user.id) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized"
+            });
+        }
 
-    const retailerDevices = {
-      new_device: 0,
-      old_device: 0,
-      supreme_device: 0,
-      pro_star: 0,
-      lite: 0,
-      google_tv: 0,
-      supreme_lock: 0,
-    };
+        const created_by = Number(req.user.id);
 
-    if (role === ROLES.RETAILER) {
-      const deviceFields = {
-        new_device,
-        old_device,
-        supreme_device,
-        pro_star,
-        lite,
-        google_tv,
-        supreme_lock,
-      };
+        const creator = await db("users")
+            .where("id", created_by)
+            .first();
 
-      for (const [field, value] of Object.entries(deviceFields)) {
+        if (!creator) {
+            return res.status(404).json({
+                success: false,
+                message: "Creator not found"
+            });
+        }
+
+        const creatorRole = Number(creator.role_id);
+
+        if (requestedRoleId <= creatorRole) {
+            return res.status(403).json({
+                success: false,
+                message: "You are not allowed to create this role"
+            });
+        }
+
+        const parentRoles = {
+            2: [1],
+            3: [2],
+            4: [2, 3],
+            5: [2, 3, 4],
+            6: [2, 3, 4, 5],
+            7: [2, 3, 4, 5, 6],
+            8: [2, 3, 4, 5, 6, 7],
+            9: [1]
+        };
+
+        if (requestedRoleId === 9 && creatorRole !== 1) {
+            return res.status(403).json({
+                success: false,
+                message: "Only Admin can create Staff"
+            });
+        }
+
+        if (creatorRole === 8 || creatorRole === 9) {
+            return res.status(403).json({
+                success: false,
+                message: "Employee and Staff cannot create users"
+            });
+        }
+
+        const allowedParentRoles = parentRoles[requestedRoleId] || [];
+
+        const finalParentId =
+            parent_id !== undefined &&
+            parent_id !== null &&
+            parent_id !== ""
+                ? Number(parent_id)
+                : null;
+
+        if (finalParentId !== null) {
+            const parentUser = await db("users")
+                .where("id", finalParentId)
+                .first();
+
+            if (!parentUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Parent user not found"
+                });
+            }
+
+            if (!allowedParentRoles.includes(Number(parentUser.role_id))) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid parent role"
+                });
+            }
+        }
+
+        const existingEmail = await db("users")
+            .where("email", email)
+            .first();
+
+        if (existingEmail) {
+            return res.status(409).json({
+                success: false,
+                message: "Email already exists"
+            });
+        }
+
+        const existingPhone = await db("users")
+            .where("phone", normalizedPhone)
+            .first();
+
+        if (existingPhone) {
+            return res.status(409).json({
+                success: false,
+                message: "Phone number already exists"
+            });
+        }
+
+        if (requestedRoleId === 6) {
+            const deviceFields = [
+                new_device,
+                old_device,
+                supreme_device,
+                pro_star,
+                lite,
+                google_tv,
+                supreme_lock
+            ];
+
+            const hasDevicePermission = deviceFields.some(
+                value => Number(value) === 1
+            );
+
+            if (!hasDevicePermission) {
+                return res.status(400).json({
+                    success: false,
+                    message: "At least one device permission is required for Retailer"
+                });
+            }
+        }
+
+        let parsedRolePermission = [];
+
         if (
-          value === undefined ||
-          value === null ||
-          value === ""
+            role_permission !== undefined &&
+            role_permission !== null &&
+            role_permission !== ""
         ) {
-          continue;
+            try {
+                parsedRolePermission =
+                    typeof role_permission === "string"
+                        ? JSON.parse(role_permission)
+                        : role_permission;
+            } catch (error) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid role_permission format"
+                });
+            }
+
+            if (!Array.isArray(parsedRolePermission)) {
+                parsedRolePermission = [parsedRolePermission];
+            }
+
+            const moduleMap = new Map();
+
+            parsedRolePermission.forEach(item => {
+                if (!item || !item.module_id) {
+                    return;
+                }
+
+                const moduleId = Number(item.module_id);
+
+                if (!moduleMap.has(moduleId)) {
+                    moduleMap.set(moduleId, {
+                        module_id: moduleId,
+                        sub_modules: {
+                            manage: 0,
+                            edit: 0,
+                            view: 0,
+                            add: 0,
+                            delete: 0
+                        },
+                        given_by: created_by,
+                        given_by_role: creatorRole,
+                        given_at: new Date().toISOString()
+                    });
+                }
+
+                const moduleData = moduleMap.get(moduleId);
+
+                if (
+                    item.sub_modules &&
+                    typeof item.sub_modules === "object"
+                ) {
+                    const subModules = item.sub_modules;
+
+                    moduleData.sub_modules.manage =
+                        Number(subModules.manage) === 1 ? 1 : 0;
+
+                    moduleData.sub_modules.edit =
+                        Number(subModules.edit) === 1 ? 1 : 0;
+
+                    moduleData.sub_modules.view =
+                        Number(subModules.view) === 1 ? 1 : 0;
+
+                    moduleData.sub_modules.add =
+                        Number(subModules.add) === 1 ? 1 : 0;
+
+                    moduleData.sub_modules.delete =
+                        Number(subModules.delete) === 1 ? 1 : 0;
+                }
+            });
+
+            parsedRolePermission = Array.from(moduleMap.values());
         }
 
-        const numericValue = Number(value);
+        const hashedPassword = await bcrypt.hash(password, 10);
 
-        if (![0, 1].includes(numericValue)) {
-          return res.status(400).json({
+        const userData = {
+            organization_name: organization_name || null,
+            role_id: requestedRoleId,
+            parent_id: finalParentId,
+            name,
+            email,
+            phone: normalizedPhone,
+            password: hashedPassword,
+            company_address: company_address || null,
+            country: country || null,
+            state: state || null,
+            city: city || null,
+            new_device: Number(new_device) || 0,
+            old_device: Number(old_device) || 0,
+            supreme_device: Number(supreme_device) || 0,
+            pro_star: Number(pro_star) || 0,
+            lite: Number(lite) || 0,
+            google_tv: Number(google_tv) || 0,
+            supreme_lock: Number(supreme_lock) || 0,
+            created_by,
+            role_permission: parsedRolePermission
+        };
+
+        const userId = await createUserModel(userData);
+
+        return res.status(201).json({
+            success: true,
+            message: "User created successfully",
+            data: {
+                id: userId,
+                organization_name: organization_name || null,
+                role_id: requestedRoleId,
+                parent_id: finalParentId,
+                name,
+                email,
+                phone: normalizedPhone,
+                company_address: company_address || null,
+                country: country || null,
+                state: state || null,
+                city: city || null,
+                role_permission: parsedRolePermission
+            }
+        });
+    } catch (error) {
+        console.error("CREATE USER ROLE ERROR:", error);
+
+        return res.status(500).json({
             success: false,
-            message: `${field} must be either 0 or 1`,
-          });
-        }
-
-        retailerDevices[field] = numericValue;
-      }
+            message: "Internal server error"
+        });
     }
-
-    const hashPassword = await bcrypt.hash(password, 10);
-
-    const userId = await createUserModel({
-      organization_name,
-      name: cleanName,
-      email: cleanEmail,
-      phone: cleanPhone,
-      password: hashPassword,
-      company_address,
-      country,
-      state,
-      city,
-      role_id: role,
-      created_by,
-      parent_id: selectedParentId,
-      new_device: retailerDevices.new_device,
-      old_device: retailerDevices.old_device,
-      supreme_device: retailerDevices.supreme_device,
-      pro_star: retailerDevices.pro_star,
-      lite: retailerDevices.lite,
-      google_tv: retailerDevices.google_tv,
-      supreme_lock: retailerDevices.supreme_lock,
-    });
-
-    return res.status(201).json({
-      success: true,
-      message: "User Registered Successfully",
-      data: {
-        id: userId,
-        organization_name,
-        name: cleanName,
-        email: cleanEmail,
-        phone: cleanPhone,
-        role_id: role,
-        company_address,
-        country,
-        state,
-        city,
-        created_by,
-        parent_id: selectedParentId,
-        new_device: retailerDevices.new_device,
-        old_device: retailerDevices.old_device,
-        supreme_device: retailerDevices.supreme_device,
-        pro_star: retailerDevices.pro_star,
-        lite: retailerDevices.lite,
-        google_tv: retailerDevices.google_tv,
-        supreme_lock: retailerDevices.supreme_lock,
-      },
-    });
-  } catch (error) {
-    console.error("CREATE USER ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: error.message || "Internal server error",
-    });
-  }
 };
+
+
+
+
+
+
 
 // Login staff
 export const loginUser = async (req, res) => {
@@ -619,6 +548,30 @@ export const getUsers = async (req, res) => {
       status
     );
 
+    const users = result.users.map(user => {
+      let role_permission = [];
+
+      if (user.role_permission) {
+        try {
+          role_permission =
+            typeof user.role_permission === "string"
+              ? JSON.parse(user.role_permission)
+              : user.role_permission;
+
+          if (!Array.isArray(role_permission)) {
+            role_permission = [];
+          }
+        } catch (error) {
+          role_permission = [];
+        }
+      }
+
+      return {
+        ...user,
+        role_permission,
+      };
+    });
+
     return res.status(200).json({
       success: true,
       pagination: {
@@ -627,7 +580,7 @@ export const getUsers = async (req, res) => {
         limit,
         totalUsers: result.total,
       },
-      data: result.users,
+      data: users,
     });
   } catch (error) {
     console.error("GET USERS ERROR:", error);
@@ -1487,20 +1440,16 @@ export const createSubModule = async (req, res) => {
 // get submodule
 export const getAllSubModules = async (req, res) => {
     try {
-        const subModules = await db("sub_modules as sm")
-            .leftJoin("modules as m", "sm.module_id", "m.id")
+        const subModules = await db("sub_modules")
             .select(
-                "sm.id",
-                "sm.module_id",
-                "m.name as module_name",
-                "sm.name",
-                "sm.icon",
-                "sm.status",
-                "sm.created_at",
-                "sm.updated_at"
+                "id",
+                "name",
+                "icon",
+                "status",
+                "created_at",
+                "updated_at"
             )
-            .orderBy("sm.module_id", "asc")
-            .orderBy("sm.id", "asc");
+            .orderBy("id", "asc");
 
         return res.status(200).json({
             success: true,
