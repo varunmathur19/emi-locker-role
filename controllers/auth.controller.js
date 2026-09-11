@@ -16,10 +16,6 @@ import path from "path";
 
 // ADD STAFF
 
-
-
-
-
 export const createuserrole = async (req, res) => {
     try {
         const {
@@ -1867,6 +1863,38 @@ export const updateSubModule = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Internal server error"
+        });
+    }
+};
+
+//get role
+export const getRoles = async (req, res) => {
+    try {
+        const roles = await db("roles")
+            .select(
+                "id",
+                "role_id",
+                "name",
+                "slug",
+                "icon",
+                "sequence",
+                "status",
+                "created_at",
+                "updated_at"
+            )
+            .orderBy("sequence", "asc");
+
+        return res.status(200).json({
+            success: true,
+            count: roles.length,
+            data: roles,
+        });
+    } catch (error) {
+        console.error("GET ROLES ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
         });
     }
 };

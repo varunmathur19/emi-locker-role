@@ -15,7 +15,8 @@ import {
     updateUserStatus,
     updateRolePermissions,
     getAllSubModules,
-    updateSubModule
+    updateSubModule,
+    getRoles
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -241,6 +242,8 @@ router.put("/sub-modules/:id", authMiddleware, updateSubModule);
 
 
 router.post("/role-permissions/:userId",authMiddleware, updateRolePermissions);
+
+router.get("/roles",authMiddleware, getRoles);
 
 
 
