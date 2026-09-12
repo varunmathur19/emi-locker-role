@@ -13,10 +13,13 @@ import {
     getModules,
     updateModule,
     updateUserStatus,
-    updateRolePermissions,
     getAllSubModules,
     updateSubModule,
-    getRoles
+    getRoles,
+    updateProfile,
+    getProfiles,
+    saveRolePermissions,
+    getRolePermissions
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -29,132 +32,79 @@ const router = express.Router();
 // Register Staff
 
 router.post(
-  "/add-staff",
+    "/add-staff",
+    authMiddleware,
 
-  // ==========================================
-  // AUTH
-  // ==========================================
+    body("organization_name")
+        .trim()
+        .custom((value, { req }) => {
+            if (Number(req.body.role_id) !== 9 && !value) {
+                throw new Error("Organization Name is required");
+            }
 
-  authMiddleware,
+            return true;
+        }),
 
+    body("name")
+        .trim()
+        .notEmpty()
+        .withMessage("Name is required"),
 
-  // ==========================================
-  // ORGANIZATION NAME
-  // ==========================================
+    body("email")
+        .trim()
+        .notEmpty()
+        .withMessage("Email is required")
+        .isEmail()
+        .withMessage("Please enter a valid email")
+        .normalizeEmail(),
 
-  body("organization_name")
-    .trim()
-    .notEmpty()
-    .withMessage("Organization Name is required"),
+    body("role_id")
+        .notEmpty()
+        .withMessage("Role ID is required")
+        .isInt({ min: 1, max: 9 })
+        .withMessage(
+            "Role ID must be a number between 1 and 9"
+        ),
 
+    body("phone")
+        .trim()
+        .notEmpty()
+        .withMessage("Phone is required")
+        .matches(/^(?:\+91\s?)?[6-9]\d{9}$/)
+        .withMessage(
+            "Phone must be a valid 10 digit Indian mobile number"
+        ),
 
-  // ==========================================
-  // NAME
-  // ==========================================
+    body("country")
+        .trim()
+        .notEmpty()
+        .withMessage("Country is required"),
 
-  body("name")
-    .trim()
-    .notEmpty()
-    .withMessage("Name is required"),
+    body("state")
+        .trim()
+        .notEmpty()
+        .withMessage("State is required"),
 
+    body("city")
+        .trim()
+        .notEmpty()
+        .withMessage("City is required"),
 
-  // ==========================================
-  // EMAIL
-  // ==========================================
+    (req, res, next) => {
+        const errors = validationResult(req);
 
-  body("email")
-    .trim()
-    .notEmpty()
-    .withMessage("Email is required")
-    .isEmail()
-    .withMessage("Please enter a valid email")
-    .normalizeEmail(),
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                success: false,
+                message: "Validation Error",
+                errors: errors.array(),
+            });
+        }
 
+        next();
+    },
 
-  // ==========================================
-  // ROLE ID
-  // ==========================================
-
-  body("role_id")
-    .notEmpty()
-    .withMessage("Role ID is required")
-    .isInt({ min: 1, max: 9 })
-    .withMessage(
-      "Role ID must be a number between 1 and 9"
-    ),
-
-
-  // ==========================================
-  // PHONE
-  // ==========================================
-
-  body("phone")
-    .trim()
-    .notEmpty()
-    .withMessage("Phone is required")
-    .matches(/^(?:\+91\s?)?[6-9]\d{9}$/)
-    .withMessage(
-      "Phone must be a valid 10 digit Indian mobile number"
-    ),
-
-
-  // ==========================================
-  // COUNTRY
-  // ==========================================
-
-  body("country")
-    .trim()
-    .notEmpty()
-    .withMessage("Country is required"),
-
-
-  // ==========================================
-  // STATE
-  // ==========================================
-
-  body("state")
-    .trim()
-    .notEmpty()
-    .withMessage("State is required"),
-
-
-  // ==========================================
-  // CITY
-  // ==========================================
-
-  body("city")
-    .trim()
-    .notEmpty()
-    .withMessage("City is required"),
-
-
-  // ==========================================
-  // VALIDATION RESULT
-  // ==========================================
-
-  (req, res, next) => {
-
-    const errors = validationResult(req);
-
-    if (!errors.isEmpty()) {
-
-      return res.status(400).json({
-        success: false,
-        message: "Validation Error",
-        errors: errors.array(),
-      });
-
-    }
-
-    next();
-  },
-
-
-  // ==========================================
-  // CONTROLLER
-  // ==========================================
-
-  createuserrole
+    createuserrole
 );
 
 router.post("/login",
@@ -239,11 +189,27 @@ router.get("/sub-modules", authMiddleware,getAllSubModules);
 
 router.put("/sub-modules/:id", authMiddleware, updateSubModule);
 
-
-
-router.post("/role-permissions/:userId",authMiddleware, updateRolePermissions);
-
 router.get("/roles",authMiddleware, getRoles);
+
+router.get("/profiles", getProfiles);
+
+// Edit profile
+router.put("/profiles/:id", updateProfile);
+
+//role-permission
+router.post(
+  "/role-permissions",
+  authMiddleware,
+  saveRolePermissions
+);
+//get role-permission
+router.get(
+  "/role-permissions/:profile_id",
+  getRolePermissions
+);
+
+
+
 
 
 
