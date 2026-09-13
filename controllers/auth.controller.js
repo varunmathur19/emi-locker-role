@@ -15,6 +15,70 @@ import fs from "fs";
 import path from "path";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 
+const isPermissionEnabled = (value) => {
+    if (typeof value === "boolean") return value;
+    if (typeof value === "number") return value === 1;
+    if (typeof value === "string") {
+        return value === "1" || value.toLowerCase() === "true";
+    }
+    if (value && typeof value === "object") {
+        if (value.status !== undefined) return Number(value.status) === 1;
+        if (value.view !== undefined) return Number(value.view) === 1;
+        if (value.access !== undefined) return Number(value.access) === 1;
+        return true;
+    }
+    return false;
+};
+
+const getStaffPermissions = async (user) => {
+    if (Number(user?.role_id) !== ROLES.STAFF || !user?.role_permission_id) {
+        return null;
+    }
+
+    const rolePermission = await db("role_permission")
+        .select("permission")
+        .where("id", Number(user.role_permission_id))
+        .first();
+
+    if (!rolePermission?.permission) return null;
+
+    try {
+        const permission = typeof rolePermission.permission === "string"
+            ? JSON.parse(rolePermission.permission)
+            : rolePermission.permission;
+        return permission && typeof permission === "object" && !Array.isArray(permission)
+            ? permission
+            : null;
+    } catch {
+        return null;
+    }
+};
+
+const hasStaffRolePermission = (permissions, role, action = null) => {
+    if (!permissions || !role) return false;
+
+    const keys = [role.slug, role.name]
+        .filter(Boolean)
+        .map((value) => String(value).trim().toLowerCase());
+
+    return keys.some((key) => {
+        if (action && permissions[`${key}.${action}`] !== undefined) {
+            return isPermissionEnabled(permissions[`${key}.${action}`]);
+        }
+
+        if (action) return false;
+
+        return Object.keys(permissions).some((permissionKey) => {
+            const normalizedKey = String(permissionKey).trim().toLowerCase();
+            return (normalizedKey === key || normalizedKey.startsWith(`${key}.`)) &&
+                isPermissionEnabled(permissions[permissionKey]);
+        });
+    });
+};
+
+const getRoleForPermission = (roleId) =>
+    db("roles").select("role_id", "name", "slug").where("role_id", Number(roleId)).first();
+
 // ADD STAFF
 
 
@@ -111,7 +175,7 @@ export const createuserrole = async (req, res) => {
 
         const creatorRole = Number(creator.role_id);
 
-        if (requestedRoleId <= creatorRole) {
+        if (creatorRole !== ROLES.STAFF && requestedRoleId <= creatorRole) {
             return res.status(403).json({
                 success: false,
                 message:
@@ -119,10 +183,7 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        if (
-            requestedRoleId === 9 &&
-            creatorRole !== 1
-        ) {
+        if (requestedRoleId === 9 && creatorRole !== 1) {
             return res.status(403).json({
                 success: false,
                 message:
@@ -130,15 +191,28 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        if (
-            creatorRole === 8 ||
-            creatorRole === 9
-        ) {
+        if (creatorRole === 8) {
             return res.status(403).json({
                 success: false,
-                message:
-                    "Employee and Staff cannot create users",
+                message: "Employee cannot create users",
             });
+        }
+
+        // Staff is allowed to create only a role for which its profile has an
+        // explicit `<role>.add` permission. A plain view/access permission is
+        // intentionally not enough to create users.
+        if (creatorRole === ROLES.STAFF) {
+            const [permissions, requestedRole] = await Promise.all([
+                getStaffPermissions(creator),
+                getRoleForPermission(requestedRoleId),
+            ]);
+
+            if (!hasStaffRolePermission(permissions, requestedRole, "add")) {
+                return res.status(403).json({
+                    success: false,
+                    message: "You are not allowed to create this role",
+                });
+            }
         }
 
         let finalParentId = null;
@@ -508,10 +582,22 @@ export const loginUser = async (req, res) => {
         .first();
 
       if (rolePermission) {
+        let permission = rolePermission.permission;
+
+        try {
+          permission = typeof permission === "string"
+            ? JSON.parse(permission)
+            : permission;
+        } catch {
+          permission = {};
+        }
+
         rolePermission = {
           id: rolePermission.id,
           profile_id: rolePermission.profile_id,
-          permission: rolePermission.permission,
+          // Send an object to the frontend. Sending JSON text here caused the
+          // staff sidebar/dashboard to discard an otherwise valid profile.
+          permission,
         };
       }
     }
@@ -694,6 +780,34 @@ export const getUsers = async (req, res) => {
       });
     }
 
+    let staffRoleAccess = false;
+
+    // Staff is not part of the normal parent/child hierarchy. Its profile is
+    // therefore the source of truth for which role lists it may open.
+    if (loggedInRoleId === ROLES.STAFF) {
+      if (role_id === null) {
+        return res.status(403).json({
+          success: false,
+          message: "Staff must select an authorized role",
+        });
+      }
+
+      const [staffUser, requestedRole] = await Promise.all([
+        db("users").select("role_id", "role_permission_id").where("id", loggedInUserId).first(),
+        getRoleForPermission(role_id),
+      ]);
+      const permissions = await getStaffPermissions(staffUser);
+
+      if (!hasStaffRolePermission(permissions, requestedRole)) {
+        return res.status(403).json({
+          success: false,
+          message: "You are not allowed to access this role",
+        });
+      }
+
+      staffRoleAccess = true;
+    }
+
     // -----------------------------
     // GET USERS
     // -----------------------------
@@ -707,7 +821,8 @@ export const getUsers = async (req, res) => {
       country,
       state,
       city,
-      status
+      status,
+      staffRoleAccess
     );
 
     // -----------------------------

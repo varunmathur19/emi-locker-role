@@ -185,9 +185,9 @@ logoutUser
 );
 
 //User Chain Api
-router.get("/hierarchy-dropdown", getDropdownUsers);
+router.get("/hierarchy-dropdown", authMiddleware, getDropdownUsers);
 
-router.patch("/update-staff-data/:id",updatedstaffdata)
+router.patch("/update-staff-data/:id",authMiddleware,updatedstaffdata)
 
 //get the data for updated user-staff
 router.get(

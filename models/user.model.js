@@ -253,7 +253,8 @@ export const getAllUsers = async (
   country = null,
   state = null,
   city = null,
-  status = null
+  status = null,
+  staffRoleAccess = false
 ) => {
   try {
     limit = Number(limit) || 10;
@@ -316,7 +317,7 @@ export const getAllUsers = async (
     |--------------------------------------------------------------------------
     */
 
-    if (loggedInRoleId === 0 || loggedInRoleId === 1) {
+    if (loggedInRoleId === 0 || loggedInRoleId === 1 || staffRoleAccess) {
       let usersQuery = db
         .from({ u: "users" })
 
