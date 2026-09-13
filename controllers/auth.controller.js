@@ -13,6 +13,7 @@ import jwt from "jsonwebtoken";
 import { ROLES } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 // ADD STAFF
 
@@ -78,7 +79,9 @@ export const createuserrole = async (req, res) => {
 
         if (
             Number.isNaN(requestedRoleId) ||
-            requestedRoleId === 0
+            requestedRoleId === 0 ||
+            requestedRoleId < 1 ||
+            requestedRoleId > 9
         ) {
             return res.status(400).json({
                 success: false,
@@ -185,27 +188,49 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        let normalizedPhone = String(phone)
+        /* =========================
+           PHONE VALIDATION
+        ========================= */
+
+        const selectedCountry = String(
+            country || ""
+        )
             .trim()
-            .replace(/\s+/g, "");
+            .toUpperCase();
 
-        if (normalizedPhone.startsWith("+91")) {
-            normalizedPhone =
-                normalizedPhone.slice(3);
-        } else if (
-            normalizedPhone.startsWith("91") &&
-            normalizedPhone.length === 12
-        ) {
-            normalizedPhone =
-                normalizedPhone.slice(2);
-        }
-
-        if (!/^[6-9]\d{9}$/.test(normalizedPhone)) {
+        if (!selectedCountry) {
             return res.status(400).json({
                 success: false,
-                message: "Invalid phone number",
+                message:
+                    "Country is required for phone number",
             });
         }
+
+        let parsedPhone;
+
+        try {
+            parsedPhone =
+                parsePhoneNumberFromString(
+                    String(phone).trim(),
+                    selectedCountry
+                );
+        } catch (phoneError) {
+            parsedPhone = null;
+        }
+
+        if (
+            !parsedPhone ||
+            !parsedPhone.isValid()
+        ) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid phone number for selected country",
+            });
+        }
+
+        const normalizedPhone =
+            parsedPhone.number;
 
         const existingPhone = await db("users")
             .where("phone", normalizedPhone)
@@ -217,6 +242,10 @@ export const createuserrole = async (req, res) => {
                 message: "Phone number already exists",
             });
         }
+
+        /* =========================
+           STAFF PROFILE / PERMISSION
+        ========================= */
 
         let rolePermissionId = null;
 
@@ -260,8 +289,13 @@ export const createuserrole = async (req, res) => {
                 });
             }
 
-            rolePermissionId = rolePermission.id;
+            rolePermissionId =
+                rolePermission.id;
         }
+
+        /* =========================
+           RETAILER DEVICE VALIDATION
+        ========================= */
 
         if (requestedRoleId === 6) {
             const devices = [
@@ -274,11 +308,12 @@ export const createuserrole = async (req, res) => {
                 supreme_lock,
             ];
 
-            if (
-                !devices.some(
+            const hasDevicePermission =
+                devices.some(
                     (value) => Number(value) === 1
-                )
-            ) {
+                );
+
+            if (!hasDevicePermission) {
                 return res.status(400).json({
                     success: false,
                     message:
@@ -287,13 +322,26 @@ export const createuserrole = async (req, res) => {
             }
         }
 
+        /* =========================
+           PASSWORD
+        ========================= */
+
         const hashedPassword =
             await bcrypt.hash(password, 10);
 
+        /* =========================
+           ORGANIZATION
+        ========================= */
+
         const finalOrganizationName =
             requestedRoleId === 9
-                ? creator.organization_name || null
+                ? creator.organization_name ||
+                  null
                 : organization_name || null;
+
+        /* =========================
+           USER DATA
+        ========================= */
 
         const userData = {
             organization_name:
@@ -308,16 +356,21 @@ export const createuserrole = async (req, res) => {
 
             parent_id: finalParentId,
 
-            name,
-            email,
+            name: name.trim(),
+
+            email: email.trim(),
+
             phone: normalizedPhone,
+
             password: hashedPassword,
 
             company_address:
                 company_address || null,
 
-            country: country || null,
+            country: selectedCountry || null,
+
             state: state || null,
+
             city: city || null,
 
             new_device:
@@ -350,23 +403,34 @@ export const createuserrole = async (req, res) => {
         return res.status(201).json({
             success: true,
             message: "User created successfully",
+
             data: {
                 id: userId,
+
                 role_id: requestedRoleId,
+
                 profile_id:
                     requestedRoleId === 9
                         ? Number(profile_id)
                         : null,
+
                 role_permission_id:
                     requestedRoleId === 9
                         ? rolePermissionId
                         : null,
+
                 parent_id: finalParentId,
+
                 organization_name:
                     finalOrganizationName,
-                name,
-                email,
+
+                name: name.trim(),
+
+                email: email.trim(),
+
                 phone: normalizedPhone,
+
+                country: selectedCountry,
             },
         });
     } catch (error) {
@@ -381,7 +445,6 @@ export const createuserrole = async (req, res) => {
         });
     }
 };
-
 
 
 

@@ -25,6 +25,7 @@ import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
 import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
+import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 const router = express.Router();
 
@@ -38,8 +39,13 @@ router.post(
     body("organization_name")
         .trim()
         .custom((value, { req }) => {
-            if (Number(req.body.role_id) !== 9 && !value) {
-                throw new Error("Organization Name is required");
+            if (
+                Number(req.body.role_id) !== 9 &&
+                !value
+            ) {
+                throw new Error(
+                    "Organization Name is required"
+                );
             }
 
             return true;
@@ -55,7 +61,9 @@ router.post(
         .notEmpty()
         .withMessage("Email is required")
         .isEmail()
-        .withMessage("Please enter a valid email")
+        .withMessage(
+            "Please enter a valid email"
+        )
         .normalizeEmail(),
 
     body("role_id")
@@ -66,19 +74,49 @@ router.post(
             "Role ID must be a number between 1 and 9"
         ),
 
+    body("country")
+        .trim()
+        .notEmpty()
+        .withMessage("Country is required")
+        .isLength({ min: 2, max: 2 })
+        .withMessage(
+            "Country must be a valid country code"
+        ),
+
     body("phone")
         .trim()
         .notEmpty()
         .withMessage("Phone is required")
-        .matches(/^(?:\+91\s?)?[6-9]\d{9}$/)
-        .withMessage(
-            "Phone must be a valid 10 digit Indian mobile number"
-        ),
+        .custom((value, { req }) => {
+            const country = String(
+                req.body.country || ""
+            )
+                .trim()
+                .toUpperCase();
 
-    body("country")
-        .trim()
-        .notEmpty()
-        .withMessage("Country is required"),
+            if (!country) {
+                throw new Error(
+                    "Country is required for phone validation"
+                );
+            }
+
+            const phoneNumber =
+                parsePhoneNumberFromString(
+                    String(value).trim(),
+                    country
+                );
+
+            if (
+                !phoneNumber ||
+                !phoneNumber.isValid()
+            ) {
+                throw new Error(
+                    "Phone number is not valid for selected country"
+                );
+            }
+
+            return true;
+        }),
 
     body("state")
         .trim()
