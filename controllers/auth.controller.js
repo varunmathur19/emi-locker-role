@@ -62,11 +62,12 @@ const hasStaffRolePermission = (permissions, role, action = null) => {
         .map((value) => String(value).trim().toLowerCase());
 
     return keys.some((key) => {
-        if (action && permissions[`${key}.${action}`] !== undefined) {
-            return isPermissionEnabled(permissions[`${key}.${action}`]);
+        if (action) {
+            return isPermissionEnabled(permissions[`${key}.${action}`]) ||
+                isPermissionEnabled(permissions[`${key}.manage`]) ||
+                // Kept for old profiles which used a role-level permission.
+                isPermissionEnabled(permissions[key]);
         }
-
-        if (action) return false;
 
         return Object.keys(permissions).some((permissionKey) => {
             const normalizedKey = String(permissionKey).trim().toLowerCase();
