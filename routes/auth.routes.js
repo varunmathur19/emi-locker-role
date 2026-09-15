@@ -26,7 +26,14 @@ import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
 import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
-import { parsePhoneNumberFromString } from "libphonenumber-js";
+
+import {
+  parsePhoneNumberFromString,
+} from "libphonenumber-js";
+
+import {
+  Country,
+} from "country-state-city";
 
 const router = express.Router();
 
@@ -35,6 +42,7 @@ const router = express.Router();
 
 router.post(
     "/add-staff",
+
     authMiddleware,
 
     body("organization_name")
@@ -62,15 +70,16 @@ router.post(
         .notEmpty()
         .withMessage("Email is required")
         .isEmail()
-        .withMessage(
-            "Please enter a valid email"
-        )
+        .withMessage("Please enter a valid email")
         .normalizeEmail(),
 
     body("role_id")
         .notEmpty()
         .withMessage("Role ID is required")
-        .isInt({ min: 1, max: 9 })
+        .isInt({
+            min: 1,
+            max: 9,
+        })
         .withMessage(
             "Role ID must be a number between 1 and 9"
         ),
@@ -79,55 +88,54 @@ router.post(
         .trim()
         .notEmpty()
         .withMessage("Country is required")
-        .isLength({ min: 2, max: 2 })
-        .withMessage(
-            "Country must be a valid country code"
-        ),
+        .custom((value) => {
+            const country = String(value).trim();
 
-    body("phone")
-        .trim()
-        .notEmpty()
-        .withMessage("Phone is required")
-        .custom((value, { req }) => {
-            const country = String(
-                req.body.country || ""
-            )
-                .trim()
-                .toUpperCase();
-
-            if (!country) {
+            if (/^\d+$/.test(country)) {
                 throw new Error(
-                    "Country is required for phone validation"
-                );
-            }
-
-            const phoneNumber =
-                parsePhoneNumberFromString(
-                    String(value).trim(),
-                    country
-                );
-
-            if (
-                !phoneNumber ||
-                !phoneNumber.isValid()
-            ) {
-                throw new Error(
-                    "Phone number is not valid for selected country"
+                    "Country name is required"
                 );
             }
 
             return true;
         }),
 
+    body("phone")
+        .trim()
+        .notEmpty()
+        .withMessage("Phone is required"),
+
     body("state")
         .trim()
         .notEmpty()
-        .withMessage("State is required"),
+        .withMessage("State is required")
+        .custom((value) => {
+            const state = String(value).trim();
+
+            if (/^\d+$/.test(state)) {
+                throw new Error(
+                    "State name is required"
+                );
+            }
+
+            return true;
+        }),
 
     body("city")
         .trim()
         .notEmpty()
-        .withMessage("City is required"),
+        .withMessage("City is required")
+        .custom((value) => {
+            const city = String(value).trim();
+
+            if (/^\d+$/.test(city)) {
+                throw new Error(
+                    "City name is required"
+                );
+            }
+
+            return true;
+        }),
 
     (req, res, next) => {
         const errors = validationResult(req);

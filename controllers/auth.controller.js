@@ -98,6 +98,7 @@ export const createuserrole = async (req, res) => {
             confirm_password,
             company_address,
             country,
+            country_code,
             state,
             city,
             parent_id,
@@ -176,7 +177,10 @@ export const createuserrole = async (req, res) => {
 
         const creatorRole = Number(creator.role_id);
 
-        if (creatorRole !== ROLES.STAFF && requestedRoleId <= creatorRole) {
+        if (
+            creatorRole !== ROLES.STAFF &&
+            requestedRoleId <= creatorRole
+        ) {
             return res.status(403).json({
                 success: false,
                 message:
@@ -184,7 +188,10 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        if (requestedRoleId === 9 && creatorRole !== 1) {
+        if (
+            requestedRoleId === 9 &&
+            creatorRole !== 1
+        ) {
             return res.status(403).json({
                 success: false,
                 message:
@@ -195,23 +202,31 @@ export const createuserrole = async (req, res) => {
         if (creatorRole === 8) {
             return res.status(403).json({
                 success: false,
-                message: "Employee cannot create users",
+                message:
+                    "Employee cannot create users",
             });
         }
 
-        // Staff is allowed to create only a role for which its profile has an
-        // explicit `<role>.add` permission. A plain view/access permission is
-        // intentionally not enough to create users.
         if (creatorRole === ROLES.STAFF) {
-            const [permissions, requestedRole] = await Promise.all([
-                getStaffPermissions(creator),
-                getRoleForPermission(requestedRoleId),
-            ]);
+            const [permissions, requestedRole] =
+                await Promise.all([
+                    getStaffPermissions(creator),
+                    getRoleForPermission(
+                        requestedRoleId
+                    ),
+                ]);
 
-            if (!hasStaffRolePermission(permissions, requestedRole, "add")) {
+            if (
+                !hasStaffRolePermission(
+                    permissions,
+                    requestedRole,
+                    "add"
+                )
+            ) {
                 return res.status(403).json({
                     success: false,
-                    message: "You are not allowed to create this role",
+                    message:
+                        "You are not allowed to create this role",
                 });
             }
         }
@@ -225,7 +240,8 @@ export const createuserrole = async (req, res) => {
             parent_id !== null &&
             parent_id !== ""
         ) {
-            const parsedParentId = Number(parent_id);
+            const parsedParentId =
+                Number(parent_id);
 
             if (
                 !Number.isInteger(parsedParentId) ||
@@ -233,7 +249,8 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid parent_id",
+                    message:
+                        "Invalid parent_id",
                 });
             }
 
@@ -259,25 +276,47 @@ export const createuserrole = async (req, res) => {
         if (existingEmail) {
             return res.status(409).json({
                 success: false,
-                message: "Email already exists",
+                message:
+                    "Email already exists",
             });
         }
 
-        /* =========================
-           PHONE VALIDATION
-        ========================= */
+        const selectedCountry =
+            String(country || "").trim();
 
-        const selectedCountry = String(
-            country || ""
-        )
-            .trim()
-            .toUpperCase();
+        const selectedCountryCode =
+            String(country_code || "")
+                .trim()
+                .toUpperCase();
 
         if (!selectedCountry) {
             return res.status(400).json({
                 success: false,
+                message: "Country is required",
+            });
+        }
+
+        if (/^\d+$/.test(selectedCountry)) {
+            return res.status(400).json({
+                success: false,
                 message:
-                    "Country is required for phone number",
+                    "Country name is required",
+            });
+        }
+
+        if (!selectedCountryCode) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Country code is required for phone number",
+            });
+        }
+
+        if (!/^[A-Z]{2}$/.test(selectedCountryCode)) {
+            return res.status(400).json({
+                success: false,
+                message:
+                    "Invalid country code",
             });
         }
 
@@ -287,7 +326,7 @@ export const createuserrole = async (req, res) => {
             parsedPhone =
                 parsePhoneNumberFromString(
                     String(phone).trim(),
-                    selectedCountry
+                    selectedCountryCode
                 );
         } catch (phoneError) {
             parsedPhone = null;
@@ -314,18 +353,16 @@ export const createuserrole = async (req, res) => {
         if (existingPhone) {
             return res.status(409).json({
                 success: false,
-                message: "Phone number already exists",
+                message:
+                    "Phone number already exists",
             });
         }
-
-        /* =========================
-           STAFF PROFILE / PERMISSION
-        ========================= */
 
         let rolePermissionId = null;
 
         if (requestedRoleId === 9) {
-            const profileId = Number(profile_id);
+            const profileId =
+                Number(profile_id);
 
             if (
                 !Number.isInteger(profileId) ||
@@ -353,7 +390,10 @@ export const createuserrole = async (req, res) => {
 
             const rolePermission =
                 await db("role_permission")
-                    .where("profile_id", profileId)
+                    .where(
+                        "profile_id",
+                        profileId
+                    )
                     .first();
 
             if (!rolePermission) {
@@ -367,10 +407,6 @@ export const createuserrole = async (req, res) => {
             rolePermissionId =
                 rolePermission.id;
         }
-
-        /* =========================
-           RETAILER DEVICE VALIDATION
-        ========================= */
 
         if (requestedRoleId === 6) {
             const devices = [
@@ -397,26 +433,14 @@ export const createuserrole = async (req, res) => {
             }
         }
 
-        /* =========================
-           PASSWORD
-        ========================= */
-
         const hashedPassword =
             await bcrypt.hash(password, 10);
-
-        /* =========================
-           ORGANIZATION
-        ========================= */
 
         const finalOrganizationName =
             requestedRoleId === 9
                 ? creator.organization_name ||
                   null
                 : organization_name || null;
-
-        /* =========================
-           USER DATA
-        ========================= */
 
         const userData = {
             organization_name:
@@ -440,13 +464,19 @@ export const createuserrole = async (req, res) => {
             password: hashedPassword,
 
             company_address:
-                company_address || null,
+                company_address
+                    ? company_address.trim()
+                    : null,
 
-            country: selectedCountry || null,
+            country: selectedCountry,
 
-            state: state || null,
+            state: state
+                ? String(state).trim()
+                : null,
 
-            city: city || null,
+            city: city
+                ? String(city).trim()
+                : null,
 
             new_device:
                 Number(new_device) || 0,
@@ -477,7 +507,8 @@ export const createuserrole = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message: "User created successfully",
+            message:
+                "User created successfully",
 
             data: {
                 id: userId,
@@ -506,6 +537,14 @@ export const createuserrole = async (req, res) => {
                 phone: normalizedPhone,
 
                 country: selectedCountry,
+
+                state: state
+                    ? String(state).trim()
+                    : null,
+
+                city: city
+                    ? String(city).trim()
+                    : null,
             },
         });
     } catch (error) {
@@ -516,7 +555,8 @@ export const createuserrole = async (req, res) => {
 
         return res.status(500).json({
             success: false,
-            message: "Internal server error",
+            message:
+                "Internal server error",
         });
     }
 };
