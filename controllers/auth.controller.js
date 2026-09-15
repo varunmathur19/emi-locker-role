@@ -2053,6 +2053,7 @@ export const getRoles = async (req, res) => {
     }
 };
 
+
 //GET 
 export const getProfiles = async (req, res) => {
   try {
@@ -2082,17 +2083,84 @@ export const getProfiles = async (req, res) => {
   }
 };
 
+//post api for profile data
+export const createProfile = async (req, res) => {
+  try {
+    const { name, status = 1 } = req.body;
 
-// EDIT / UPDATE 
+    // Validation
+    if (!name || !name.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Profile name is required",
+      });
+    }
+
+    // Check duplicate profile
+    const existingProfile = await db("profile")
+      .where("name", name.trim())
+      .first();
+
+    if (existingProfile) {
+      return res.status(409).json({
+        success: false,
+        message: "Profile already exists",
+      });
+    }
+
+    // Insert profile using Knex
+    const [profileId] = await db("profile").insert({
+      name: name.trim(),
+      status: status,
+      created_at: db.fn.now(),
+      updated_at: db.fn.now(),
+    });
+
+    // Get inserted profile
+    const profile = await db("profile")
+      .select(
+        "id",
+        "name",
+        "status",
+        "created_at",
+        "updated_at"
+      )
+      .where("id", profileId)
+      .first();
+
+    return res.status(201).json({
+      success: true,
+      message: "Profile created successfully",
+      data: profile,
+    });
+  } catch (error) {
+    console.error("CREATE PROFILE DB ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create profile",
+      error: error.message,
+    });
+  }
+};
+
+//update/edit  api for profile data
 export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, status } = req.body;
 
-    if (!id) {
+    if (!name || !name.trim()) {
       return res.status(400).json({
         success: false,
-        message: "Profile ID is required",
+        message: "Profile name is required",
+      });
+    }
+
+    if (![0, 1].includes(Number(status))) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be 0 or 1",
       });
     }
 
@@ -2107,43 +2175,44 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    const updateData = {};
+    const duplicateProfile = await db("profile")
+      .where("name", name.trim())
+      .whereNot("id", id)
+      .first();
 
-    // Name diya hai to name update hoga
-    if (name !== undefined) {
-      updateData.name = name;
-    }
-
-    // Status diya hai to status update hoga
-    if (status !== undefined) {
-      updateData.status = status;
-    }
-
-    // Kuch bhi update nahi diya
-    if (Object.keys(updateData).length === 0) {
-      return res.status(400).json({
+    if (duplicateProfile) {
+      return res.status(409).json({
         success: false,
-        message: "Nothing to update",
+        message: "Profile already exists",
       });
     }
 
-    updateData.updated_at = db.fn.now();
-
     await db("profile")
       .where("id", id)
-      .update(updateData);
+      .update({
+        name: name.trim(),
+        status: Number(status),
+        updated_at: db.fn.now(),
+      });
 
-    const updatedProfile = await db("profile")
+    const profile = await db("profile")
+      .select(
+        "id",
+        "name",
+        "status",
+        "created_at",
+        "updated_at"
+      )
       .where("id", id)
       .first();
 
     return res.status(200).json({
       success: true,
       message: "Profile updated successfully",
-      data: updatedProfile,
+      data: profile,
     });
   } catch (error) {
-    console.error("Update Profile Error:", error);
+    console.error("UPDATE PROFILE DB ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -2154,11 +2223,7 @@ export const updateProfile = async (req, res) => {
 };
 
 
-
-
-
-
-//
+//role-permission
 export const saveRolePermissions = async (req, res) => {
   try {
     const { profile_id, permission } = req.body;
@@ -2270,7 +2335,6 @@ export const saveRolePermissions = async (req, res) => {
     });
   }
 };
-
 
 //get permission
 export const getRolePermissions = async (req, res) => {

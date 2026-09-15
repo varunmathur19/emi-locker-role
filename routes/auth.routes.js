@@ -19,7 +19,8 @@ import {
     updateProfile,
     getProfiles,
     saveRolePermissions,
-    getRolePermissions
+    getRolePermissions,
+    createProfile
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -199,15 +200,11 @@ router.get(
 //internal login
 router.post("/login-as-user", authMiddleware, loginAsUser);
 
-
-
-
 router.get(
   "/modules",
   authMiddleware,
   getModules
 );
-
 
 router.put(
   "/update-module/:id",
@@ -229,10 +226,14 @@ router.put("/sub-modules/:id", authMiddleware, updateSubModule);
 
 router.get("/roles",authMiddleware, getRoles);
 
-router.get("/profiles", getProfiles);
+//get api for profile data
+router.get("/profiles",authMiddleware, getProfiles);
+
+//post api for profile data
+router.post("/profiles",authMiddleware, createProfile);
 
 // Edit profile
-router.put("/profiles/:id", updateProfile);
+router.put("/profiles/:id",authMiddleware, updateProfile);
 
 //role-permission
 router.post(
@@ -243,6 +244,7 @@ router.post(
 //get role-permission
 router.get(
   "/role-permissions/:profile_id",
+  authMiddleware,
   getRolePermissions
 );
 
