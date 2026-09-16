@@ -1288,13 +1288,12 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Get existing user
     const existingUser = await db("users")
       .select(
         "id",
         "role_id",
         "parent_id",
-        "role_permission"
+        "role_permission_id"
       )
       .where("id", userId)
       .first();
@@ -1306,7 +1305,6 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Current role
     const currentRoleId = Number(
       role_id ?? existingUser.role_id
     );
@@ -1322,8 +1320,8 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Parent handling
-    let normalizedParentId = existingUser.parent_id ?? null;
+    let normalizedParentId =
+      existingUser.parent_id ?? null;
 
     if (parent_id !== undefined) {
       if (parent_id === null || parent_id === "") {
@@ -1379,62 +1377,104 @@ export const updatedstaffdata = async (req, res) => {
     }
 
     return await db.transaction(async (trx) => {
-      // -----------------------------------------
-      // ROLE PERMISSION
-      // -----------------------------------------
-      let normalizedRolePermission =
-        existingUser.role_permission ?? null;
+      let normalizedRolePermissionId =
+        existingUser.role_permission_id ?? null;
+
+      let parsedRolePermission = null;
 
       if (role_permission !== undefined) {
         if (
           role_permission === null ||
           role_permission === ""
         ) {
-          normalizedRolePermission = null;
-        } else if (typeof role_permission === "string") {
-          // Already JSON string
-          try {
-            JSON.parse(role_permission);
-            normalizedRolePermission = role_permission;
-          } catch (error) {
+          normalizedRolePermissionId = null;
+        } else {
+          let permissionData = role_permission;
+
+          if (typeof role_permission === "string") {
+            try {
+              permissionData = JSON.parse(
+                role_permission
+              );
+            } catch {
+              return res.status(400).json({
+                success: false,
+                message:
+                  "Invalid role_permission JSON",
+              });
+            }
+          }
+
+          if (
+            typeof permissionData !== "object" ||
+            permissionData === null
+          ) {
             return res.status(400).json({
               success: false,
-              message: "Invalid role_permission JSON",
+              message:
+                "Invalid role_permission format",
             });
           }
-        } else {
-          // Array / Object -> JSON string
-          normalizedRolePermission =
-            JSON.stringify(role_permission);
+
+          parsedRolePermission = permissionData;
+
+          if (normalizedRolePermissionId) {
+            await trx("role_permission")
+              .where(
+                "id",
+                normalizedRolePermissionId
+              )
+              .update({
+                permission: JSON.stringify(
+                  permissionData
+                ),
+                updated_at: trx.fn.now(),
+              });
+          } else {
+            const [rolePermissionId] =
+              await trx("role_permission").insert({
+                permission:
+                  JSON.stringify(permissionData),
+                created_at: trx.fn.now(),
+                updated_at: trx.fn.now(),
+              });
+
+            normalizedRolePermissionId =
+              rolePermissionId;
+          }
         }
       }
 
       const updateData = {
-        organization_name: organization_name || "",
+        organization_name:
+          organization_name || "",
         role_id: currentRoleId,
-
-        // ✅ FIXED ROLE PERMISSION
-        role_permission: normalizedRolePermission,
-
+        role_permission_id:
+          normalizedRolePermissionId,
         name: name || "",
         email: email || "",
         phone: phone || "",
-        company_address: company_address || "",
+        company_address:
+          company_address || "",
         country: country || "",
         state: state || "",
         city: city || "",
         parent_id: normalizedParentId,
-
         new_device: Number(new_device ?? 0),
         old_device: Number(old_device ?? 0),
-        supreme_device: Number(supreme_device ?? 0),
+        supreme_device: Number(
+          supreme_device ?? 0
+        ),
         pro_star: Number(pro_star ?? 0),
         lite: Number(lite ?? 0),
-        google_tv: Number(google_tv ?? 0),
-        supreme_lock: Number(supreme_lock ?? 0),
+        google_tv: Number(
+          google_tv ?? 0
+        ),
+        supreme_lock: Number(
+          supreme_lock ?? 0
+        ),
       };
 
-      // Password only update if provided
       if (
         password !== undefined &&
         password !== null &&
@@ -1443,18 +1483,16 @@ export const updatedstaffdata = async (req, res) => {
         updateData.password = password;
       }
 
-      // Update user
       await trx("users")
         .where("id", userId)
         .update(updateData);
 
-      // Get updated user
       const updatedUser = await trx("users")
         .select(
           "id",
           "organization_name",
           "role_id",
-          "role_permission",
+          "role_permission_id",
           "name",
           "email",
           "phone",
@@ -1476,40 +1514,64 @@ export const updatedstaffdata = async (req, res) => {
         .where("id", userId)
         .first();
 
-      // Convert role_permission back to array/object
-      let parsedRolePermission = [];
+      if (updatedUser?.role_permission_id) {
+        const permissionData = await trx(
+          "role_permission"
+        )
+          .select(
+            "id",
+            "profile_id",
+            "permission"
+          )
+          .where(
+            "id",
+            updatedUser.role_permission_id
+          )
+          .first();
 
-      if (updatedUser?.role_permission) {
-        try {
-          parsedRolePermission =
-            typeof updatedUser.role_permission === "string"
-              ? JSON.parse(updatedUser.role_permission)
-              : updatedUser.role_permission;
-        } catch (error) {
-          console.error(
-            "ROLE PERMISSION PARSE ERROR:",
-            error
-          );
+        if (permissionData) {
+          let permission = permissionData.permission;
 
-          parsedRolePermission = [];
+          if (typeof permission === "string") {
+            try {
+              permission = JSON.parse(
+                permission
+              );
+            } catch {
+              permission = {};
+            }
+          }
+
+          parsedRolePermission = {
+            id: permissionData.id,
+            profile_id:
+              permissionData.profile_id,
+            permission,
+          };
         }
       }
 
       return res.status(200).json({
         success: true,
-        message: "Staff data updated successfully",
+        message:
+          "Staff data updated successfully",
         data: {
           ...updatedUser,
-          role_permission: parsedRolePermission,
+          role_permission:
+            parsedRolePermission,
         },
       });
     });
   } catch (error) {
-    console.error("UPDATE STAFF ERROR:", error);
+    console.error(
+      "UPDATE STAFF ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update staff data",
+      message:
+        "Failed to update staff data",
       error: error.message,
     });
   }
