@@ -111,6 +111,10 @@ export const createuserrole = async (req, res) => {
             supreme_lock,
         } = req.body;
 
+        // --------------------------------------------------
+        // BASIC VALIDATION
+        // --------------------------------------------------
+
         if (
             !name ||
             !email ||
@@ -141,19 +145,9 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        const requestedRoleId = Number(role_id);
-
-        if (
-            Number.isNaN(requestedRoleId) ||
-            requestedRoleId === 0 ||
-            requestedRoleId < 1 ||
-            requestedRoleId > 9
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Valid role_id is required",
-            });
-        }
+        // --------------------------------------------------
+        // AUTHENTICATION
+        // --------------------------------------------------
 
         if (!req.user?.id) {
             return res.status(401).json({
@@ -163,6 +157,27 @@ export const createuserrole = async (req, res) => {
         }
 
         const created_by = Number(req.user.id);
+
+        // --------------------------------------------------
+        // ROLE VALIDATION
+        // --------------------------------------------------
+
+        const requestedRoleId = Number(role_id);
+
+        if (
+            Number.isNaN(requestedRoleId) ||
+            requestedRoleId < 1 ||
+            requestedRoleId > 9
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid role_id is required",
+            });
+        }
+
+        // --------------------------------------------------
+        // GET CREATOR
+        // --------------------------------------------------
 
         const creator = await db("users")
             .where("id", created_by)
@@ -177,8 +192,23 @@ export const createuserrole = async (req, res) => {
 
         const creatorRole = Number(creator.role_id);
 
+        // --------------------------------------------------
+        // ROLE CREATION PERMISSION
+        // --------------------------------------------------
+
+        /*
+         * Normal roles:
+         * Creator can create only a lower-level role.
+         *
+         * Staff:
+         * Any role that is allowed to create users can create
+         * Staff under themselves.
+         */
+
         if (
             creatorRole !== ROLES.STAFF &&
+            creatorRole !== 8 &&
+            requestedRoleId !== 9 &&
             requestedRoleId <= creatorRole
         ) {
             return res.status(403).json({
@@ -188,16 +218,16 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        if (
-            requestedRoleId === 9 &&
-            creatorRole !== 1
-        ) {
-            return res.status(403).json({
-                success: false,
-                message:
-                    "Only Admin can create Staff",
-            });
-        }
+        // --------------------------------------------------
+        // EMPLOYEE RESTRICTION
+        // --------------------------------------------------
+
+        /*
+         * Employee cannot create users.
+         *
+         * Remove this block if Employee should also be
+         * allowed to create Staff.
+         */
 
         if (creatorRole === 8) {
             return res.status(403).json({
@@ -207,13 +237,15 @@ export const createuserrole = async (req, res) => {
             });
         }
 
+        // --------------------------------------------------
+        // STAFF PERMISSION
+        // --------------------------------------------------
+
         if (creatorRole === ROLES.STAFF) {
             const [permissions, requestedRole] =
                 await Promise.all([
                     getStaffPermissions(creator),
-                    getRoleForPermission(
-                        requestedRoleId
-                    ),
+                    getRoleForPermission(requestedRoleId),
                 ]);
 
             if (
@@ -231,8 +263,16 @@ export const createuserrole = async (req, res) => {
             }
         }
 
+        // --------------------------------------------------
+        // PARENT VALIDATION
+        // --------------------------------------------------
+
         let finalParentId = null;
 
+        /*
+         * Staff is always created under the user who is
+         * creating the Staff.
+         */
         if (requestedRoleId === 9) {
             finalParentId = created_by;
         } else if (
@@ -240,8 +280,7 @@ export const createuserrole = async (req, res) => {
             parent_id !== null &&
             parent_id !== ""
         ) {
-            const parsedParentId =
-                Number(parent_id);
+            const parsedParentId = Number(parent_id);
 
             if (
                 !Number.isInteger(parsedParentId) ||
@@ -249,8 +288,7 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(400).json({
                     success: false,
-                    message:
-                        "Invalid parent_id",
+                    message: "Invalid parent_id",
                 });
             }
 
@@ -269,25 +307,38 @@ export const createuserrole = async (req, res) => {
             finalParentId = parsedParentId;
         }
 
+        // --------------------------------------------------
+        // EMAIL DUPLICATE CHECK
+        // --------------------------------------------------
+
+        const normalizedEmail = String(email)
+            .trim()
+            .toLowerCase();
+
         const existingEmail = await db("users")
-            .where("email", email)
+            .where("email", normalizedEmail)
             .first();
 
         if (existingEmail) {
             return res.status(409).json({
                 success: false,
-                message:
-                    "Email already exists",
+                message: "Email already exists",
             });
         }
 
-        const selectedCountry =
-            String(country || "").trim();
+        // --------------------------------------------------
+        // COUNTRY VALIDATION
+        // --------------------------------------------------
 
-        const selectedCountryCode =
-            String(country_code || "")
-                .trim()
-                .toUpperCase();
+        const selectedCountry = String(
+            country || ""
+        ).trim();
+
+        const selectedCountryCode = String(
+            country_code || ""
+        )
+            .trim()
+            .toUpperCase();
 
         if (!selectedCountry) {
             return res.status(400).json({
@@ -319,6 +370,10 @@ export const createuserrole = async (req, res) => {
                     "Invalid country code",
             });
         }
+
+        // --------------------------------------------------
+        // PHONE VALIDATION
+        // --------------------------------------------------
 
         let parsedPhone;
 
@@ -358,11 +413,14 @@ export const createuserrole = async (req, res) => {
             });
         }
 
+        // --------------------------------------------------
+        // STAFF PROFILE / ROLE PERMISSION
+        // --------------------------------------------------
+
         let rolePermissionId = null;
 
         if (requestedRoleId === 9) {
-            const profileId =
-                Number(profile_id);
+            const profileId = Number(profile_id);
 
             if (
                 !Number.isInteger(profileId) ||
@@ -408,6 +466,10 @@ export const createuserrole = async (req, res) => {
                 rolePermission.id;
         }
 
+        // --------------------------------------------------
+        // RETAILER DEVICE VALIDATION
+        // --------------------------------------------------
+
         if (requestedRoleId === 6) {
             const devices = [
                 new_device,
@@ -433,14 +495,32 @@ export const createuserrole = async (req, res) => {
             }
         }
 
+        // --------------------------------------------------
+        // PASSWORD HASH
+        // --------------------------------------------------
+
         const hashedPassword =
             await bcrypt.hash(password, 10);
 
+        // --------------------------------------------------
+        // ORGANIZATION NAME
+        // --------------------------------------------------
+
+        /*
+         * Staff gets the creator's organization.
+         */
         const finalOrganizationName =
             requestedRoleId === 9
-                ? creator.organization_name ||
-                  null
-                : organization_name || null;
+                ? creator.organization_name || null
+                : organization_name
+                    ? String(
+                          organization_name
+                      ).trim()
+                    : null;
+
+        // --------------------------------------------------
+        // USER DATA
+        // --------------------------------------------------
 
         const userData = {
             organization_name:
@@ -455,9 +535,9 @@ export const createuserrole = async (req, res) => {
 
             parent_id: finalParentId,
 
-            name: name.trim(),
+            name: String(name).trim(),
 
-            email: email.trim(),
+            email: normalizedEmail,
 
             phone: normalizedPhone,
 
@@ -465,7 +545,9 @@ export const createuserrole = async (req, res) => {
 
             company_address:
                 company_address
-                    ? company_address.trim()
+                    ? String(
+                          company_address
+                      ).trim()
                     : null,
 
             country: selectedCountry,
@@ -502,11 +584,20 @@ export const createuserrole = async (req, res) => {
             created_by,
         };
 
+        // --------------------------------------------------
+        // CREATE USER
+        // --------------------------------------------------
+
         const userId =
             await createUserModel(userData);
 
+        // --------------------------------------------------
+        // RESPONSE
+        // --------------------------------------------------
+
         return res.status(201).json({
             success: true,
+
             message:
                 "User created successfully",
 
@@ -530,9 +621,9 @@ export const createuserrole = async (req, res) => {
                 organization_name:
                     finalOrganizationName,
 
-                name: name.trim(),
+                name: String(name).trim(),
 
-                email: email.trim(),
+                email: normalizedEmail,
 
                 phone: normalizedPhone,
 
