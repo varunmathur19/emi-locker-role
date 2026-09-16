@@ -1691,15 +1691,22 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
-    const targetUser = await db("users")
-      .select(
-        "id",
-        "name",
-        "email",
-        "role_id",
-        "parent_id"
+    const targetUser = await db("users as u")
+      .leftJoin(
+        "role_permission as rp",
+        "u.role_permission_id",
+        "rp.id"
       )
-      .where("id", user_id)
+      .select(
+        "u.id",
+        "u.name",
+        "u.email",
+        "u.role_id",
+        "u.parent_id",
+        "u.role_permission_id",
+        "rp.permission"
+      )
+      .where("u.id", user_id)
       .first();
 
     if (!targetUser) {
@@ -1747,6 +1754,20 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
+    let permission = targetUser.permission;
+
+    if (typeof permission === "string") {
+      try {
+        permission = JSON.parse(permission);
+      } catch {
+        permission = {};
+      }
+    }
+
+    if (!permission || typeof permission !== "object") {
+      permission = {};
+    }
+
     const token = jwt.sign(
       {
         id: targetUser.id,
@@ -1772,6 +1793,10 @@ export const loginAsUser = async (req, res) => {
         email: targetUser.email,
         role_id: targetRoleId,
         parent_id: targetUser.parent_id || null,
+        role_permission_id: targetUser.role_permission_id || null,
+        role_permission: {
+          permission,
+        },
       },
     });
   } catch (error) {
