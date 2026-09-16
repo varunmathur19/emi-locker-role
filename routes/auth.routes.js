@@ -42,7 +42,6 @@ const router = express.Router();
 
 
 // Register Staff
-
 router.post(
     "/add-staff",
 
@@ -109,9 +108,8 @@ router.post(
         .withMessage("Phone is required"),
 
     body("state")
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage("State is required")
         .custom((value) => {
             const state = String(value).trim();
 
@@ -125,9 +123,8 @@ router.post(
         }),
 
     body("city")
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage("City is required")
         .custom((value) => {
             const city = String(value).trim();
 
