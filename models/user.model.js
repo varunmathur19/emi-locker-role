@@ -311,38 +311,144 @@ export const getAllUsers = async (
       status,
     };
 
-    /*
-    |--------------------------------------------------------------------------
-    | MASTER ADMIN / ADMIN
-    |--------------------------------------------------------------------------
-    */
+    if (staffRoleAccess && loggedInRoleId === 9) {
+      const staffUser = await db("users")
+        .select("parent_id")
+        .where("id", loggedInUserId)
+        .first();
 
-    if (loggedInRoleId === 0 || loggedInRoleId === 1 || staffRoleAccess) {
-      let usersQuery = db
+      const parentId = Number(staffUser?.parent_id);
+
+      if (!Number.isInteger(parentId) || parentId <= 0) {
+        return {
+          users: [],
+          total: 0,
+        };
+      }
+
+      const buildStaffChain = () =>
+        db.withRecursive(
+          "user_chain",
+          ["id", "parent_id", "created_by", "role_id"],
+          (query) => {
+            query
+              .select(
+                "id",
+                "parent_id",
+                "created_by",
+                "role_id"
+              )
+              .from("users")
+              .where("id", parentId)
+
+              .unionAll((query) => {
+                query
+                  .select(
+                    "child.id",
+                    "child.parent_id",
+                    "child.created_by",
+                    "child.role_id"
+                  )
+                  .from({ child: "users" })
+                  .join(
+                    { parent: "user_chain" },
+                    "child.parent_id",
+                    "parent.id"
+                  );
+              });
+          }
+        );
+
+      let countQuery = buildStaffChain()
+        .from({ u: "users" })
+        .join(
+          { uc: "user_chain" },
+          "uc.id",
+          "u.id"
+        )
+        .whereNot("u.id", loggedInUserId)
+        .count("* as total");
+
+      applyFilters(countQuery, filters);
+
+      const countResult = await countQuery.first();
+
+      const total = Number(countResult?.total || 0);
+
+      let usersQuery = buildStaffChain()
         .from({ u: "users" })
 
-        // Parent
+        .join(
+          { uc: "user_chain" },
+          "uc.id",
+          "u.id"
+        )
+
         .leftJoin(
           { parent: "users" },
           "parent.id",
           "u.parent_id"
         )
 
-        // Creator
         .leftJoin(
           { creator: "users" },
           "creator.id",
           "u.created_by"
         )
 
-        // Role Permission
         .leftJoin(
           { rp: "role_permission" },
           "rp.id",
           "u.role_permission_id"
         )
 
-        // Profile
+        .leftJoin(
+          { p: "profile" },
+          "p.id",
+          "rp.profile_id"
+        )
+
+        .select(selectUserFields)
+
+        .whereNot("u.id", loggedInUserId)
+
+        .orderBy("u.id", "desc")
+
+        .limit(limit)
+        .offset(offset);
+
+      applyFilters(usersQuery, filters);
+
+      const users = await usersQuery;
+
+      return {
+        users,
+        total,
+      };
+    }
+
+    if (loggedInRoleId === 0 || loggedInRoleId === 1) {
+      let usersQuery = db
+        .from({ u: "users" })
+
+        .leftJoin(
+          { parent: "users" },
+          "parent.id",
+          "u.parent_id"
+        )
+
+        .leftJoin(
+          { creator: "users" },
+          "creator.id",
+          "u.created_by"
+        )
+
+        .leftJoin(
+          { rp: "role_permission" },
+          "rp.id",
+          "u.role_permission_id"
+        )
+
         .leftJoin(
           { p: "profile" },
           "p.id",
@@ -357,12 +463,6 @@ export const getAllUsers = async (
       applyFilters(usersQuery, filters);
 
       const users = await usersQuery;
-
-      /*
-      |--------------------------------------------------------------------------
-      | TOTAL COUNT
-      |--------------------------------------------------------------------------
-      */
 
       let countQuery = db
         .from({ u: "users" })
@@ -379,12 +479,6 @@ export const getAllUsers = async (
         total,
       };
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | USER CHAIN
-    |--------------------------------------------------------------------------
-    */
 
     const buildUserChain = () =>
       db.withRecursive(
@@ -419,12 +513,6 @@ export const getAllUsers = async (
         }
       );
 
-    /*
-    |--------------------------------------------------------------------------
-    | COUNT USERS
-    |--------------------------------------------------------------------------
-    */
-
     let countQuery = buildUserChain()
       .from({ u: "users" })
       .join(
@@ -441,44 +529,33 @@ export const getAllUsers = async (
 
     const total = Number(countResult?.total || 0);
 
-    /*
-    |--------------------------------------------------------------------------
-    | GET USERS
-    |--------------------------------------------------------------------------
-    */
-
     let usersQuery = buildUserChain()
       .from({ u: "users" })
 
-      // User Chain
       .join(
         { uc: "user_chain" },
         "uc.id",
         "u.id"
       )
 
-      // Parent
       .leftJoin(
         { parent: "users" },
         "parent.id",
         "u.parent_id"
       )
 
-      // Creator
       .leftJoin(
         { creator: "users" },
         "creator.id",
         "u.created_by"
       )
 
-      // Role Permission
       .leftJoin(
         { rp: "role_permission" },
         "rp.id",
         "u.role_permission_id"
       )
 
-      // Profile
       .leftJoin(
         { p: "profile" },
         "p.id",

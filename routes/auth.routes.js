@@ -20,7 +20,10 @@ import {
     getProfiles,
     saveRolePermissions,
     getRolePermissions,
-    createProfile
+    createProfile,
+    getCountries,
+    getStates,
+    getCities
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -39,7 +42,6 @@ const router = express.Router();
 
 
 // Register Staff
-
 router.post(
     "/add-staff",
 
@@ -106,9 +108,8 @@ router.post(
         .withMessage("Phone is required"),
 
     body("state")
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage("State is required")
         .custom((value) => {
             const state = String(value).trim();
 
@@ -122,9 +123,8 @@ router.post(
         }),
 
     body("city")
+        .optional({ checkFalsy: true })
         .trim()
-        .notEmpty()
-        .withMessage("City is required")
         .custom((value) => {
             const city = String(value).trim();
 
@@ -256,6 +256,15 @@ router.get(
   getRolePermissions
 );
 
+
+//country get api
+router.get("/countries", getCountries);
+
+// get state api accoridng to the country
+router.get("/states", getStates);
+
+//get city api according to the state
+router.get("/cities", getCities);
 
 
 

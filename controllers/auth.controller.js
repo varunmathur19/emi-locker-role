@@ -128,30 +128,14 @@ export const createuserrole = async (req, res) => {
         if (password !== confirm_password) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Password and confirm password do not match",
+                message: "Password and confirm password do not match",
             });
         }
 
         if (!/^[A-Z]/.test(password)) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Password must start with a capital letter",
-            });
-        }
-
-        const requestedRoleId = Number(role_id);
-
-        if (
-            Number.isNaN(requestedRoleId) ||
-            requestedRoleId === 0 ||
-            requestedRoleId < 1 ||
-            requestedRoleId > 9
-        ) {
-            return res.status(400).json({
-                success: false,
-                message: "Valid role_id is required",
+                message: "Password must start with a capital letter",
             });
         }
 
@@ -163,6 +147,18 @@ export const createuserrole = async (req, res) => {
         }
 
         const created_by = Number(req.user.id);
+        const requestedRoleId = Number(role_id);
+
+        if (
+            !Number.isInteger(requestedRoleId) ||
+            requestedRoleId < 1 ||
+            requestedRoleId > 9
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Valid role_id is required",
+            });
+        }
 
         const creator = await db("users")
             .where("id", created_by)
@@ -179,31 +175,20 @@ export const createuserrole = async (req, res) => {
 
         if (
             creatorRole !== ROLES.STAFF &&
+            creatorRole !== 8 &&
+            requestedRoleId !== 9 &&
             requestedRoleId <= creatorRole
         ) {
             return res.status(403).json({
                 success: false,
-                message:
-                    "You are not allowed to create this role",
-            });
-        }
-
-        if (
-            requestedRoleId === 9 &&
-            creatorRole !== 1
-        ) {
-            return res.status(403).json({
-                success: false,
-                message:
-                    "Only Admin can create Staff",
+                message: "You are not allowed to create this role",
             });
         }
 
         if (creatorRole === 8) {
             return res.status(403).json({
                 success: false,
-                message:
-                    "Employee cannot create users",
+                message: "Employee cannot create users",
             });
         }
 
@@ -211,9 +196,7 @@ export const createuserrole = async (req, res) => {
             const [permissions, requestedRole] =
                 await Promise.all([
                     getStaffPermissions(creator),
-                    getRoleForPermission(
-                        requestedRoleId
-                    ),
+                    getRoleForPermission(requestedRoleId),
                 ]);
 
             if (
@@ -225,8 +208,7 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(403).json({
                     success: false,
-                    message:
-                        "You are not allowed to create this role",
+                    message: "You are not allowed to create this role",
                 });
             }
         }
@@ -240,8 +222,7 @@ export const createuserrole = async (req, res) => {
             parent_id !== null &&
             parent_id !== ""
         ) {
-            const parsedParentId =
-                Number(parent_id);
+            const parsedParentId = Number(parent_id);
 
             if (
                 !Number.isInteger(parsedParentId) ||
@@ -249,8 +230,7 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(400).json({
                     success: false,
-                    message:
-                        "Invalid parent_id",
+                    message: "Invalid parent_id",
                 });
             }
 
@@ -261,33 +241,29 @@ export const createuserrole = async (req, res) => {
             if (!parentUser) {
                 return res.status(404).json({
                     success: false,
-                    message:
-                        "Selected parent not found",
+                    message: "Selected parent not found",
                 });
             }
 
             finalParentId = parsedParentId;
         }
 
+        const normalizedEmail = String(email)
+            .trim()
+            .toLowerCase();
+
         const existingEmail = await db("users")
-            .where("email", email)
+            .where("email", normalizedEmail)
             .first();
 
         if (existingEmail) {
             return res.status(409).json({
                 success: false,
-                message:
-                    "Email already exists",
+                message: "Email already exists",
             });
         }
 
-        const selectedCountry =
-            String(country || "").trim();
-
-        const selectedCountryCode =
-            String(country_code || "")
-                .trim()
-                .toUpperCase();
+        const selectedCountry = String(country || "").trim();
 
         if (!selectedCountry) {
             return res.status(400).json({
@@ -299,43 +275,82 @@ export const createuserrole = async (req, res) => {
         if (/^\d+$/.test(selectedCountry)) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Country name is required",
+                message: "Country name is required",
             });
         }
+
+        const rawPhone = String(phone || "").trim();
+
+        if (!rawPhone) {
+            return res.status(400).json({
+                success: false,
+                message: "Phone number is required",
+            });
+        }
+
+        let selectedCountryCode = String(
+            country_code || ""
+        )
+            .trim()
+            .toUpperCase();
+
+        const countryCodeMap = {
+            INDIA: "IN",
+            "INDIA": "IN",
+            "UNITED STATES": "US",
+            "UNITED STATES OF AMERICA": "US",
+            USA: "US",
+            CANADA: "CA",
+            "UNITED KINGDOM": "GB",
+            UK: "GB",
+            AUSTRALIA: "AU",
+            UAE: "AE",
+            "UNITED ARAB EMIRATES": "AE",
+            SINGAPORE: "SG",
+            GERMANY: "DE",
+            FRANCE: "FR",
+            ITALY: "IT",
+            SPAIN: "ES",
+            JAPAN: "JP",
+            CHINA: "CN",
+            "NEW ZEALAND": "NZ",
+            "SOUTH AFRICA": "ZA",
+        };
 
         if (!selectedCountryCode) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Country code is required for phone number",
-            });
+            const normalizedCountryName =
+                selectedCountry
+                    .replace(/\s+/g, " ")
+                    .trim()
+                    .toUpperCase();
+
+            selectedCountryCode =
+                countryCodeMap[normalizedCountryName] || "";
         }
 
-        if (!/^[A-Z]{2}$/.test(selectedCountryCode)) {
-            return res.status(400).json({
-                success: false,
-                message:
-                    "Invalid country code",
-            });
-        }
-
-        let parsedPhone;
+        let parsedPhone = null;
 
         try {
-            parsedPhone =
-                parsePhoneNumberFromString(
-                    String(phone).trim(),
-                    selectedCountryCode
-                );
-        } catch (phoneError) {
+            if (rawPhone.startsWith("+")) {
+                parsedPhone =
+                    parsePhoneNumberFromString(rawPhone);
+
+                if (parsedPhone?.country) {
+                    selectedCountryCode =
+                        parsedPhone.country;
+                }
+            } else if (selectedCountryCode) {
+                parsedPhone =
+                    parsePhoneNumberFromString(
+                        rawPhone,
+                        selectedCountryCode
+                    );
+            }
+        } catch (error) {
             parsedPhone = null;
         }
 
-        if (
-            !parsedPhone ||
-            !parsedPhone.isValid()
-        ) {
+        if (!parsedPhone || !parsedPhone.isValid()) {
             return res.status(400).json({
                 success: false,
                 message:
@@ -343,8 +358,7 @@ export const createuserrole = async (req, res) => {
             });
         }
 
-        const normalizedPhone =
-            parsedPhone.number;
+        const normalizedPhone = parsedPhone.number;
 
         const existingPhone = await db("users")
             .where("phone", normalizedPhone)
@@ -353,16 +367,14 @@ export const createuserrole = async (req, res) => {
         if (existingPhone) {
             return res.status(409).json({
                 success: false,
-                message:
-                    "Phone number already exists",
+                message: "Phone number already exists",
             });
         }
 
         let rolePermissionId = null;
 
         if (requestedRoleId === 9) {
-            const profileId =
-                Number(profile_id);
+            const profileId = Number(profile_id);
 
             if (
                 !Number.isInteger(profileId) ||
@@ -370,8 +382,7 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(400).json({
                     success: false,
-                    message:
-                        "Profile is required for Staff",
+                    message: "Profile is required for Staff",
                 });
             }
 
@@ -383,29 +394,23 @@ export const createuserrole = async (req, res) => {
             if (!profile) {
                 return res.status(404).json({
                     success: false,
-                    message:
-                        "Active profile not found",
+                    message: "Active profile not found",
                 });
             }
 
             const rolePermission =
                 await db("role_permission")
-                    .where(
-                        "profile_id",
-                        profileId
-                    )
+                    .where("profile_id", profileId)
                     .first();
 
             if (!rolePermission) {
                 return res.status(404).json({
                     success: false,
-                    message:
-                        "Role permission not found",
+                    message: "Role permission not found",
                 });
             }
 
-            rolePermissionId =
-                rolePermission.id;
+            rolePermissionId = rolePermission.id;
         }
 
         if (requestedRoleId === 6) {
@@ -438,9 +443,10 @@ export const createuserrole = async (req, res) => {
 
         const finalOrganizationName =
             requestedRoleId === 9
-                ? creator.organization_name ||
-                  null
-                : organization_name || null;
+                ? creator.organization_name || null
+                : organization_name
+                    ? String(organization_name).trim()
+                    : null;
 
         const userData = {
             organization_name:
@@ -455,9 +461,9 @@ export const createuserrole = async (req, res) => {
 
             parent_id: finalParentId,
 
-            name: name.trim(),
+            name: String(name).trim(),
 
-            email: email.trim(),
+            email: normalizedEmail,
 
             phone: normalizedPhone,
 
@@ -465,7 +471,7 @@ export const createuserrole = async (req, res) => {
 
             company_address:
                 company_address
-                    ? company_address.trim()
+                    ? String(company_address).trim()
                     : null,
 
             country: selectedCountry,
@@ -507,41 +513,29 @@ export const createuserrole = async (req, res) => {
 
         return res.status(201).json({
             success: true,
-            message:
-                "User created successfully",
-
+            message: "User created successfully",
             data: {
                 id: userId,
-
                 role_id: requestedRoleId,
-
                 profile_id:
                     requestedRoleId === 9
                         ? Number(profile_id)
                         : null,
-
                 role_permission_id:
                     requestedRoleId === 9
                         ? rolePermissionId
                         : null,
-
                 parent_id: finalParentId,
-
                 organization_name:
                     finalOrganizationName,
-
-                name: name.trim(),
-
-                email: email.trim(),
-
+                name: String(name).trim(),
+                email: normalizedEmail,
                 phone: normalizedPhone,
-
                 country: selectedCountry,
-
+                country_code: selectedCountryCode,
                 state: state
                     ? String(state).trim()
                     : null,
-
                 city: city
                     ? String(city).trim()
                     : null,
@@ -555,8 +549,7 @@ export const createuserrole = async (req, res) => {
 
         return res.status(500).json({
             success: false,
-            message:
-                "Internal server error",
+            message: "Internal server error",
         });
     }
 };
@@ -1161,6 +1154,7 @@ export const updatedstaffdata = async (req, res) => {
     const {
       organization_name,
       role_id,
+      profile_id,
       role_permission,
       name,
       email,
@@ -1170,7 +1164,6 @@ export const updatedstaffdata = async (req, res) => {
       state,
       city,
       parent_id,
-      parent_hierarchy,
       new_device,
       old_device,
       supreme_device,
@@ -1197,13 +1190,12 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Get existing user
     const existingUser = await db("users")
       .select(
         "id",
         "role_id",
         "parent_id",
-        "role_permission"
+        "role_permission_id"
       )
       .where("id", userId)
       .first();
@@ -1215,7 +1207,6 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Current role
     const currentRoleId = Number(
       role_id ?? existingUser.role_id
     );
@@ -1231,11 +1222,14 @@ export const updatedstaffdata = async (req, res) => {
       });
     }
 
-    // Parent handling
-    let normalizedParentId = existingUser.parent_id ?? null;
+    let normalizedParentId =
+      existingUser.parent_id ?? null;
 
     if (parent_id !== undefined) {
-      if (parent_id === null || parent_id === "") {
+      if (
+        parent_id === null ||
+        parent_id === ""
+      ) {
         normalizedParentId = null;
       } else {
         normalizedParentId = Number(parent_id);
@@ -1253,7 +1247,8 @@ export const updatedstaffdata = async (req, res) => {
         if (normalizedParentId === userId) {
           return res.status(400).json({
             success: false,
-            message: "User cannot be their own parent",
+            message:
+              "User cannot be their own parent",
           });
         }
 
@@ -1270,155 +1265,418 @@ export const updatedstaffdata = async (req, res) => {
         if (!parentUser) {
           return res.status(400).json({
             success: false,
-            message: "Selected parent not found",
+            message:
+              "Selected parent not found",
           });
         }
 
-        const selectedParentRoleId = Number(
-          parentUser.role_id
-        );
+        const selectedParentRoleId =
+          Number(parentUser.role_id);
 
-        if (selectedParentRoleId >= currentRoleId) {
+        if (
+          selectedParentRoleId >= currentRoleId
+        ) {
           return res.status(400).json({
             success: false,
-            message: "Selected parent role is invalid",
+            message:
+              "Selected parent role is invalid",
           });
         }
       }
     }
 
     return await db.transaction(async (trx) => {
-      // -----------------------------------------
-      // ROLE PERMISSION
-      // -----------------------------------------
-      let normalizedRolePermission =
-        existingUser.role_permission ?? null;
+      let normalizedRolePermissionId =
+        existingUser.role_permission_id ?? null;
 
-      if (role_permission !== undefined) {
+      let parsedRolePermission = null;
+
+      const hasProfileId =
+        profile_id !== undefined &&
+        profile_id !== null &&
+        String(profile_id).trim() !== "";
+
+      if (hasProfileId) {
+        const selectedProfileId =
+          Number(profile_id);
+
         if (
-          role_permission === null ||
-          role_permission === ""
+          !Number.isInteger(selectedProfileId) ||
+          selectedProfileId <= 0
         ) {
-          normalizedRolePermission = null;
-        } else if (typeof role_permission === "string") {
-          // Already JSON string
-          try {
-            JSON.parse(role_permission);
-            normalizedRolePermission = role_permission;
-          } catch (error) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid profile ID",
+          });
+        }
+
+        const profile = await trx("profile")
+          .select(
+            "id",
+            "name",
+            "status"
+          )
+          .where("id", selectedProfileId)
+          .first();
+
+        if (!profile) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Selected profile not found",
+          });
+        }
+
+        let permissionData = {};
+
+        if (
+          role_permission !== undefined &&
+          role_permission !== null &&
+          role_permission !== ""
+        ) {
+          permissionData = role_permission;
+
+          if (
+            typeof permissionData ===
+            "string"
+          ) {
+            try {
+              permissionData =
+                JSON.parse(
+                  permissionData
+                );
+            } catch {
+              return res.status(400).json({
+                success: false,
+                message:
+                  "Invalid role_permission JSON",
+              });
+            }
+          }
+
+          if (
+            typeof permissionData !==
+              "object" ||
+            Array.isArray(permissionData)
+          ) {
             return res.status(400).json({
               success: false,
-              message: "Invalid role_permission JSON",
+              message:
+                "Invalid role_permission format",
             });
           }
-        } else {
-          // Array / Object -> JSON string
-          normalizedRolePermission =
-            JSON.stringify(role_permission);
         }
+
+        let rolePermission =
+          await trx("role_permission")
+            .select(
+              "id",
+              "profile_id",
+              "permission"
+            )
+            .where(
+              "profile_id",
+              selectedProfileId
+            )
+            .first();
+
+        if (rolePermission) {
+          normalizedRolePermissionId =
+            Number(rolePermission.id);
+
+          await trx("role_permission")
+            .where(
+              "id",
+              normalizedRolePermissionId
+            )
+            .update({
+              profile_id:
+                selectedProfileId,
+              permission:
+                JSON.stringify(
+                  permissionData
+                ),
+              updated_at:
+                trx.fn.now(),
+            });
+        } else {
+          const insertData = {
+            profile_id:
+              selectedProfileId,
+            permission:
+              JSON.stringify(
+                permissionData
+              ),
+            created_at:
+              trx.fn.now(),
+            updated_at:
+              trx.fn.now(),
+          };
+
+          const inserted =
+            await trx("role_permission")
+              .insert(insertData);
+
+          normalizedRolePermissionId =
+            Number(inserted[0]);
+        }
+
+        parsedRolePermission = {
+          profile_id:
+            selectedProfileId,
+          permission:
+            permissionData,
+        };
+      } else if (
+        role_permission !== undefined
+      ) {
+        let permissionData =
+          role_permission;
+
+        if (
+          typeof permissionData ===
+          "string"
+        ) {
+          try {
+            permissionData =
+              JSON.parse(
+                permissionData
+              );
+          } catch {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Invalid role_permission JSON",
+            });
+          }
+        }
+
+        if (
+          typeof permissionData !==
+            "object" ||
+          permissionData === null ||
+          Array.isArray(permissionData)
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid role_permission format",
+          });
+        }
+
+        if (
+          normalizedRolePermissionId
+        ) {
+          await trx("role_permission")
+            .where(
+              "id",
+              normalizedRolePermissionId
+            )
+            .update({
+              permission:
+                JSON.stringify(
+                  permissionData
+                ),
+              updated_at:
+                trx.fn.now(),
+            });
+        } else {
+          const inserted =
+            await trx("role_permission")
+              .insert({
+                permission:
+                  JSON.stringify(
+                    permissionData
+                  ),
+                created_at:
+                  trx.fn.now(),
+                updated_at:
+                  trx.fn.now(),
+              });
+
+          normalizedRolePermissionId =
+            Number(inserted[0]);
+        }
+
+        parsedRolePermission = {
+          id:
+            normalizedRolePermissionId,
+          permission:
+            permissionData,
+        };
       }
 
       const updateData = {
-        organization_name: organization_name || "",
-        role_id: currentRoleId,
+        organization_name:
+          organization_name || "",
 
-        // ✅ FIXED ROLE PERMISSION
-        role_permission: normalizedRolePermission,
+        role_id:
+          currentRoleId,
 
-        name: name || "",
-        email: email || "",
-        phone: phone || "",
-        company_address: company_address || "",
-        country: country || "",
-        state: state || "",
-        city: city || "",
-        parent_id: normalizedParentId,
+        role_permission_id:
+          normalizedRolePermissionId,
 
-        new_device: Number(new_device ?? 0),
-        old_device: Number(old_device ?? 0),
-        supreme_device: Number(supreme_device ?? 0),
-        pro_star: Number(pro_star ?? 0),
-        lite: Number(lite ?? 0),
-        google_tv: Number(google_tv ?? 0),
-        supreme_lock: Number(supreme_lock ?? 0),
+        name:
+          name || "",
+
+        email:
+          email || "",
+
+        phone:
+          phone || "",
+
+        company_address:
+          company_address || "",
+
+        country:
+          country || "",
+
+        state:
+          state || "",
+
+        city:
+          city || "",
+
+        parent_id:
+          normalizedParentId,
+
+        new_device:
+          Number(new_device ?? 0),
+
+        old_device:
+          Number(old_device ?? 0),
+
+        supreme_device:
+          Number(
+            supreme_device ?? 0
+          ),
+
+        pro_star:
+          Number(pro_star ?? 0),
+
+        lite:
+          Number(lite ?? 0),
+
+        google_tv:
+          Number(
+            google_tv ?? 0
+          ),
+
+        supreme_lock:
+          Number(
+            supreme_lock ?? 0
+          ),
       };
 
-      // Password only update if provided
       if (
         password !== undefined &&
         password !== null &&
         password !== ""
       ) {
-        updateData.password = password;
+        updateData.password =
+          password;
       }
 
-      // Update user
       await trx("users")
         .where("id", userId)
         .update(updateData);
 
-      // Get updated user
-      const updatedUser = await trx("users")
-        .select(
-          "id",
-          "organization_name",
-          "role_id",
-          "role_permission",
-          "name",
-          "email",
-          "phone",
-          "company_address",
-          "country",
-          "state",
-          "city",
-          "parent_id",
-          "new_device",
-          "old_device",
-          "supreme_device",
-          "pro_star",
-          "lite",
-          "google_tv",
-          "supreme_lock",
-          "created_at",
-          "updated_at"
-        )
-        .where("id", userId)
-        .first();
+      const updatedUser =
+        await trx("users")
+          .select(
+            "id",
+            "organization_name",
+            "role_id",
+            "role_permission_id",
+            "name",
+            "email",
+            "phone",
+            "company_address",
+            "country",
+            "state",
+            "city",
+            "parent_id",
+            "new_device",
+            "old_device",
+            "supreme_device",
+            "pro_star",
+            "lite",
+            "google_tv",
+            "supreme_lock",
+            "created_at",
+            "updated_at"
+          )
+          .where("id", userId)
+          .first();
 
-      // Convert role_permission back to array/object
-      let parsedRolePermission = [];
+      if (
+        updatedUser?.role_permission_id
+      ) {
+        const permissionData =
+          await trx("role_permission")
+            .select(
+              "id",
+              "profile_id",
+              "permission"
+            )
+            .where(
+              "id",
+              updatedUser.role_permission_id
+            )
+            .first();
 
-      if (updatedUser?.role_permission) {
-        try {
-          parsedRolePermission =
-            typeof updatedUser.role_permission === "string"
-              ? JSON.parse(updatedUser.role_permission)
-              : updatedUser.role_permission;
-        } catch (error) {
-          console.error(
-            "ROLE PERMISSION PARSE ERROR:",
-            error
-          );
+        if (permissionData) {
+          let permission =
+            permissionData.permission;
 
-          parsedRolePermission = [];
+          if (
+            typeof permission ===
+            "string"
+          ) {
+            try {
+              permission =
+                JSON.parse(
+                  permission
+                );
+            } catch {
+              permission = {};
+            }
+          }
+
+          parsedRolePermission = {
+            id:
+              permissionData.id,
+
+            profile_id:
+              permissionData.profile_id,
+
+            permission:
+              permission,
+          };
         }
       }
 
       return res.status(200).json({
         success: true,
-        message: "Staff data updated successfully",
+        message:
+          "Staff data updated successfully",
         data: {
           ...updatedUser,
-          role_permission: parsedRolePermission,
+          role_permission:
+            parsedRolePermission,
         },
       });
     });
   } catch (error) {
-    console.error("UPDATE STAFF ERROR:", error);
+    console.error(
+      "UPDATE STAFF ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update staff data",
+      message:
+        "Failed to update staff data",
       error: error.message,
     });
   }
@@ -1600,15 +1858,22 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
-    const targetUser = await db("users")
-      .select(
-        "id",
-        "name",
-        "email",
-        "role_id",
-        "parent_id"
+    const targetUser = await db("users as u")
+      .leftJoin(
+        "role_permission as rp",
+        "u.role_permission_id",
+        "rp.id"
       )
-      .where("id", user_id)
+      .select(
+        "u.id",
+        "u.name",
+        "u.email",
+        "u.role_id",
+        "u.parent_id",
+        "u.role_permission_id",
+        "rp.permission"
+      )
+      .where("u.id", user_id)
       .first();
 
     if (!targetUser) {
@@ -1656,6 +1921,20 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
+    let permission = targetUser.permission;
+
+    if (typeof permission === "string") {
+      try {
+        permission = JSON.parse(permission);
+      } catch {
+        permission = {};
+      }
+    }
+
+    if (!permission || typeof permission !== "object") {
+      permission = {};
+    }
+
     const token = jwt.sign(
       {
         id: targetUser.id,
@@ -1681,6 +1960,10 @@ export const loginAsUser = async (req, res) => {
         email: targetUser.email,
         role_id: targetRoleId,
         parent_id: targetUser.parent_id || null,
+        role_permission_id: targetUser.role_permission_id || null,
+        role_permission: {
+          permission,
+        },
       },
     });
   } catch (error) {
@@ -2402,5 +2685,170 @@ export const getRolePermissions = async (req, res) => {
   }
 };
 
+//country get api
+export const getCountries = async (req, res) => {
+    try {
+        const countries = await db("loksiz_master_countries_migrated")
+            .select(
+                "country_id",
+                "country_name",
+                "currency",
+                "country_code",
+                "iso3",
+                "numeric_code",
+                "mobile_code",
+                "capital",
+                "currency_name",
+                "currency_symbol",
+                "tld",
+                "native",
+                "region",
+                "region_id",
+                "subregion",
+                "subregion_id",
+                "nationality",
+                "timezones",
+                "translations",
+                "latitude",
+                "longitude",
+                "emoji",
+                "emojiU",
+                "flag",
+                "wikiDataId",
+                "is_active",
+                "created_at",
+                "updated_at"
+            )
+            .where("is_active", 1)
+            .orderBy("country_name", "asc");
 
+        return res.status(200).json({
+            success: true,
+            message: "Countries fetched successfully",
+            data: countries,
+        });
+    } catch (error) {
+        console.error("GET COUNTRIES ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch countries",
+            error: error.message,
+        });
+    }
+};
+
+// get state api accoridng to the country
+export const getStates = async (req, res) => {
+    try {
+        const { country_id } = req.query;
+
+        if (!country_id) {
+            return res.status(400).json({
+                success: false,
+                message: "country_id is required",
+            });
+        }
+
+        const countryId = Number(country_id);
+
+        if (!Number.isInteger(countryId) || countryId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid country_id",
+            });
+        }
+
+        const states = await db("loksiz_master_states")
+            .select(
+                "id",
+                "name",
+                "country_id",
+                "country_code",
+                "fips_code",
+                "iso2",
+                "type",
+                "level",
+                "parent_id",
+                "latitude",
+                "longitude",
+                "created_at",
+                "updated_at",
+                "flag",
+                "wikiDataId"
+            )
+            .where("country_id", countryId)
+            .orderBy("name", "asc");
+
+        return res.status(200).json({
+            success: true,
+            message: "States fetched successfully",
+            data: states,
+        });
+    } catch (error) {
+        console.error("GET STATES ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch states",
+            error: error.message,
+        });
+    }
+};
+
+
+//get city api according to the state
+export const getCities = async (req, res) => {
+    try {
+        const { state_id } = req.query;
+
+        if (!state_id) {
+            return res.status(400).json({
+                success: false,
+                message: "state_id is required",
+            });
+        }
+
+        const stateId = Number(state_id);
+
+        if (!Number.isInteger(stateId) || stateId <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid state_id",
+            });
+        }
+
+        const cities = await db("loksiz_master_cities")
+            .select(
+                "id",
+                "name",
+                "state_id",
+                "state_code",
+                "country_id",
+                "country_code",
+                "latitude",
+                "longitude",
+                "created_at",
+                "updated_at",
+                "flag",
+                "wikiDataId"
+            )
+            .where("state_id", stateId)
+            .orderBy("name", "asc");
+
+        return res.status(200).json({
+            success: true,
+            message: "Cities fetched successfully",
+            data: cities,
+        });
+    } catch (error) {
+        console.error("GET CITIES ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Failed to fetch cities",
+            error: error.message,
+        });
+    }
+};
 
