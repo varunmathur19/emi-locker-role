@@ -20,7 +20,10 @@ import {
     getProfiles,
     saveRolePermissions,
     getRolePermissions,
-    createProfile
+    createProfile,
+    getCountries,
+    getStates,
+    getCities
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -256,6 +259,15 @@ router.get(
   getRolePermissions
 );
 
+
+//country get api
+router.get("/countries", getCountries);
+
+// get state api accoridng to the country
+router.get("/states", getStates);
+
+//get city api according to the state
+router.get("/cities", getCities);
 
 
 
