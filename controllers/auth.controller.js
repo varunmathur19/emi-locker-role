@@ -739,6 +739,10 @@ export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
 
+    // ==========================================
+    // VALIDATION
+    // ==========================================
+
     if (!email || !String(email).trim()) {
       return res.status(400).json({
         success: false,
@@ -753,6 +757,10 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    // ==========================================
+    // FIND USER
+    // ==========================================
+
     const user = await findUserByEmail(
       String(email).trim().toLowerCase()
     );
@@ -764,6 +772,10 @@ export const loginUser = async (req, res) => {
       });
     }
 
+    // ==========================================
+    // ACCOUNT STATUS
+    // ==========================================
+
     if (Number(user.userStatus) === 0) {
       return res.status(403).json({
         success: false,
@@ -771,48 +783,81 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    const match = await bcrypt.compare(
+    // ==========================================
+    // PASSWORD CHECK
+    // ==========================================
+
+    const passwordMatch = await bcrypt.compare(
       password,
       user.password
     );
 
-    if (!match) {
+    if (!passwordMatch) {
       return res.status(401).json({
         success: false,
         message: "Invalid password",
       });
     }
 
-    let rolePermission = null;
+    // ==========================================
+    // STAFF PERMISSION
+    // ==========================================
 
-    if (
-      Number(user.role_id) === 9 &&
-      user.role_permission_id
-    ) {
-      rolePermission = await db("role_permission")
-        .where("id", Number(user.role_permission_id))
+    let staffPermission = null;
+
+    const isStaff = Number(user.role_id) === 9;
+
+    if (isStaff && user.role_permission_id) {
+      const rolePermission = await db("role_permission")
+        .select(
+          "id",
+          "profile_id",
+          "permission"
+        )
+        .where(
+          "id",
+          Number(user.role_permission_id)
+        )
         .first();
 
       if (rolePermission) {
-        let permission = rolePermission.permission;
+        let permission =
+          rolePermission.permission;
 
-        try {
-          permission = typeof permission === "string"
-            ? JSON.parse(permission)
-            : permission;
-        } catch {
+        // Convert JSON string to object
+        if (typeof permission === "string") {
+          try {
+            permission = JSON.parse(permission);
+          } catch (error) {
+            console.error(
+              "STAFF PERMISSION PARSE ERROR:",
+              error
+            );
+
+            permission = {};
+          }
+        }
+
+        // Ensure permission is always an object
+        if (
+          !permission ||
+          typeof permission !== "object" ||
+          Array.isArray(permission)
+        ) {
           permission = {};
         }
 
-        rolePermission = {
+        staffPermission = {
           id: rolePermission.id,
           profile_id: rolePermission.profile_id,
-          // Send an object to the frontend. Sending JSON text here caused the
-          // staff sidebar/dashboard to discard an otherwise valid profile.
           permission,
         };
       }
     }
+
+    // ==========================================
+    // JWT TOKEN
+    // ==========================================
 
     const token = jwt.sign(
       {
@@ -826,62 +871,77 @@ export const loginUser = async (req, res) => {
       }
     );
 
+    // ==========================================
+    // USER RESPONSE
+    // ==========================================
+
+    const userResponse = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role_id: user.role_id,
+      userStatus: Number(user.userStatus),
+
+      parent_id: user.parent_id,
+
+      parent_admin_id:
+        user.parent_admin_id,
+
+      parent_cnf_id:
+        user.parent_cnf_id,
+
+      parent_super_distributor_id:
+        user.parent_super_distributor_id,
+
+      parent_distributor_id:
+        user.parent_distributor_id,
+
+      parent_fos_id:
+        user.parent_fos_id,
+
+      parent_retailer_id:
+        user.parent_retailer_id,
+
+      parent_employee_id:
+        user.parent_employee_id,
+
+      parent_staff_id:
+        user.parent_staff_id,
+
+      // ========================================
+      // STAFF PERMISSION ONLY
+      // ========================================
+
+      role_permission_id: isStaff
+        ? user.role_permission_id
+        : null,
+
+      staff_permission: isStaff
+        ? staffPermission
+        : null,
+    };
+
+    // ==========================================
+    // LOGIN RESPONSE
+    // ==========================================
+
     return res.status(200).json({
       success: true,
       message: "Login Successful",
       token,
-
-      user: {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        role_id: user.role_id,
-        userStatus: Number(user.userStatus),
-
-        parent_id: user.parent_id,
-
-        parent_admin_id:
-          user.parent_admin_id,
-
-        parent_cnf_id:
-          user.parent_cnf_id,
-
-        parent_super_distributor_id:
-          user.parent_super_distributor_id,
-
-        parent_distributor_id:
-          user.parent_distributor_id,
-
-        parent_fos_id:
-          user.parent_fos_id,
-
-        parent_retailer_id:
-          user.parent_retailer_id,
-
-        parent_employee_id:
-          user.parent_employee_id,
-
-        parent_staff_id:
-          user.parent_staff_id,
-
-        role_permission_id:
-          Number(user.role_id) === 9
-            ? user.role_permission_id
-            : null,
-
-        role_permission:
-          Number(user.role_id) === 9
-            ? rolePermission
-            : null,
-      },
+      user: userResponse,
     });
   } catch (error) {
-    console.error("LOGIN ERROR:", error);
+    console.error(
+      "LOGIN ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
       message:
-        error.message || "Internal server error",
+        error.message ||
+        "Internal server error",
     });
   }
 };
