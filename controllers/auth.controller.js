@@ -109,7 +109,12 @@ export const createuserrole = async (req, res) => {
             lite,
             google_tv,
             supreme_lock,
+            role_permission,
         } = req.body;
+
+        // --------------------------------------------------
+        // BASIC VALIDATION
+        // --------------------------------------------------
 
         if (
             !name ||
@@ -135,7 +140,8 @@ export const createuserrole = async (req, res) => {
         if (!/^[A-Z]/.test(password)) {
             return res.status(400).json({
                 success: false,
-                message: "Password must start with a capital letter",
+                message:
+                    "Password must start with a capital letter",
             });
         }
 
@@ -149,6 +155,10 @@ export const createuserrole = async (req, res) => {
         const created_by = Number(req.user.id);
         const requestedRoleId = Number(role_id);
 
+        // --------------------------------------------------
+        // ROLE VALIDATION
+        // --------------------------------------------------
+
         if (
             !Number.isInteger(requestedRoleId) ||
             requestedRoleId < 1 ||
@@ -159,6 +169,10 @@ export const createuserrole = async (req, res) => {
                 message: "Valid role_id is required",
             });
         }
+
+        // --------------------------------------------------
+        // GET CREATOR
+        // --------------------------------------------------
 
         const creator = await db("users")
             .where("id", created_by)
@@ -173,6 +187,10 @@ export const createuserrole = async (req, res) => {
 
         const creatorRole = Number(creator.role_id);
 
+        // --------------------------------------------------
+        // ROLE CREATION ACCESS
+        // --------------------------------------------------
+
         if (
             creatorRole !== ROLES.STAFF &&
             creatorRole !== 8 &&
@@ -181,7 +199,8 @@ export const createuserrole = async (req, res) => {
         ) {
             return res.status(403).json({
                 success: false,
-                message: "You are not allowed to create this role",
+                message:
+                    "You are not allowed to create this role",
             });
         }
 
@@ -191,6 +210,10 @@ export const createuserrole = async (req, res) => {
                 message: "Employee cannot create users",
             });
         }
+
+        // --------------------------------------------------
+        // STAFF PERMISSION CHECK
+        // --------------------------------------------------
 
         if (creatorRole === ROLES.STAFF) {
             const [permissions, requestedRole] =
@@ -208,13 +231,19 @@ export const createuserrole = async (req, res) => {
             ) {
                 return res.status(403).json({
                     success: false,
-                    message: "You are not allowed to create this role",
+                    message:
+                        "You are not allowed to create this role",
                 });
             }
         }
 
+        // --------------------------------------------------
+        // PARENT USER
+        // --------------------------------------------------
+
         let finalParentId = null;
 
+        // Staff will always be created under logged-in user
         if (requestedRoleId === 9) {
             finalParentId = created_by;
         } else if (
@@ -248,6 +277,10 @@ export const createuserrole = async (req, res) => {
             finalParentId = parsedParentId;
         }
 
+        // --------------------------------------------------
+        // EMAIL VALIDATION
+        // --------------------------------------------------
+
         const normalizedEmail = String(email)
             .trim()
             .toLowerCase();
@@ -262,6 +295,10 @@ export const createuserrole = async (req, res) => {
                 message: "Email already exists",
             });
         }
+
+        // --------------------------------------------------
+        // COUNTRY VALIDATION
+        // --------------------------------------------------
 
         const selectedCountry = String(country || "").trim();
 
@@ -278,6 +315,10 @@ export const createuserrole = async (req, res) => {
                 message: "Country name is required",
             });
         }
+
+        // --------------------------------------------------
+        // PHONE VALIDATION
+        // --------------------------------------------------
 
         const rawPhone = String(phone || "").trim();
 
@@ -296,7 +337,6 @@ export const createuserrole = async (req, res) => {
 
         const countryCodeMap = {
             INDIA: "IN",
-            "INDIA": "IN",
             "UNITED STATES": "US",
             "UNITED STATES OF AMERICA": "US",
             USA: "US",
@@ -371,14 +411,26 @@ export const createuserrole = async (req, res) => {
             });
         }
 
+        // --------------------------------------------------
+        // ROLE PERMISSION
+        //
+        // profiles
+        //      ↓
+        // role_permission
+        //      ↓
+        // users.role_permission_id
+        // --------------------------------------------------
+
         let rolePermissionId = null;
+        let selectedProfileId = null;
+        let permissionData = {};
 
         if (requestedRoleId === 9) {
-            const profileId = Number(profile_id);
+            selectedProfileId = Number(profile_id);
 
             if (
-                !Number.isInteger(profileId) ||
-                profileId <= 0
+                !Number.isInteger(selectedProfileId) ||
+                selectedProfileId <= 0
             ) {
                 return res.status(400).json({
                     success: false,
@@ -386,8 +438,12 @@ export const createuserrole = async (req, res) => {
                 });
             }
 
+            // ----------------------------------------------
+            // CHECK PROFILE
+            // ----------------------------------------------
+
             const profile = await db("profile")
-                .where("id", profileId)
+                .where("id", selectedProfileId)
                 .where("status", 1)
                 .first();
 
@@ -398,20 +454,104 @@ export const createuserrole = async (req, res) => {
                 });
             }
 
-            const rolePermission =
-                await db("role_permission")
-                    .where("profile_id", profileId)
-                    .first();
+            // ----------------------------------------------
+            // PARSE PERMISSION
+            // ----------------------------------------------
 
-            if (!rolePermission) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Role permission not found",
-                });
+            if (
+                role_permission !== undefined &&
+                role_permission !== null &&
+                role_permission !== ""
+            ) {
+                if (typeof role_permission === "string") {
+                    try {
+                        permissionData =
+                            JSON.parse(role_permission);
+                    } catch (error) {
+                        return res.status(400).json({
+                            success: false,
+                            message:
+                                "Invalid role_permission format",
+                        });
+                    }
+                } else {
+                    permissionData = role_permission;
+                }
+
+                if (
+                    typeof permissionData !== "object" ||
+                    Array.isArray(permissionData)
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "role_permission must be a valid object",
+                    });
+                }
             }
 
-            rolePermissionId = rolePermission.id;
+            // ----------------------------------------------
+            // FIND ROLE PERMISSION BY PROFILE
+            // ----------------------------------------------
+
+            const existingRolePermission =
+                await db("role_permission")
+                    .where(
+                        "profile_id",
+                        selectedProfileId
+                    )
+                    .first();
+
+            if (existingRolePermission) {
+                // Existing role_permission belongs to this profile.
+                // Reuse its ID.
+                rolePermissionId =
+                    existingRolePermission.id;
+
+                // Only update permission when permission
+                // was explicitly provided.
+                if (
+                    role_permission !== undefined &&
+                    role_permission !== null &&
+                    role_permission !== ""
+                ) {
+                    await db("role_permission")
+                        .where(
+                            "id",
+                            existingRolePermission.id
+                        )
+                        .update({
+                            permission:
+                                JSON.stringify(
+                                    permissionData
+                                ),
+                            updated_at: db.fn.now(),
+                        });
+                }
+            } else {
+                // ------------------------------------------
+                // CREATE NEW ROLE PERMISSION
+                // ------------------------------------------
+
+                const [newRolePermissionId] =
+                    await db("role_permission").insert({
+                        profile_id: selectedProfileId,
+                        permission:
+                            JSON.stringify(
+                                permissionData
+                            ),
+                        created_at: db.fn.now(),
+                        updated_at: db.fn.now(),
+                    });
+
+                rolePermissionId =
+                    newRolePermissionId;
+            }
         }
+
+        // --------------------------------------------------
+        // RETAILER DEVICE VALIDATION
+        // --------------------------------------------------
 
         if (requestedRoleId === 6) {
             const devices = [
@@ -438,8 +578,16 @@ export const createuserrole = async (req, res) => {
             }
         }
 
+        // --------------------------------------------------
+        // HASH PASSWORD
+        // --------------------------------------------------
+
         const hashedPassword =
             await bcrypt.hash(password, 10);
+
+        // --------------------------------------------------
+        // ORGANIZATION NAME
+        // --------------------------------------------------
 
         const finalOrganizationName =
             requestedRoleId === 9
@@ -448,12 +596,19 @@ export const createuserrole = async (req, res) => {
                     ? String(organization_name).trim()
                     : null;
 
+        // --------------------------------------------------
+        // USER DATA
+        // --------------------------------------------------
+
         const userData = {
             organization_name:
                 finalOrganizationName,
 
             role_id: requestedRoleId,
 
+            // IMPORTANT:
+            // Only role_permission_id is stored in users.
+            // profile_id is NOT stored in users.
             role_permission_id:
                 requestedRoleId === 9
                     ? rolePermissionId
@@ -508,34 +663,56 @@ export const createuserrole = async (req, res) => {
             created_by,
         };
 
+        // --------------------------------------------------
+        // CREATE USER
+        // --------------------------------------------------
+
         const userId =
             await createUserModel(userData);
+
+        // --------------------------------------------------
+        // RESPONSE
+        // --------------------------------------------------
 
         return res.status(201).json({
             success: true,
             message: "User created successfully",
+
             data: {
                 id: userId,
+
                 role_id: requestedRoleId,
+
                 profile_id:
                     requestedRoleId === 9
-                        ? Number(profile_id)
+                        ? selectedProfileId
                         : null,
+
                 role_permission_id:
                     requestedRoleId === 9
                         ? rolePermissionId
                         : null,
+
                 parent_id: finalParentId,
+
                 organization_name:
                     finalOrganizationName,
+
                 name: String(name).trim(),
+
                 email: normalizedEmail,
+
                 phone: normalizedPhone,
+
                 country: selectedCountry,
-                country_code: selectedCountryCode,
+
+                country_code:
+                    selectedCountryCode,
+
                 state: state
                     ? String(state).trim()
                     : null,
+
                 city: city
                     ? String(city).trim()
                     : null,
@@ -550,6 +727,7 @@ export const createuserrole = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: "Internal server error",
+            error: error.message,
         });
     }
 };
@@ -709,253 +887,369 @@ export const loginUser = async (req, res) => {
 };
 // GET ALL USERS
 export const getUsers = async (req, res) => {
-  try {
-    const page = Math.max(Number(req.query.page) || 1, 1);
-    const limit = Math.max(Number(req.query.limit) || 10, 1);
-    const offset = (page - 1) * limit;
+    try {
+        const page = Math.max(
+            Number(req.query.page) || 1,
+            1
+        );
 
-    // -----------------------------
-    // ROLE FILTER
-    // -----------------------------
-    let role_id = null;
+        const limit = Math.max(
+            Number(req.query.limit) || 10,
+            1
+        );
 
-    if (
-      req.query.role_id !== undefined &&
-      String(req.query.role_id).trim() !== ""
-    ) {
-      role_id = Number(req.query.role_id);
+        const offset = (page - 1) * limit;
 
-      if (!Number.isInteger(role_id)) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid role_id",
-        });
-      }
-    }
+        // --------------------------------------------------
+        // ROLE FILTER
+        // --------------------------------------------------
 
-    // -----------------------------
-    // SEARCH
-    // -----------------------------
-    const search =
-      req.query.search !== undefined &&
-      String(req.query.search).trim() !== ""
-        ? String(req.query.search).trim()
-        : null;
+        let role_id = null;
 
-    // -----------------------------
-    // LOCATION FILTERS
-    // -----------------------------
-    const country =
-      req.query.country !== undefined &&
-      String(req.query.country).trim() !== ""
-        ? String(req.query.country).trim()
-        : null;
-
-    const state =
-      req.query.state !== undefined &&
-      String(req.query.state).trim() !== ""
-        ? String(req.query.state).trim()
-        : null;
-
-    const city =
-      req.query.city !== undefined &&
-      String(req.query.city).trim() !== ""
-        ? String(req.query.city).trim()
-        : null;
-
-    // -----------------------------
-    // STATUS FILTER
-    // -----------------------------
-    let status = null;
-
-    if (
-      req.query.status !== undefined &&
-      String(req.query.status).trim() !== ""
-    ) {
-      const statusValue = String(req.query.status)
-        .trim()
-        .toLowerCase();
-
-      if (statusValue === "active" || statusValue === "1") {
-        status = 1;
-      } else if (
-        statusValue === "inactive" ||
-        statusValue === "0"
-      ) {
-        status = 0;
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid status",
-        });
-      }
-    }
-
-    // -----------------------------
-    // LOGGED-IN USER
-    // -----------------------------
-    const loggedInUserId = Number(req.user?.id);
-    const loggedInRoleId = Number(req.user?.role_id);
-
-    if (
-      !Number.isInteger(loggedInUserId) ||
-      loggedInUserId <= 0
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized user",
-      });
-    }
-
-    if (!Number.isInteger(loggedInRoleId)) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid logged-in user role",
-      });
-    }
-
-    let staffRoleAccess = false;
-
-    // Staff is not part of the normal parent/child hierarchy. Its profile is
-    // therefore the source of truth for which role lists it may open.
-    if (loggedInRoleId === ROLES.STAFF) {
-      if (role_id === null) {
-        return res.status(403).json({
-          success: false,
-          message: "Staff must select an authorized role",
-        });
-      }
-
-      const [staffUser, requestedRole] = await Promise.all([
-        db("users").select("role_id", "role_permission_id").where("id", loggedInUserId).first(),
-        getRoleForPermission(role_id),
-      ]);
-      const permissions = await getStaffPermissions(staffUser);
-
-      if (!hasStaffRolePermission(permissions, requestedRole)) {
-        return res.status(403).json({
-          success: false,
-          message: "You are not allowed to access this role",
-        });
-      }
-
-      staffRoleAccess = true;
-    }
-
-    // -----------------------------
-    // GET USERS
-    // -----------------------------
-    const result = await getAllUsers(
-      limit,
-      offset,
-      role_id,
-      loggedInUserId,
-      loggedInRoleId,
-      search,
-      country,
-      state,
-      city,
-      status,
-      staffRoleAccess
-    );
-
-    // -----------------------------
-    // GET PARENT DATA FOR CNF
-    // -----------------------------
-    const users = await Promise.all(
-      result.users.map(async (user) => {
-        let role_permission = [];
-
-        // -----------------------------
-        // ROLE PERMISSION
-        // -----------------------------
-        if (user.role_permission) {
-          try {
-            role_permission =
-              typeof user.role_permission === "string"
-                ? JSON.parse(user.role_permission)
-                : user.role_permission;
-
-            if (!Array.isArray(role_permission)) {
-              role_permission = [];
-            }
-          } catch (error) {
-            role_permission = [];
-          }
-        }
-
-        // -----------------------------
-        // DEFAULT USER DATA
-        // -----------------------------
-        let parent_name = user.parent_name || null;
-        let parent_organization_name =
-          user.parent_organization_name || null;
-
-        // -----------------------------
-        // CNF PARENT
-        // CNF ROLE = 2
-        // CNF PARENT = ADMIN
-        // -----------------------------
         if (
-          Number(user.role_id) === 2 &&
-          user.parent_id
+            req.query.role_id !== undefined &&
+            String(req.query.role_id).trim() !== ""
         ) {
-          try {
-            const parentUser = await db("users")
-              .select(
-                "name",
-                "organization_name"
-              )
-              .where("id", Number(user.parent_id))
-              .first();
+            role_id = Number(req.query.role_id);
 
-            if (parentUser) {
-              parent_name = parentUser.name || null;
-
-              parent_organization_name =
-                parentUser.organization_name || null;
+            if (!Number.isInteger(role_id)) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid role_id",
+                });
             }
-          } catch (parentError) {
-            console.error(
-              "CNF PARENT FETCH ERROR:",
-              parentError
-            );
-          }
         }
 
-        // -----------------------------
-        // FINAL USER
-        // -----------------------------
-        return {
-          ...user,
-          parent_name,
-          parent_organization_name,
-          role_permission,
-        };
-      })
-    );
+        // --------------------------------------------------
+        // SEARCH
+        // --------------------------------------------------
 
-    // -----------------------------
-    // RESPONSE
-    // -----------------------------
-    return res.status(200).json({
-      success: true,
-      pagination: {
-        currentPage: page,
-        totalPages: Math.ceil(result.total / limit),
-        limit,
-        totalUsers: result.total,
-      },
-      data: users,
-    });
-  } catch (error) {
-    console.error("GET USERS ERROR:", error);
+        const search =
+            req.query.search !== undefined &&
+            String(req.query.search).trim() !== ""
+                ? String(req.query.search).trim()
+                : null;
 
-    return res.status(500).json({
-      success: false,
-      message: error?.message || "Failed to get users",
-    });
-  }
+        // --------------------------------------------------
+        // LOCATION FILTERS
+        // --------------------------------------------------
+
+        const country =
+            req.query.country !== undefined &&
+            String(req.query.country).trim() !== ""
+                ? String(req.query.country).trim()
+                : null;
+
+        const state =
+            req.query.state !== undefined &&
+            String(req.query.state).trim() !== ""
+                ? String(req.query.state).trim()
+                : null;
+
+        const city =
+            req.query.city !== undefined &&
+            String(req.query.city).trim() !== ""
+                ? String(req.query.city).trim()
+                : null;
+
+        // --------------------------------------------------
+        // STATUS FILTER
+        // --------------------------------------------------
+
+        let status = null;
+
+        if (
+            req.query.status !== undefined &&
+            String(req.query.status).trim() !== ""
+        ) {
+            const statusValue = String(req.query.status)
+                .trim()
+                .toLowerCase();
+
+            if (
+                statusValue === "active" ||
+                statusValue === "1"
+            ) {
+                status = 1;
+            } else if (
+                statusValue === "inactive" ||
+                statusValue === "0"
+            ) {
+                status = 0;
+            } else {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid status",
+                });
+            }
+        }
+
+        // --------------------------------------------------
+        // LOGGED-IN USER
+        // --------------------------------------------------
+
+        const loggedInUserId = Number(req.user?.id);
+        const loggedInRoleId = Number(req.user?.role_id);
+
+        if (
+            !Number.isInteger(loggedInUserId) ||
+            loggedInUserId <= 0
+        ) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized user",
+            });
+        }
+
+        if (!Number.isInteger(loggedInRoleId)) {
+            return res.status(401).json({
+                success: false,
+                message:
+                    "Invalid logged-in user role",
+            });
+        }
+
+        // --------------------------------------------------
+        // STAFF ROLE ACCESS
+        // --------------------------------------------------
+
+        let staffRoleAccess = false;
+
+        if (loggedInRoleId === ROLES.STAFF) {
+            if (role_id === null) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Staff must select an authorized role",
+                });
+            }
+
+            const [
+                staffUser,
+                requestedRole,
+            ] = await Promise.all([
+                db("users")
+                    .select(
+                        "id",
+                        "role_id",
+                        "role_permission_id"
+                    )
+                    .where(
+                        "id",
+                        loggedInUserId
+                    )
+                    .first(),
+
+                getRoleForPermission(role_id),
+            ]);
+
+            if (!staffUser) {
+                return res.status(404).json({
+                    success: false,
+                    message:
+                        "Logged-in staff user not found",
+                });
+            }
+
+            const permissions =
+                await getStaffPermissions(
+                    staffUser
+                );
+
+            if (
+                !hasStaffRolePermission(
+                    permissions,
+                    requestedRole
+                )
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not allowed to access this role",
+                });
+            }
+
+            staffRoleAccess = true;
+        }
+
+        // --------------------------------------------------
+        // GET USERS
+        // --------------------------------------------------
+
+        const result = await getAllUsers(
+            limit,
+            offset,
+            role_id,
+            loggedInUserId,
+            loggedInRoleId,
+            search,
+            country,
+            state,
+            city,
+            status,
+            staffRoleAccess
+        );
+
+        // --------------------------------------------------
+        // FORMAT USERS
+        // --------------------------------------------------
+
+        const users = await Promise.all(
+            result.users.map(async (user) => {
+                // ------------------------------------------
+                // PARSE ROLE PERMISSION
+                // ------------------------------------------
+
+                let parsedPermission = {};
+
+                if (user.role_permission) {
+                    try {
+                        parsedPermission =
+                            typeof user.role_permission ===
+                            "string"
+                                ? JSON.parse(
+                                      user.role_permission
+                                  )
+                                : user.role_permission;
+
+                        if (
+                            !parsedPermission ||
+                            typeof parsedPermission !==
+                                "object" ||
+                            Array.isArray(
+                                parsedPermission
+                            )
+                        ) {
+                            parsedPermission = {};
+                        }
+                    } catch (error) {
+                        parsedPermission = {};
+                    }
+                }
+
+                // ------------------------------------------
+                // DEFAULT PARENT DATA
+                // ------------------------------------------
+
+                let parent_name =
+                    user.parent_name || null;
+
+                let parent_organization_name =
+                    user.parent_organization_name ||
+                    null;
+
+                // ------------------------------------------
+                // CNF PARENT
+                // ROLE 2 = CNF
+                // ------------------------------------------
+
+                if (
+                    Number(user.role_id) === 2 &&
+                    user.parent_id
+                ) {
+                    try {
+                        const parentUser =
+                            await db("users")
+                                .select(
+                                    "name",
+                                    "organization_name"
+                                )
+                                .where(
+                                    "id",
+                                    Number(
+                                        user.parent_id
+                                    )
+                                )
+                                .first();
+
+                        if (parentUser) {
+                            parent_name =
+                                parentUser.name ||
+                                null;
+
+                            parent_organization_name =
+                                parentUser.organization_name ||
+                                null;
+                        }
+                    } catch (parentError) {
+                        console.error(
+                            "CNF PARENT FETCH ERROR:",
+                            parentError
+                        );
+                    }
+                }
+
+                // ------------------------------------------
+                // FINAL USER
+                // ------------------------------------------
+
+                return {
+                    ...user,
+
+                    parent_name,
+
+                    parent_organization_name,
+
+                    // --------------------------------------
+                    // ROLE PERMISSION
+                    // --------------------------------------
+
+                    role_permission: {
+                        id:
+                            user.role_permission_id ||
+                            null,
+
+                        profile_id:
+                            user.profile_id ||
+                            null,
+
+                        profile_name:
+                            user.profile_name ||
+                            null,
+
+                        permission:
+                            parsedPermission,
+                    },
+                };
+            })
+        );
+
+        // --------------------------------------------------
+        // RESPONSE
+        // --------------------------------------------------
+
+        return res.status(200).json({
+            success: true,
+
+            pagination: {
+                currentPage: page,
+
+                totalPages:
+                    Math.ceil(
+                        result.total / limit
+                    ),
+
+                limit,
+
+                totalUsers:
+                    result.total,
+            },
+
+            data: users,
+        });
+    } catch (error) {
+        console.error(
+            "GET USERS ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                error?.message ||
+                "Failed to get users",
+        });
+    }
 };
 
 // Logout api
@@ -1148,538 +1442,803 @@ const getRoleName = (roleId) => {
 
 //upadte staff
 export const updatedstaffdata = async (req, res) => {
-  try {
-    const { id } = req.params;
+    try {
+        const { id } = req.params;
 
-    const {
-      organization_name,
-      role_id,
-      profile_id,
-      role_permission,
-      name,
-      email,
-      phone,
-      company_address,
-      country,
-      state,
-      city,
-      parent_id,
-      new_device,
-      old_device,
-      supreme_device,
-      pro_star,
-      lite,
-      google_tv,
-      supreme_lock,
-      password,
-    } = req.body;
+        // --------------------------------------------------
+        // VALIDATE USER ID
+        // --------------------------------------------------
 
-    if (!id) {
-      return res.status(400).json({
-        success: false,
-        message: "User ID is required",
-      });
-    }
-
-    const userId = Number(id);
-
-    if (!Number.isInteger(userId) || userId <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid User ID",
-      });
-    }
-
-    const existingUser = await db("users")
-      .select(
-        "id",
-        "role_id",
-        "parent_id",
-        "role_permission_id"
-      )
-      .where("id", userId)
-      .first();
-
-    if (!existingUser) {
-      return res.status(404).json({
-        success: false,
-        message: "User not found",
-      });
-    }
-
-    const currentRoleId = Number(
-      role_id ?? existingUser.role_id
-    );
-
-    if (
-      !Number.isInteger(currentRoleId) ||
-      currentRoleId < 1 ||
-      currentRoleId > 9
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid role ID",
-      });
-    }
-
-    let normalizedParentId =
-      existingUser.parent_id ?? null;
-
-    if (parent_id !== undefined) {
-      if (
-        parent_id === null ||
-        parent_id === ""
-      ) {
-        normalizedParentId = null;
-      } else {
-        normalizedParentId = Number(parent_id);
-
-        if (
-          !Number.isInteger(normalizedParentId) ||
-          normalizedParentId <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid parent ID",
-          });
-        }
-
-        if (normalizedParentId === userId) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "User cannot be their own parent",
-          });
-        }
-
-        const parentUser = await db("users")
-          .select(
-            "id",
-            "role_id",
-            "name",
-            "organization_name"
-          )
-          .where("id", normalizedParentId)
-          .first();
-
-        if (!parentUser) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Selected parent not found",
-          });
-        }
-
-        const selectedParentRoleId =
-          Number(parentUser.role_id);
-
-        if (
-          selectedParentRoleId >= currentRoleId
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Selected parent role is invalid",
-          });
-        }
-      }
-    }
-
-    return await db.transaction(async (trx) => {
-      let normalizedRolePermissionId =
-        existingUser.role_permission_id ?? null;
-
-      let parsedRolePermission = null;
-
-      const hasProfileId =
-        profile_id !== undefined &&
-        profile_id !== null &&
-        String(profile_id).trim() !== "";
-
-      if (hasProfileId) {
-        const selectedProfileId =
-          Number(profile_id);
-
-        if (
-          !Number.isInteger(selectedProfileId) ||
-          selectedProfileId <= 0
-        ) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid profile ID",
-          });
-        }
-
-        const profile = await trx("profile")
-          .select(
-            "id",
-            "name",
-            "status"
-          )
-          .where("id", selectedProfileId)
-          .first();
-
-        if (!profile) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Selected profile not found",
-          });
-        }
-
-        let permissionData = {};
-
-        if (
-          role_permission !== undefined &&
-          role_permission !== null &&
-          role_permission !== ""
-        ) {
-          permissionData = role_permission;
-
-          if (
-            typeof permissionData ===
-            "string"
-          ) {
-            try {
-              permissionData =
-                JSON.parse(
-                  permissionData
-                );
-            } catch {
-              return res.status(400).json({
+        if (!id) {
+            return res.status(400).json({
                 success: false,
-                message:
-                  "Invalid role_permission JSON",
-              });
-            }
-          }
-
-          if (
-            typeof permissionData !==
-              "object" ||
-            Array.isArray(permissionData)
-          ) {
-            return res.status(400).json({
-              success: false,
-              message:
-                "Invalid role_permission format",
+                message: "User ID is required",
             });
-          }
         }
 
-        let rolePermission =
-          await trx("role_permission")
+        const userId = Number(id);
+
+        if (
+            !Number.isInteger(userId) ||
+            userId <= 0
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: "Invalid User ID",
+            });
+        }
+
+        // --------------------------------------------------
+        // REQUEST DATA
+        // --------------------------------------------------
+
+        const {
+            organization_name,
+            role_id,
+            profile_id,
+            role_permission,
+            name,
+            email,
+            phone,
+            company_address,
+            country,
+            state,
+            city,
+            parent_id,
+            new_device,
+            old_device,
+            supreme_device,
+            pro_star,
+            lite,
+            google_tv,
+            supreme_lock,
+            password,
+        } = req.body;
+
+        // --------------------------------------------------
+        // GET EXISTING USER
+        //
+        // IMPORTANT:
+        // users.profile_id DOES NOT EXIST.
+        // Only role_permission_id is used.
+        // --------------------------------------------------
+
+        const existingUser = await db("users")
             .select(
-              "id",
-              "profile_id",
-              "permission"
+                "id",
+                "role_id",
+                "parent_id",
+                "role_permission_id"
             )
-            .where(
-              "profile_id",
-              selectedProfileId
-            )
+            .where("id", userId)
             .first();
 
-        if (rolePermission) {
-          normalizedRolePermissionId =
-            Number(rolePermission.id);
-
-          await trx("role_permission")
-            .where(
-              "id",
-              normalizedRolePermissionId
-            )
-            .update({
-              profile_id:
-                selectedProfileId,
-              permission:
-                JSON.stringify(
-                  permissionData
-                ),
-              updated_at:
-                trx.fn.now(),
+        if (!existingUser) {
+            return res.status(404).json({
+                success: false,
+                message: "User not found",
             });
-        } else {
-          const insertData = {
-            profile_id:
-              selectedProfileId,
-            permission:
-              JSON.stringify(
-                permissionData
-              ),
-            created_at:
-              trx.fn.now(),
-            updated_at:
-              trx.fn.now(),
-          };
-
-          const inserted =
-            await trx("role_permission")
-              .insert(insertData);
-
-          normalizedRolePermissionId =
-            Number(inserted[0]);
         }
 
-        parsedRolePermission = {
-          profile_id:
-            selectedProfileId,
-          permission:
-            permissionData,
-        };
-      } else if (
-        role_permission !== undefined
-      ) {
-        let permissionData =
-          role_permission;
+        // --------------------------------------------------
+        // ROLE
+        // --------------------------------------------------
+
+        const currentRoleId = Number(
+            role_id ?? existingUser.role_id
+        );
 
         if (
-          typeof permissionData ===
-          "string"
+            !Number.isInteger(currentRoleId) ||
+            currentRoleId < 1 ||
+            currentRoleId > 9
         ) {
-          try {
-            permissionData =
-              JSON.parse(
-                permissionData
-              );
-          } catch {
             return res.status(400).json({
-              success: false,
-              message:
-                "Invalid role_permission JSON",
+                success: false,
+                message: "Invalid role ID",
             });
-          }
         }
 
-        if (
-          typeof permissionData !==
-            "object" ||
-          permissionData === null ||
-          Array.isArray(permissionData)
-        ) {
-          return res.status(400).json({
+        // --------------------------------------------------
+        // PARENT
+        // --------------------------------------------------
+
+        let normalizedParentId =
+            existingUser.parent_id ?? null;
+
+        if (parent_id !== undefined) {
+            if (
+                parent_id === null ||
+                parent_id === ""
+            ) {
+                normalizedParentId = null;
+            } else {
+                normalizedParentId = Number(
+                    parent_id
+                );
+
+                if (
+                    !Number.isInteger(
+                        normalizedParentId
+                    ) ||
+                    normalizedParentId <= 0
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Invalid parent ID",
+                    });
+                }
+
+                if (
+                    normalizedParentId === userId
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "User cannot be their own parent",
+                    });
+                }
+
+                const parentUser = await db("users")
+                    .select(
+                        "id",
+                        "role_id",
+                        "name",
+                        "organization_name"
+                    )
+                    .where(
+                        "id",
+                        normalizedParentId
+                    )
+                    .first();
+
+                if (!parentUser) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Selected parent not found",
+                    });
+                }
+
+                const parentRoleId = Number(
+                    parentUser.role_id
+                );
+
+                if (
+                    parentRoleId >=
+                    currentRoleId
+                ) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Selected parent role is invalid",
+                    });
+                }
+            }
+        }
+
+        // --------------------------------------------------
+        // PROFILE
+        //
+        // Profile is NOT stored in users.
+        //
+        // profile_id
+        //      ↓
+        // role_permission.profile_id
+        //      ↓
+        // role_permission.id
+        //      ↓
+        // users.role_permission_id
+        // --------------------------------------------------
+
+        const hasProfileId =
+            profile_id !== undefined &&
+            profile_id !== null &&
+            String(profile_id).trim() !== "";
+
+        let normalizedProfileId = null;
+
+        if (hasProfileId) {
+            normalizedProfileId = Number(
+                profile_id
+            );
+
+            if (
+                !Number.isInteger(
+                    normalizedProfileId
+                ) ||
+                normalizedProfileId <= 0
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid profile ID",
+                });
+            }
+
+            const profile = await db("profile")
+                .select(
+                    "id",
+                    "name",
+                    "status"
+                )
+                .where(
+                    "id",
+                    normalizedProfileId
+                )
+                .first();
+
+            if (!profile) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected profile not found",
+                });
+            }
+
+            if (Number(profile.status) !== 1) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected profile is inactive",
+                });
+            }
+        }
+
+        // --------------------------------------------------
+        // ROLE PERMISSION INPUT
+        // --------------------------------------------------
+
+        const hasRolePermission =
+            role_permission !== undefined &&
+            role_permission !== null &&
+            role_permission !== "";
+
+        let parsedRolePermission = null;
+
+        if (hasRolePermission) {
+            parsedRolePermission =
+                role_permission;
+
+            if (
+                typeof parsedRolePermission ===
+                "string"
+            ) {
+                try {
+                    parsedRolePermission =
+                        JSON.parse(
+                            parsedRolePermission
+                        );
+                } catch (error) {
+                    return res.status(400).json({
+                        success: false,
+                        message:
+                            "Invalid role_permission JSON",
+                    });
+                }
+            }
+
+            if (
+                typeof parsedRolePermission !==
+                    "object" ||
+                parsedRolePermission === null ||
+                Array.isArray(
+                    parsedRolePermission
+                )
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Invalid role_permission format",
+                });
+            }
+        }
+
+        // --------------------------------------------------
+        // TRANSACTION
+        // --------------------------------------------------
+
+        const result = await db.transaction(
+            async (trx) => {
+                /*
+                |--------------------------------------------------------------------------
+                | KEEP EXISTING ROLE PERMISSION
+                |--------------------------------------------------------------------------
+                */
+
+                let rolePermissionId =
+                    existingUser.role_permission_id ??
+                    null;
+
+                /*
+                |--------------------------------------------------------------------------
+                | PROFILE SELECTED
+                |
+                | Find role_permission using profile_id.
+                |--------------------------------------------------------------------------
+                */
+
+                if (hasProfileId) {
+                    const profilePermission =
+                        await trx(
+                            "role_permission"
+                        )
+                            .select(
+                                "id",
+                                "profile_id",
+                                "permission"
+                            )
+                            .where(
+                                "profile_id",
+                                normalizedProfileId
+                            )
+                            .first();
+
+                    /*
+                    |--------------------------------------------------------------------------
+                    | EXISTING PROFILE PERMISSION
+                    |--------------------------------------------------------------------------
+                    */
+
+                    if (profilePermission) {
+                        rolePermissionId =
+                            profilePermission.id;
+
+                        /*
+                        | Only change permission if
+                        | permission was explicitly sent.
+                        */
+
+                        if (
+                            hasRolePermission
+                        ) {
+                            await trx(
+                                "role_permission"
+                            )
+                                .where(
+                                    "id",
+                                    profilePermission.id
+                                )
+                                .update({
+                                    permission:
+                                        JSON.stringify(
+                                            parsedRolePermission
+                                        ),
+                                    updated_at:
+                                        trx.fn.now(),
+                                });
+                        }
+                    } else {
+                        /*
+                        |--------------------------------------------------------------------------
+                        | CREATE NEW PROFILE PERMISSION
+                        |--------------------------------------------------------------------------
+                        */
+
+                        const inserted =
+                            await trx(
+                                "role_permission"
+                            ).insert({
+                                profile_id:
+                                    normalizedProfileId,
+
+                                permission:
+                                    JSON.stringify(
+                                        hasRolePermission
+                                            ? parsedRolePermission
+                                            : {}
+                                    ),
+
+                                created_at:
+                                    trx.fn.now(),
+
+                                updated_at:
+                                    trx.fn.now(),
+                            });
+
+                        rolePermissionId =
+                            Number(
+                                inserted[0]
+                            );
+                    }
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | NO PROFILE CHANGE
+                |
+                | But permission explicitly changed.
+                |--------------------------------------------------------------------------
+                */
+
+                else if (
+                    hasRolePermission
+                ) {
+                    /*
+                    | Existing role_permission
+                    */
+
+                    if (rolePermissionId) {
+                        const permissionRow =
+                            await trx(
+                                "role_permission"
+                            )
+                                .where(
+                                    "id",
+                                    rolePermissionId
+                                )
+                                .first();
+
+                        if (permissionRow) {
+                            await trx(
+                                "role_permission"
+                            )
+                                .where(
+                                    "id",
+                                    rolePermissionId
+                                )
+                                .update({
+                                    permission:
+                                        JSON.stringify(
+                                            parsedRolePermission
+                                        ),
+                                    updated_at:
+                                        trx.fn.now(),
+                                });
+                        } else {
+                            /*
+                            | Broken reference
+                            */
+
+                            const inserted =
+                                await trx(
+                                    "role_permission"
+                                ).insert({
+                                    permission:
+                                        JSON.stringify(
+                                            parsedRolePermission
+                                        ),
+                                    created_at:
+                                        trx.fn.now(),
+                                    updated_at:
+                                        trx.fn.now(),
+                                });
+
+                            rolePermissionId =
+                                Number(
+                                    inserted[0]
+                                );
+                        }
+                    } else {
+                        /*
+                        | No permission record
+                        */
+
+                        const inserted =
+                            await trx(
+                                "role_permission"
+                            ).insert({
+                                permission:
+                                    JSON.stringify(
+                                        parsedRolePermission
+                                    ),
+                                created_at:
+                                    trx.fn.now(),
+                                updated_at:
+                                    trx.fn.now(),
+                            });
+
+                        rolePermissionId =
+                            Number(
+                                inserted[0]
+                            );
+                    }
+                }
+
+                // --------------------------------------------------
+                // USER UPDATE
+                // --------------------------------------------------
+
+                const updateData = {};
+
+                if (
+                    organization_name !==
+                    undefined
+                ) {
+                    updateData.organization_name =
+                        organization_name;
+                }
+
+                if (
+                    role_id !== undefined
+                ) {
+                    updateData.role_id =
+                        currentRoleId;
+                }
+
+                /*
+                |--------------------------------------------------------------------------
+                | IMPORTANT:
+                | DO NOT update users.profile_id
+                |--------------------------------------------------------------------------
+                */
+
+                if (name !== undefined) {
+                    updateData.name = name;
+                }
+
+                if (email !== undefined) {
+                    updateData.email = email;
+                }
+
+                if (phone !== undefined) {
+                    updateData.phone = phone;
+                }
+
+                if (
+                    company_address !==
+                    undefined
+                ) {
+                    updateData.company_address =
+                        company_address;
+                }
+
+                if (country !== undefined) {
+                    updateData.country =
+                        country;
+                }
+
+                if (state !== undefined) {
+                    updateData.state =
+                        state;
+                }
+
+                if (city !== undefined) {
+                    updateData.city =
+                        city;
+                }
+
+                // --------------------------------------------------
+                // PARENT
+                // --------------------------------------------------
+
+                if (
+                    parent_id !== undefined
+                ) {
+                    updateData.parent_id =
+                        normalizedParentId;
+                }
+
+                // --------------------------------------------------
+                // ROLE PERMISSION ID
+                // --------------------------------------------------
+
+                if (
+                    rolePermissionId !== null
+                ) {
+                    updateData.role_permission_id =
+                        rolePermissionId;
+                }
+
+                // --------------------------------------------------
+                // DEVICE FLAGS
+                // --------------------------------------------------
+
+                if (
+                    new_device !== undefined
+                ) {
+                    updateData.new_device =
+                        Number(new_device) || 0;
+                }
+
+                if (
+                    old_device !== undefined
+                ) {
+                    updateData.old_device =
+                        Number(old_device) || 0;
+                }
+
+                if (
+                    supreme_device !==
+                    undefined
+                ) {
+                    updateData.supreme_device =
+                        Number(
+                            supreme_device
+                        ) || 0;
+                }
+
+                if (
+                    pro_star !== undefined
+                ) {
+                    updateData.pro_star =
+                        Number(pro_star) || 0;
+                }
+
+                if (lite !== undefined) {
+                    updateData.lite =
+                        Number(lite) || 0;
+                }
+
+                if (
+                    google_tv !== undefined
+                ) {
+                    updateData.google_tv =
+                        Number(google_tv) || 0;
+                }
+
+                if (
+                    supreme_lock !==
+                    undefined
+                ) {
+                    updateData.supreme_lock =
+                        Number(
+                            supreme_lock
+                        ) || 0;
+                }
+
+                // --------------------------------------------------
+                // PASSWORD
+                // --------------------------------------------------
+
+                if (
+                    password !== undefined &&
+                    password !== null &&
+                    password !== ""
+                ) {
+                    updateData.password =
+                        password;
+                }
+
+                // --------------------------------------------------
+                // UPDATED AT
+                // --------------------------------------------------
+
+                updateData.updated_at =
+                    trx.fn.now();
+
+                // --------------------------------------------------
+                // UPDATE USER
+                // --------------------------------------------------
+
+                await trx("users")
+                    .where("id", userId)
+                    .update(updateData);
+
+                // --------------------------------------------------
+                // GET UPDATED USER
+                // --------------------------------------------------
+
+                const updatedUser =
+                    await trx("users")
+                        .select(
+                            "id",
+                            "organization_name",
+                            "role_id",
+                            "role_permission_id",
+                            "name",
+                            "email",
+                            "phone",
+                            "company_address",
+                            "country",
+                            "state",
+                            "city",
+                            "parent_id",
+                            "new_device",
+                            "old_device",
+                            "supreme_device",
+                            "pro_star",
+                            "lite",
+                            "google_tv",
+                            "supreme_lock",
+                            "created_at",
+                            "updated_at"
+                        )
+                        .where("id", userId)
+                        .first();
+
+                // --------------------------------------------------
+                // GET ROLE PERMISSION + PROFILE
+                // --------------------------------------------------
+
+                let finalRolePermission = null;
+
+                if (
+                    updatedUser?.role_permission_id
+                ) {
+                    const permissionRow =
+                        await trx(
+                            "role_permission"
+                        )
+                            .leftJoin(
+                                "profile",
+                                "role_permission.profile_id",
+                                "profile.id"
+                            )
+                            .select(
+                                "role_permission.id",
+                                "role_permission.profile_id",
+                                "role_permission.permission",
+                                "profile.name as profile_name"
+                            )
+                            .where(
+                                "role_permission.id",
+                                updatedUser.role_permission_id
+                            )
+                            .first();
+
+                    if (permissionRow) {
+                        let permission =
+                            permissionRow.permission;
+
+                        if (
+                            typeof permission ===
+                            "string"
+                        ) {
+                            try {
+                                permission =
+                                    JSON.parse(
+                                        permission
+                                    );
+                            } catch (error) {
+                                permission = {};
+                            }
+                        }
+
+                        finalRolePermission = {
+                            id:
+                                permissionRow.id,
+
+                            profile_id:
+                                permissionRow.profile_id,
+
+                            profile_name:
+                                permissionRow.profile_name ||
+                                null,
+
+                            permission:
+                                permission || {},
+                        };
+                    }
+                }
+
+                // --------------------------------------------------
+                // FINAL RESULT
+                // --------------------------------------------------
+
+                return {
+                    ...updatedUser,
+
+                    role_permission:
+                        finalRolePermission,
+                };
+            }
+        );
+
+        // --------------------------------------------------
+        // SUCCESS
+        // --------------------------------------------------
+
+        return res.status(200).json({
+            success: true,
+            message:
+                "Staff data updated successfully",
+            data: result,
+        });
+    } catch (error) {
+        console.error(
+            "UPDATE STAFF ERROR:",
+            error
+        );
+
+        return res.status(500).json({
             success: false,
             message:
-              "Invalid role_permission format",
-          });
-        }
-
-        if (
-          normalizedRolePermissionId
-        ) {
-          await trx("role_permission")
-            .where(
-              "id",
-              normalizedRolePermissionId
-            )
-            .update({
-              permission:
-                JSON.stringify(
-                  permissionData
-                ),
-              updated_at:
-                trx.fn.now(),
-            });
-        } else {
-          const inserted =
-            await trx("role_permission")
-              .insert({
-                permission:
-                  JSON.stringify(
-                    permissionData
-                  ),
-                created_at:
-                  trx.fn.now(),
-                updated_at:
-                  trx.fn.now(),
-              });
-
-          normalizedRolePermissionId =
-            Number(inserted[0]);
-        }
-
-        parsedRolePermission = {
-          id:
-            normalizedRolePermissionId,
-          permission:
-            permissionData,
-        };
-      }
-
-      const updateData = {
-        organization_name:
-          organization_name || "",
-
-        role_id:
-          currentRoleId,
-
-        role_permission_id:
-          normalizedRolePermissionId,
-
-        name:
-          name || "",
-
-        email:
-          email || "",
-
-        phone:
-          phone || "",
-
-        company_address:
-          company_address || "",
-
-        country:
-          country || "",
-
-        state:
-          state || "",
-
-        city:
-          city || "",
-
-        parent_id:
-          normalizedParentId,
-
-        new_device:
-          Number(new_device ?? 0),
-
-        old_device:
-          Number(old_device ?? 0),
-
-        supreme_device:
-          Number(
-            supreme_device ?? 0
-          ),
-
-        pro_star:
-          Number(pro_star ?? 0),
-
-        lite:
-          Number(lite ?? 0),
-
-        google_tv:
-          Number(
-            google_tv ?? 0
-          ),
-
-        supreme_lock:
-          Number(
-            supreme_lock ?? 0
-          ),
-      };
-
-      if (
-        password !== undefined &&
-        password !== null &&
-        password !== ""
-      ) {
-        updateData.password =
-          password;
-      }
-
-      await trx("users")
-        .where("id", userId)
-        .update(updateData);
-
-      const updatedUser =
-        await trx("users")
-          .select(
-            "id",
-            "organization_name",
-            "role_id",
-            "role_permission_id",
-            "name",
-            "email",
-            "phone",
-            "company_address",
-            "country",
-            "state",
-            "city",
-            "parent_id",
-            "new_device",
-            "old_device",
-            "supreme_device",
-            "pro_star",
-            "lite",
-            "google_tv",
-            "supreme_lock",
-            "created_at",
-            "updated_at"
-          )
-          .where("id", userId)
-          .first();
-
-      if (
-        updatedUser?.role_permission_id
-      ) {
-        const permissionData =
-          await trx("role_permission")
-            .select(
-              "id",
-              "profile_id",
-              "permission"
-            )
-            .where(
-              "id",
-              updatedUser.role_permission_id
-            )
-            .first();
-
-        if (permissionData) {
-          let permission =
-            permissionData.permission;
-
-          if (
-            typeof permission ===
-            "string"
-          ) {
-            try {
-              permission =
-                JSON.parse(
-                  permission
-                );
-            } catch {
-              permission = {};
-            }
-          }
-
-          parsedRolePermission = {
-            id:
-              permissionData.id,
-
-            profile_id:
-              permissionData.profile_id,
-
-            permission:
-              permission,
-          };
-        }
-      }
-
-      return res.status(200).json({
-        success: true,
-        message:
-          "Staff data updated successfully",
-        data: {
-          ...updatedUser,
-          role_permission:
-            parsedRolePermission,
-        },
-      });
-    });
-  } catch (error) {
-    console.error(
-      "UPDATE STAFF ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message:
-        "Failed to update staff data",
-      error: error.message,
-    });
-  }
+                "Failed to update staff data",
+            error: error.message,
+        });
+    }
 };
 
 //get staff data with id in edit 
