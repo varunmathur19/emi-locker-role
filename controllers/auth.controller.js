@@ -3516,3 +3516,100 @@ export const getCities = async (req, res) => {
     }
 };
 
+//get key-setting data
+export const getKeySettings = async (req, res) => {
+  try {
+    const keySettings = await db("key_setting")
+      .select(
+        "id",
+        "name",
+        "status",
+        "created_at",
+        "updated_at"
+      )
+      .orderBy("id", "asc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Key settings fetched successfully",
+      data: keySettings,
+    });
+  } catch (error) {
+    console.error("GET KEY SETTINGS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch key settings",
+      error: error.message,
+    });
+  }
+};
+
+//updated key-setting api
+export const updateKeySetting = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, status } = req.body;
+
+    if (!id) {
+      return res.status(400).json({
+        success: false,
+        message: "Key setting id is required",
+      });
+    }
+
+    if (name === undefined && status === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Name or status is required",
+      });
+    }
+
+    const keySetting = await db("key_setting")
+      .where("id", id)
+      .first();
+
+    if (!keySetting) {
+      return res.status(404).json({
+        success: false,
+        message: "Key setting not found",
+      });
+    }
+
+    const updateData = {};
+
+    if (name !== undefined) {
+      updateData.name = String(name).trim();
+    }
+
+    if (status !== undefined) {
+      updateData.status = Number(status) === 1 ? 1 : 0;
+    }
+
+    await db("key_setting")
+      .where("id", id)
+      .update(updateData);
+
+    const updatedKeySetting = await db("key_setting")
+      .where("id", id)
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "Key setting updated successfully",
+      data: updatedKeySetting,
+    });
+  } catch (error) {
+    console.error(
+      "UPDATE KEY SETTING ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update key setting",
+      error: error.message,
+    });
+  }
+};
+
