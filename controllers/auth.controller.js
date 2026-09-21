@@ -2999,19 +2999,30 @@ export const getRoles = async (req, res) => {
 //GET 
 export const getProfiles = async (req, res) => {
   try {
+    const createdBy = req.user?.id;
+
+    if (!createdBy) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
     const profiles = await db("profile")
       .select(
         "id",
+        "created_by",
         "name",
         "status",
         "created_at",
         "updated_at"
       )
-      .orderBy("id", "asc");
+      .where("created_by", createdBy)
+      .orderBy("id", "desc");
 
     return res.status(200).json({
       success: true,
-      count: profiles.length,
+      message: "Profiles fetched successfully",
       data: profiles,
     });
   } catch (error) {
@@ -3019,7 +3030,7 @@ export const getProfiles = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to get profiles",
+      message: "Failed to fetch profiles",
       error: error.message,
     });
   }
@@ -3030,17 +3041,34 @@ export const createProfile = async (req, res) => {
   try {
     const { name, status = 1 } = req.body;
 
-    // Validation
-    if (!name || !name.trim()) {
+    const profileName = String(name || "").trim();
+    const profileStatus = Number(status);
+    const createdBy = req.user?.id;
+
+    if (!createdBy) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    if (!profileName) {
       return res.status(400).json({
         success: false,
         message: "Profile name is required",
       });
     }
 
-    // Check duplicate profile
+    if (![0, 1].includes(profileStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Status must be 0 or 1",
+      });
+    }
+
     const existingProfile = await db("profile")
-      .where("name", name.trim())
+      .where("created_by", createdBy)
+      .whereRaw("LOWER(`name`) = LOWER(?)", [profileName])
       .first();
 
     if (existingProfile) {
@@ -3050,24 +3078,25 @@ export const createProfile = async (req, res) => {
       });
     }
 
-    // Insert profile using Knex
     const [profileId] = await db("profile").insert({
-      name: name.trim(),
-      status: status,
+      created_by: createdBy,
+      name: profileName,
+      status: profileStatus,
       created_at: db.fn.now(),
       updated_at: db.fn.now(),
     });
 
-    // Get inserted profile
     const profile = await db("profile")
       .select(
         "id",
+        "created_by",
         "name",
         "status",
         "created_at",
         "updated_at"
       )
       .where("id", profileId)
+      .where("created_by", createdBy)
       .first();
 
     return res.status(201).json({
@@ -3091,15 +3120,26 @@ export const updateProfile = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, status } = req.body;
+    const createdBy = req.user?.id;
 
-    if (!name || !name.trim()) {
+    if (!createdBy) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const profileName = String(name || "").trim();
+    const profileStatus = Number(status);
+
+    if (!profileName) {
       return res.status(400).json({
         success: false,
         message: "Profile name is required",
       });
     }
 
-    if (![0, 1].includes(Number(status))) {
+    if (![0, 1].includes(profileStatus)) {
       return res.status(400).json({
         success: false,
         message: "Status must be 0 or 1",
@@ -3108,6 +3148,7 @@ export const updateProfile = async (req, res) => {
 
     const existingProfile = await db("profile")
       .where("id", id)
+      .where("created_by", createdBy)
       .first();
 
     if (!existingProfile) {
@@ -3118,7 +3159,8 @@ export const updateProfile = async (req, res) => {
     }
 
     const duplicateProfile = await db("profile")
-      .where("name", name.trim())
+      .where("created_by", createdBy)
+      .whereRaw("LOWER(`name`) = LOWER(?)", [profileName])
       .whereNot("id", id)
       .first();
 
@@ -3131,21 +3173,24 @@ export const updateProfile = async (req, res) => {
 
     await db("profile")
       .where("id", id)
+      .where("created_by", createdBy)
       .update({
-        name: name.trim(),
-        status: Number(status),
+        name: profileName,
+        status: profileStatus,
         updated_at: db.fn.now(),
       });
 
     const profile = await db("profile")
       .select(
         "id",
+        "created_by",
         "name",
         "status",
         "created_at",
         "updated_at"
       )
       .where("id", id)
+      .where("created_by", createdBy)
       .first();
 
     return res.status(200).json({
