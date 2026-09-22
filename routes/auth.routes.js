@@ -26,7 +26,6 @@ import {
     getCities,
     getKeySettings,
     updateKeySetting,
-    getWalletReceiverBalance,
     transferWalletPoints
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
@@ -286,13 +285,6 @@ router.post(
   "/wallet/transfer",
   authMiddleware,
   transferWalletPoints
-);
-
-
-router.get(
-  "/wallet/receiver-balance",
-  authMiddleware,
-  getWalletReceiverBalance
 );
 
 
