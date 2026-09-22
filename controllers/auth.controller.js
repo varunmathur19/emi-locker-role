@@ -3519,6 +3519,52 @@ export const getCities = async (req, res) => {
 //get key-setting data
 export const getKeySettings = async (req, res) => {
   try {
+    const userId = req.user.id;
+
+    // Logged-in user's wallet
+    const user = await db("users")
+      .select("wallet_balance")
+      .where("id", userId)
+      .first();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    let walletBalance = user.wallet_balance || [];
+
+    // JSON string ko array mein convert karo
+    if (typeof walletBalance === "string") {
+      try {
+        walletBalance = JSON.parse(walletBalance);
+      } catch (error) {
+        console.error(
+          "WALLET BALANCE JSON ERROR:",
+          error
+        );
+
+        walletBalance = [];
+      }
+    }
+
+    if (!Array.isArray(walletBalance)) {
+      walletBalance = [];
+    }
+
+    console.log(
+      "USER ID:",
+      userId
+    );
+
+    console.log(
+      "WALLET BALANCE:",
+      walletBalance
+    );
+
+    // Key settings
     const keySettings = await db("key_setting")
       .select(
         "id",
@@ -3529,17 +3575,49 @@ export const getKeySettings = async (req, res) => {
       )
       .orderBy("id", "asc");
 
+    const data = keySettings.map((key) => {
+      const walletItem = walletBalance.find(
+        (item) =>
+          String(item.name).trim().toLowerCase() ===
+          String(key.name).trim().toLowerCase()
+      );
+
+      return {
+        id: key.id,
+        name: key.name,
+        status: key.status,
+
+        // User ka actual balance
+        balance: Number(
+          walletItem?.balance || 0
+        ),
+
+        created_at: key.created_at,
+        updated_at: key.updated_at,
+      };
+    });
+
+    console.log(
+      "KEY SETTINGS WITH BALANCE:",
+      data
+    );
+
     return res.status(200).json({
       success: true,
-      message: "Key settings fetched successfully",
-      data: keySettings,
+      message:
+        "Key settings fetched successfully",
+      data,
     });
   } catch (error) {
-    console.error("GET KEY SETTINGS ERROR:", error);
+    console.error(
+      "GET KEY SETTINGS ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch key settings",
+      message:
+        "Failed to fetch key settings",
       error: error.message,
     });
   }
@@ -3549,7 +3627,7 @@ export const getKeySettings = async (req, res) => {
 export const updateKeySetting = async (req, res) => {
   try {
     const { id } = req.params;
-    const { name, status } = req.body;
+    const { status } = req.body;
 
     if (!id) {
       return res.status(400).json({
@@ -3558,10 +3636,10 @@ export const updateKeySetting = async (req, res) => {
       });
     }
 
-    if (name === undefined && status === undefined) {
+    if (status === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Name or status is required",
+        message: "Status is required",
       });
     }
 
@@ -3576,15 +3654,9 @@ export const updateKeySetting = async (req, res) => {
       });
     }
 
-    const updateData = {};
-
-    if (name !== undefined) {
-      updateData.name = String(name).trim();
-    }
-
-    if (status !== undefined) {
-      updateData.status = Number(status) === 1 ? 1 : 0;
-    }
+    const updateData = {
+      status: Number(status) === 1 ? 1 : 0,
+    };
 
     await db("key_setting")
       .where("id", id)
@@ -3596,20 +3668,256 @@ export const updateKeySetting = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Key setting updated successfully",
+      message: "Key setting status updated successfully",
       data: updatedKeySetting,
     });
   } catch (error) {
     console.error(
-      "UPDATE KEY SETTING ERROR:",
+      "UPDATE KEY SETTING STATUS ERROR:",
       error
     );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update key setting",
+      message: "Failed to update key setting status",
       error: error.message,
     });
   }
 };
 
+
+export const getWalletKeySettings = async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    // Get user's actual wallet balance
+    const user = await db("users")
+      .select("wallet_balance")
+      .where("id", userId)
+      .first();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "User not found",
+      });
+    }
+
+    let walletBalance = user.wallet_balance || [];
+
+    // MySQL JSON can sometimes come as string
+    if (typeof walletBalance === "string") {
+      try {
+        walletBalance = JSON.parse(walletBalance);
+      } catch (error) {
+        walletBalance = [];
+      }
+    }
+
+    // Get active key settings
+    const keySettings = await db("key_setting")
+      .select("id", "name", "status")
+      .where("status", 1)
+      .orderBy("id", "asc");
+
+    const data = keySettings.map((key) => {
+      const walletItem = walletBalance.find(
+        (item) => item.name === key.name
+      );
+
+      return {
+        id: key.id,
+        name: key.name,
+        status: key.status,
+        balance: Number(walletItem?.balance || 0),
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Wallet key settings fetched successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("GET WALLET KEY SETTINGS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch wallet key settings",
+      error: error.message,
+    });
+  }
+};
+
+export const getWalletTransferUsers = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const roleId = Number(req.user.role_id);
+
+    const nextRoleMap = {
+      0: 1,
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
+    };
+
+    const nextRoleId = nextRoleMap[roleId];
+
+    if (nextRoleId === undefined) {
+      return res.status(200).json({
+        success: true,
+        message: "No transfer users available",
+        data: [],
+      });
+    }
+
+    const users = await db("users")
+      .select(
+        "id",
+        "name",
+        "email",
+        "mobile",
+        "role_id",
+        "wallet_balance"
+      )
+      .where("role_id", nextRoleId)
+      .where("id", "!=", userId)
+      .orderBy("id", "asc");
+
+    const data = users.map((user) => {
+      let walletBalance = user.wallet_balance || [];
+
+      if (typeof walletBalance === "string") {
+        try {
+          walletBalance = JSON.parse(walletBalance);
+        } catch (error) {
+          walletBalance = [];
+        }
+      }
+
+      return {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        mobile: user.mobile,
+        role_id: user.role_id,
+        wallet_balance: Array.isArray(walletBalance)
+          ? walletBalance
+          : [],
+      };
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Transfer users fetched successfully",
+      data,
+    });
+  } catch (error) {
+    console.error("GET WALLET TRANSFER USERS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch transfer users",
+      error: error.message,
+    });
+  }
+};
+
+
+export const getWalletReceiverBalance = async (req, res) => {
+  try {
+    const { user_id, key_setting_id } = req.query;
+
+    if (!user_id || !key_setting_id) {
+      return res.status(400).json({
+        success: false,
+        message: "user_id and key_setting_id are required",
+      });
+    }
+
+    const keySetting = await db("key_setting")
+      .select("id", "name", "status")
+      .where("id", key_setting_id)
+      .first();
+
+    if (!keySetting) {
+      return res.status(404).json({
+        success: false,
+        message: "Key setting not found",
+      });
+    }
+
+    if (Number(keySetting.status) !== 1) {
+      return res.status(400).json({
+        success: false,
+        message: "Key setting is inactive",
+      });
+    }
+
+    const user = await db("users")
+      .select(
+        "id",
+        "name",
+        "email",
+        "role_id",
+        "wallet_balance"
+      )
+      .where("id", user_id)
+      .first();
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: "Receiver not found",
+      });
+    }
+
+    let walletBalance = user.wallet_balance || [];
+
+    if (typeof walletBalance === "string") {
+      try {
+        walletBalance = JSON.parse(walletBalance);
+      } catch (error) {
+        walletBalance = [];
+      }
+    }
+
+    if (!Array.isArray(walletBalance)) {
+      walletBalance = [];
+    }
+
+    const walletItem = walletBalance.find(
+      (item) => item.name === keySetting.name
+    );
+
+    const balance = Number(walletItem?.balance || 0);
+
+    return res.status(200).json({
+      success: true,
+      message: "Receiver balance fetched successfully",
+      data: {
+        user_id: user.id,
+        user_name: user.name,
+        role_id: user.role_id,
+
+        key_setting_id: keySetting.id,
+        key_name: keySetting.name,
+
+        balance,
+      },
+    });
+  } catch (error) {
+    console.error("GET RECEIVER WALLET BALANCE ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch receiver balance",
+      error: error.message,
+    });
+  }
+};
