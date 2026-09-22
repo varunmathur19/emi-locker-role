@@ -1426,6 +1426,7 @@ export const getDropdownUsers = async (req, res) => {
         "u.role_id",
         "u.parent_id",
         "u.created_by",
+        "u.wallet_balance",
         "u.created_at"
       )
       .where("u.role_id", requestedRoleId);
@@ -3685,149 +3686,306 @@ export const updateKeySetting = async (req, res) => {
   }
 };
 
+//transer point
+export const transferWalletPoints = async (req, res) => {
+  const trx = await db.transaction();
 
-export const getWalletKeySettings = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const fromUserId = Number(req.user.id);
+    const {
+      to_user_id,
+      key_setting_id,
+      points_sent,
+    } = req.body;
 
-    // Get user's actual wallet balance
-    const user = await db("users")
-      .select("wallet_balance")
-      .where("id", userId)
+    if (!fromUserId) {
+      await trx.rollback();
+
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    const toUserId = Number(to_user_id);
+    const keySettingId = Number(key_setting_id);
+    const points = Number(points_sent);
+
+    if (
+      !Number.isInteger(toUserId) ||
+      toUserId <= 0
+    ) {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Valid receiver user id is required",
+      });
+    }
+
+    if (
+      !Number.isInteger(keySettingId) ||
+      keySettingId <= 0
+    ) {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Valid key setting id is required",
+      });
+    }
+
+    if (
+      !Number.isFinite(points) ||
+      points <= 0
+    ) {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Transfer points must be greater than 0",
+      });
+    }
+
+    if (fromUserId === toUserId) {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "You cannot transfer points to yourself",
+      });
+    }
+
+    const keySetting = await trx("key_setting")
+      .select("id", "name", "status")
+      .where("id", keySettingId)
       .first();
 
-    if (!user) {
+    if (!keySetting) {
+      await trx.rollback();
+
       return res.status(404).json({
         success: false,
-        message: "User not found",
+        message: "Key setting not found",
       });
     }
 
-    let walletBalance = user.wallet_balance || [];
+    if (Number(keySetting.status) !== 1) {
+      await trx.rollback();
 
-    // MySQL JSON can sometimes come as string
-    if (typeof walletBalance === "string") {
-      try {
-        walletBalance = JSON.parse(walletBalance);
-      } catch (error) {
-        walletBalance = [];
-      }
-    }
-
-    // Get active key settings
-    const keySettings = await db("key_setting")
-      .select("id", "name", "status")
-      .where("status", 1)
-      .orderBy("id", "asc");
-
-    const data = keySettings.map((key) => {
-      const walletItem = walletBalance.find(
-        (item) => item.name === key.name
-      );
-
-      return {
-        id: key.id,
-        name: key.name,
-        status: key.status,
-        balance: Number(walletItem?.balance || 0),
-      };
-    });
-
-    return res.status(200).json({
-      success: true,
-      message: "Wallet key settings fetched successfully",
-      data,
-    });
-  } catch (error) {
-    console.error("GET WALLET KEY SETTINGS ERROR:", error);
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch wallet key settings",
-      error: error.message,
-    });
-  }
-};
-
-export const getWalletTransferUsers = async (req, res) => {
-  try {
-    const userId = req.user.id;
-    const roleId = Number(req.user.role_id);
-
-    const nextRoleMap = {
-      0: 1,
-      1: 2,
-      2: 3,
-      3: 4,
-      4: 5,
-      5: 6,
-      6: 7,
-      7: 8,
-      8: 9,
-    };
-
-    const nextRoleId = nextRoleMap[roleId];
-
-    if (nextRoleId === undefined) {
-      return res.status(200).json({
-        success: true,
-        message: "No transfer users available",
-        data: [],
+      return res.status(400).json({
+        success: false,
+        message: "Selected key setting is inactive",
       });
     }
 
-    const users = await db("users")
+    const sender = await trx("users")
       .select(
         "id",
-        "name",
-        "email",
-        "mobile",
         "role_id",
+        "parent_id",
         "wallet_balance"
       )
-      .where("role_id", nextRoleId)
-      .where("id", "!=", userId)
-      .orderBy("id", "asc");
+      .where("id", fromUserId)
+      .forUpdate()
+      .first();
 
-    const data = users.map((user) => {
-      let walletBalance = user.wallet_balance || [];
+    if (!sender) {
+      await trx.rollback();
 
-      if (typeof walletBalance === "string") {
-        try {
-          walletBalance = JSON.parse(walletBalance);
-        } catch (error) {
-          walletBalance = [];
-        }
+      return res.status(404).json({
+        success: false,
+        message: "Sender user not found",
+      });
+    }
+
+    const receiver = await trx("users")
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "wallet_balance"
+      )
+      .where("id", toUserId)
+      .forUpdate()
+      .first();
+
+    if (!receiver) {
+      await trx.rollback();
+
+      return res.status(404).json({
+        success: false,
+        message: "Receiver user not found",
+      });
+    }
+
+    let senderWallet = sender.wallet_balance || [];
+    let receiverWallet = receiver.wallet_balance || [];
+
+    if (typeof senderWallet === "string") {
+      try {
+        senderWallet = JSON.parse(senderWallet);
+      } catch (error) {
+        senderWallet = [];
       }
+    }
 
-      return {
-        id: user.id,
-        name: user.name,
-        email: user.email,
-        mobile: user.mobile,
-        role_id: user.role_id,
-        wallet_balance: Array.isArray(walletBalance)
-          ? walletBalance
-          : [],
+    if (typeof receiverWallet === "string") {
+      try {
+        receiverWallet = JSON.parse(receiverWallet);
+      } catch (error) {
+        receiverWallet = [];
+      }
+    }
+
+    if (!Array.isArray(senderWallet)) {
+      senderWallet = [];
+    }
+
+    if (!Array.isArray(receiverWallet)) {
+      receiverWallet = [];
+    }
+
+    const keyName = String(
+      keySetting.name || ""
+    )
+      .trim()
+      .toLowerCase();
+
+    const senderWalletIndex = senderWallet.findIndex(
+      (item) =>
+        String(item?.name || "")
+          .trim()
+          .toLowerCase() === keyName
+    );
+
+    const receiverWalletIndex =
+      receiverWallet.findIndex(
+        (item) =>
+          String(item?.name || "")
+            .trim()
+            .toLowerCase() === keyName
+      );
+
+    const fromBalanceBefore =
+      senderWalletIndex >= 0
+        ? Number(
+            senderWallet[senderWalletIndex]?.balance || 0
+          )
+        : 0;
+
+    const toBalanceBefore =
+      receiverWalletIndex >= 0
+        ? Number(
+            receiverWallet[receiverWalletIndex]?.balance || 0
+          )
+        : 0;
+
+    if (
+      !Number.isFinite(fromBalanceBefore) ||
+      fromBalanceBefore < points
+    ) {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message: "Insufficient wallet balance",
+        available_balance: fromBalanceBefore,
+        requested_points: points,
+      });
+    }
+
+    const fromBalanceAfter =
+      fromBalanceBefore - points;
+
+    const toBalanceAfter =
+      toBalanceBefore + points;
+
+    if (senderWalletIndex >= 0) {
+      senderWallet[senderWalletIndex] = {
+        ...senderWallet[senderWalletIndex],
+        balance: fromBalanceAfter,
       };
+    } else {
+      await trx.rollback();
+
+      return res.status(400).json({
+        success: false,
+        message:
+          "Selected key setting balance not found in sender wallet",
+      });
+    }
+
+    if (receiverWalletIndex >= 0) {
+      receiverWallet[receiverWalletIndex] = {
+        ...receiverWallet[receiverWalletIndex],
+        balance: toBalanceAfter,
+      };
+    } else {
+      receiverWallet.push({
+        name: keySetting.name,
+        balance: toBalanceAfter,
+      });
+    }
+
+    await trx("users")
+      .where("id", fromUserId)
+      .update({
+        wallet_balance: JSON.stringify(senderWallet),
+      });
+
+    await trx("users")
+      .where("id", toUserId)
+      .update({
+        wallet_balance: JSON.stringify(receiverWallet),
+      });
+
+    const [transactionId] = await trx("wallet").insert({
+      from_user_id: fromUserId,
+      to_user_id: toUserId,
+      key_setting_id: keySettingId,
+      points_sent: points,
+      from_balance_before: fromBalanceBefore,
+      from_balance_after: fromBalanceAfter,
+      to_balance_before: toBalanceBefore,
+      to_balance_after: toBalanceAfter,
+      transaction_type: "TRANSFER",
+      created_by: fromUserId,
     });
+
+    await trx.commit();
 
     return res.status(200).json({
       success: true,
-      message: "Transfer users fetched successfully",
-      data,
+      message: "Points transferred successfully",
+      data: {
+        transaction_id: transactionId,
+        from_user_id: fromUserId,
+        to_user_id: toUserId,
+        key_setting_id: keySettingId,
+        key_name: keySetting.name,
+        points_sent: points,
+        from_balance_before: fromBalanceBefore,
+        from_balance_after: fromBalanceAfter,
+        to_balance_before: toBalanceBefore,
+        to_balance_after: toBalanceAfter,
+      },
     });
   } catch (error) {
-    console.error("GET WALLET TRANSFER USERS ERROR:", error);
+    await trx.rollback();
+
+    console.error(
+      "TRANSFER WALLET POINTS ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: "Failed to fetch transfer users",
+      message: "Failed to transfer wallet points",
       error: error.message,
     });
   }
 };
-
 
 export const getWalletReceiverBalance = async (req, res) => {
   try {

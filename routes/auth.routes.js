@@ -26,9 +26,8 @@ import {
     getCities,
     getKeySettings,
     updateKeySetting,
-    getWalletKeySettings,
-    getWalletTransferUsers,
-    getWalletReceiverBalance
+    getWalletReceiverBalance,
+    transferWalletPoints
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -282,12 +281,11 @@ router.get(
 router.put("/key-setting/:id",authMiddleware, updateKeySetting);
 
 
-
-
-router.get(
-  "/wallet/transfer-users",
+//wallet transfer
+router.post(
+  "/wallet/transfer",
   authMiddleware,
-  getWalletTransferUsers
+  transferWalletPoints
 );
 
 
