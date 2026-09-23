@@ -3130,23 +3130,7 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    const profileName = String(name || "").trim();
-    const profileStatus = Number(status);
-
-    if (!profileName) {
-      return res.status(400).json({
-        success: false,
-        message: "Profile name is required",
-      });
-    }
-
-    if (![0, 1].includes(profileStatus)) {
-      return res.status(400).json({
-        success: false,
-        message: "Status must be 0 or 1",
-      });
-    }
-
+    // Check existing profile
     const existingProfile = await db("profile")
       .where("id", id)
       .where("created_by", createdBy)
@@ -3159,28 +3143,74 @@ export const updateProfile = async (req, res) => {
       });
     }
 
-    const duplicateProfile = await db("profile")
-      .where("created_by", createdBy)
-      .whereRaw("LOWER(`name`) = LOWER(?)", [profileName])
-      .whereNot("id", id)
-      .first();
+    const updateData = {};
 
-    if (duplicateProfile) {
-      return res.status(409).json({
+    // =========================
+    // Update Name
+    // =========================
+    if (name !== undefined) {
+      const profileName = String(name).trim();
+
+      if (!profileName) {
+        return res.status(400).json({
+          success: false,
+          message: "Profile name is required",
+        });
+      }
+
+      // Check duplicate name
+      const duplicateProfile = await db("profile")
+        .where("created_by", createdBy)
+        .whereRaw(
+          "LOWER(`name`) = LOWER(?)",
+          [profileName]
+        )
+        .whereNot("id", id)
+        .first();
+
+      if (duplicateProfile) {
+        return res.status(409).json({
+          success: false,
+          message: "Profile already exists",
+        });
+      }
+
+      updateData.name = profileName;
+    }
+
+    // =========================
+    // Update Status
+    // =========================
+    if (status !== undefined) {
+      const profileStatus = Number(status);
+
+      if (![0, 1].includes(profileStatus)) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be 0 or 1",
+        });
+      }
+
+      updateData.status = profileStatus;
+    }
+
+    // Nothing to update
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
         success: false,
-        message: "Profile already exists",
+        message: "Nothing to update",
       });
     }
+
+    // Always update timestamp
+    updateData.updated_at = db.fn.now();
 
     await db("profile")
       .where("id", id)
       .where("created_by", createdBy)
-      .update({
-        name: profileName,
-        status: profileStatus,
-        updated_at: db.fn.now(),
-      });
+      .update(updateData);
 
+    // Get updated profile
     const profile = await db("profile")
       .select(
         "id",
@@ -3200,7 +3230,10 @@ export const updateProfile = async (req, res) => {
       data: profile,
     });
   } catch (error) {
-    console.error("UPDATE PROFILE DB ERROR:", error);
+    console.error(
+      "UPDATE PROFILE DB ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
