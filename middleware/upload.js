@@ -8,9 +8,7 @@ const uploadDir = path.join(
   "modules"
 );
 
-// ==========================================
-// CREATE DIRECTORY
-// ==========================================
+
 
 if (!fs.existsSync(uploadDir)) {
   fs.mkdirSync(uploadDir, {
@@ -18,9 +16,7 @@ if (!fs.existsSync(uploadDir)) {
   });
 }
 
-// ==========================================
-// STORAGE
-// ==========================================
+
 
 const storage = multer.diskStorage({
 
@@ -45,9 +41,7 @@ const storage = multer.diskStorage({
 
 });
 
-// ==========================================
-// PNG FILTER
-// ==========================================
+
 
 const fileFilter = (req, file, cb) => {
 
@@ -67,12 +61,6 @@ const fileFilter = (req, file, cb) => {
   }
 
 };
-
-// ==========================================
-// ADD MODULE
-// FIELD = icon
-// ==========================================
-
 export const uploadModuleIcon = multer({
 
   storage,

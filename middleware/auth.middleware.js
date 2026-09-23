@@ -29,7 +29,6 @@ export const authMiddleware = (req, res, next) => {
     );
 
     req.user = {
-      // CURRENT USER
       id: decoded.id,
 
       role_id:
@@ -39,7 +38,6 @@ export const authMiddleware = (req, res, next) => {
 
       email: decoded.email,
 
-      // ORIGINAL LOGIN USER
       original_user_id:
         decoded.original_user_id || null,
 
@@ -49,7 +47,6 @@ export const authMiddleware = (req, res, next) => {
           ? Number(decoded.original_role_id)
           : null,
 
-      // IMPERSONATION
       is_impersonating:
         decoded.is_impersonating === true,
     };

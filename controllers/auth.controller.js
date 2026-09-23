@@ -82,9 +82,6 @@ const getRoleForPermission = (roleId) =>
 
 // ADD STAFF
 
-
-
-
 export const createuserrole = async (req, res) => {
     try {
         const {
@@ -731,8 +728,6 @@ export const createuserrole = async (req, res) => {
         });
     }
 };
-
-
 
 // Login staff
 export const loginUser = async (req, res) => {
@@ -2596,7 +2591,6 @@ export const loginAsUser = async (req, res) => {
   }
 };
 
-
 export const getModules = async (req, res) => {
     try {
         const { search, status } = req.query;
@@ -2641,7 +2635,6 @@ export const getModules = async (req, res) => {
         });
     }
 };
-
 
 export const updateModule = async (req, res) => {
     try {
@@ -2995,7 +2988,6 @@ export const getRoles = async (req, res) => {
         });
     }
 };
-
 
 //GET 
 export const getProfiles = async (req, res) => {
@@ -3493,7 +3485,6 @@ export const getStates = async (req, res) => {
         });
     }
 };
-
 
 //get city api according to the state
 export const getCities = async (req, res) => {
