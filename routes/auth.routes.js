@@ -23,7 +23,10 @@ import {
     createProfile,
     getCountries,
     getStates,
-    getCities
+    getCities,
+    getKeySettings,
+    updateKeySetting,
+    transferWalletPoints
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -266,6 +269,23 @@ router.get("/states", getStates);
 //get city api according to the state
 router.get("/cities", getCities);
 
+//get key setting data
+router.get(
+  "/key-setting",
+  authMiddleware,
+  getKeySettings
+);
+
+//update key setting api
+router.put("/key-setting/:id",authMiddleware, updateKeySetting);
+
+
+//wallet transfer
+router.post(
+  "/wallet/transfer",
+  authMiddleware,
+  transferWalletPoints
+);
 
 
 
