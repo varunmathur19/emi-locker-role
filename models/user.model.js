@@ -132,11 +132,10 @@ const selectUserFields = [
   "u.created_by",
   "u.parent_id",
   "u.userStatus",
+  "u.wallet_balance",
 
-  // Role Permission
   "u.role_permission_id",
 
-  // Profile
   "p.id as profile_id",
   "p.name as profile_name",
   "p.status as profile_status",
