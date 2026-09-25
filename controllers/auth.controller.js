@@ -4118,155 +4118,171 @@ export const transferWalletPoints = async (req, res) => {
 };
 
 //get the transactione data
+
 export const getWalletTransactions = async (req, res) => {
-    try {
-        const userId = Number(req.user?.id);
+  try {
+    const userId = Number(req.user?.id);
+    const roleId = Number(req.user?.role_id);
 
-        if (!userId) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized",
-            });
-        }
-
-        const {
-            transaction_type,
-            key_setting_id,
-            page = 1,
-            limit = 10,
-        } = req.query;
-
-        const pageNumber = Math.max(Number(page) || 1, 1);
-        const limitNumber = Math.min(
-            Math.max(Number(limit) || 10, 1),
-            100
-        );
-
-        const offset = (pageNumber - 1) * limitNumber;
-
-        const query = db("wallet as w")
-            .leftJoin(
-                "users as from_user",
-                "w.from_user_id",
-                "from_user.id"
-            )
-            .leftJoin(
-                "users as to_user",
-                "w.to_user_id",
-                "to_user.id"
-            )
-            .leftJoin(
-                "key_setting as ks",
-                "w.key_setting_id",
-                "ks.id"
-            )
-            .select(
-                "w.id",
-                "w.from_user_id",
-                "w.to_user_id",
-                "w.key_setting_id",
-                "ks.name as key_name",
-                "w.points_sent",
-                "w.from_balance_before",
-                "w.from_balance_after",
-                "w.to_balance_before",
-                "w.to_balance_after",
-                "w.transaction_type",
-                "w.created_by",
-                "w.created_at",
-                "from_user.name as from_user_name",
-                "to_user.name as to_user_name"
-            )
-            .where(function () {
-                this.where(
-                    "w.from_user_id",
-                    userId
-                ).orWhere(
-                    "w.to_user_id",
-                    userId
-                );
-            });
-
-        if (
-            transaction_type !== undefined &&
-            transaction_type !== ""
-        ) {
-            const type = Number(transaction_type);
-
-            if ([0, 1, 2].includes(type)) {
-                query.where(
-                    "w.transaction_type",
-                    type
-                );
-            }
-        }
-
-        if (
-            key_setting_id !== undefined &&
-            key_setting_id !== ""
-        ) {
-            const keySettingId =
-                Number(key_setting_id);
-
-            if (
-                Number.isInteger(keySettingId) &&
-                keySettingId > 0
-            ) {
-                query.where(
-                    "w.key_setting_id",
-                    keySettingId
-                );
-            }
-        }
-
-        const countQuery = query
-            .clone()
-            .clearSelect()
-            .clearOrder()
-            .count("w.id as total")
-            .first();
-
-        const [countResult, transactions] =
-            await Promise.all([
-                countQuery,
-                query
-                    .orderBy(
-                        "w.created_at",
-                        "desc"
-                    )
-                    .limit(limitNumber)
-                    .offset(offset),
-            ]);
-
-        const total = Number(
-            countResult?.total || 0
-        );
-
-        return res.status(200).json({
-            success: true,
-            message:
-                "Wallet transactions fetched successfully",
-            data: transactions,
-            pagination: {
-                page: pageNumber,
-                limit: limitNumber,
-                total,
-                total_pages: Math.ceil(
-                    total / limitNumber
-                ),
-            },
-        });
-    } catch (error) {
-        console.error(
-            "GET WALLET TRANSACTIONS ERROR:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message:
-                "Failed to fetch wallet transactions",
-            error: error.message,
-        });
+    if (!userId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized",
+      });
     }
+
+    const {
+      page = 1,
+      limit = 10,
+      transaction_type,
+      key_setting_id,
+    } = req.query;
+
+    const pageNumber = Math.max(Number(page) || 1, 1);
+
+    const limitNumber = Math.min(
+      Math.max(Number(limit) || 10, 1),
+      100
+    );
+
+    const offset = (pageNumber - 1) * limitNumber;
+
+    /*
+     * Transaction Visibility:
+     *
+     * Master Admin (role 0)
+     * Admin (role 1)
+     * -> All transactions
+     *
+     * Other roles (2-9)
+     * -> Only their own transactions
+     *    where logged-in user is sender or receiver.
+     */
+    const query = db("wallet as wt")
+      .leftJoin(
+        "users as from_user",
+        "from_user.id",
+        "wt.from_user_id"
+      )
+      .leftJoin(
+        "users as to_user",
+        "to_user.id",
+        "wt.to_user_id"
+      )
+      .leftJoin(
+        "key_setting as ks",
+        "ks.id",
+        "wt.key_setting_id"
+      );
+
+    // Only non-admin roles should see their own transactions
+    if (roleId !== 0 && roleId !== 1) {
+      query.where(function () {
+        this.where(
+          "wt.from_user_id",
+          userId
+        ).orWhere(
+          "wt.to_user_id",
+          userId
+        );
+      });
+    }
+
+    // Transaction type filter
+    if (
+      transaction_type !== undefined &&
+      transaction_type !== ""
+    ) {
+      query.where(
+        "wt.transaction_type",
+        Number(transaction_type)
+      );
+    }
+
+    // Key setting filter
+    if (
+      key_setting_id !== undefined &&
+      key_setting_id !== ""
+    ) {
+      query.where(
+        "wt.key_setting_id",
+        Number(key_setting_id)
+      );
+    }
+
+    // Total count
+    const countQuery = query
+      .clone()
+      .clearSelect()
+      .clearOrder()
+      .count({
+        total: "wt.id",
+      })
+      .first();
+
+    // Transaction data
+    const transactionsQuery = query
+      .clone()
+      .select(
+        "wt.*",
+
+        "from_user.name as from_user_name",
+        "from_user.email as from_user_email",
+        "from_user.role_id as from_user_role_id",
+
+        "to_user.name as to_user_name",
+        "to_user.email as to_user_email",
+        "to_user.role_id as to_user_role_id",
+
+        "ks.name as key_setting_name"
+      )
+      .orderBy(
+        "wt.created_at",
+        "desc"
+      )
+      .limit(limitNumber)
+      .offset(offset);
+
+    const [
+      countResult,
+      transactions,
+    ] = await Promise.all([
+      countQuery,
+      transactionsQuery,
+    ]);
+
+    const total = Number(
+      countResult?.total || 0
+    );
+
+    const totalPages = Math.ceil(
+      total / limitNumber
+    );
+
+    return res.status(200).json({
+      success: true,
+      message:
+        "Wallet transactions fetched successfully",
+      data: transactions,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "GET WALLET TRANSACTIONS ERROR:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message:
+        "Failed to fetch wallet transactions",
+      error: error.message,
+    });
+  }
 };
+
