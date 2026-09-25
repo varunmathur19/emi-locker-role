@@ -3668,7 +3668,7 @@ export const updateKeySetting = async (req, res) => {
   }
 };
 
-//transer point
+//post the transactione data
 export const transferWalletPoints = async (req, res) => {
     const trx = await db.transaction();
 
@@ -4112,6 +4112,160 @@ export const transferWalletPoints = async (req, res) => {
             success: false,
             message:
                 "Failed to transfer wallet points",
+            error: error.message,
+        });
+    }
+};
+
+//get the transactione data
+export const getWalletTransactions = async (req, res) => {
+    try {
+        const userId = Number(req.user?.id);
+
+        if (!userId) {
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
+
+        const {
+            transaction_type,
+            key_setting_id,
+            page = 1,
+            limit = 10,
+        } = req.query;
+
+        const pageNumber = Math.max(Number(page) || 1, 1);
+        const limitNumber = Math.min(
+            Math.max(Number(limit) || 10, 1),
+            100
+        );
+
+        const offset = (pageNumber - 1) * limitNumber;
+
+        const query = db("wallet as w")
+            .leftJoin(
+                "users as from_user",
+                "w.from_user_id",
+                "from_user.id"
+            )
+            .leftJoin(
+                "users as to_user",
+                "w.to_user_id",
+                "to_user.id"
+            )
+            .leftJoin(
+                "key_setting as ks",
+                "w.key_setting_id",
+                "ks.id"
+            )
+            .select(
+                "w.id",
+                "w.from_user_id",
+                "w.to_user_id",
+                "w.key_setting_id",
+                "ks.name as key_name",
+                "w.points_sent",
+                "w.from_balance_before",
+                "w.from_balance_after",
+                "w.to_balance_before",
+                "w.to_balance_after",
+                "w.transaction_type",
+                "w.created_by",
+                "w.created_at",
+                "from_user.name as from_user_name",
+                "to_user.name as to_user_name"
+            )
+            .where(function () {
+                this.where(
+                    "w.from_user_id",
+                    userId
+                ).orWhere(
+                    "w.to_user_id",
+                    userId
+                );
+            });
+
+        if (
+            transaction_type !== undefined &&
+            transaction_type !== ""
+        ) {
+            const type = Number(transaction_type);
+
+            if ([0, 1, 2].includes(type)) {
+                query.where(
+                    "w.transaction_type",
+                    type
+                );
+            }
+        }
+
+        if (
+            key_setting_id !== undefined &&
+            key_setting_id !== ""
+        ) {
+            const keySettingId =
+                Number(key_setting_id);
+
+            if (
+                Number.isInteger(keySettingId) &&
+                keySettingId > 0
+            ) {
+                query.where(
+                    "w.key_setting_id",
+                    keySettingId
+                );
+            }
+        }
+
+        const countQuery = query
+            .clone()
+            .clearSelect()
+            .clearOrder()
+            .count("w.id as total")
+            .first();
+
+        const [countResult, transactions] =
+            await Promise.all([
+                countQuery,
+                query
+                    .orderBy(
+                        "w.created_at",
+                        "desc"
+                    )
+                    .limit(limitNumber)
+                    .offset(offset),
+            ]);
+
+        const total = Number(
+            countResult?.total || 0
+        );
+
+        return res.status(200).json({
+            success: true,
+            message:
+                "Wallet transactions fetched successfully",
+            data: transactions,
+            pagination: {
+                page: pageNumber,
+                limit: limitNumber,
+                total,
+                total_pages: Math.ceil(
+                    total / limitNumber
+                ),
+            },
+        });
+    } catch (error) {
+        console.error(
+            "GET WALLET TRANSACTIONS ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "Failed to fetch wallet transactions",
             error: error.message,
         });
     }
