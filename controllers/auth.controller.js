@@ -82,9 +82,6 @@ const getRoleForPermission = (roleId) =>
 
 // ADD STAFF
 
-
-
-
 export const createuserrole = async (req, res) => {
     try {
         const {
@@ -732,8 +729,6 @@ export const createuserrole = async (req, res) => {
     }
 };
 
-
-
 // Login staff
 export const loginUser = async (req, res) => {
   try {
@@ -948,21 +943,9 @@ export const loginUser = async (req, res) => {
 // GET ALL USERS
 export const getUsers = async (req, res) => {
     try {
-        const page = Math.max(
-            Number(req.query.page) || 1,
-            1
-        );
-
-        const limit = Math.max(
-            Number(req.query.limit) || 10,
-            1
-        );
-
+        const page = Math.max(Number(req.query.page) || 1, 1);
+        const limit = Math.max(Number(req.query.limit) || 10, 1);
         const offset = (page - 1) * limit;
-
-        // --------------------------------------------------
-        // ROLE FILTER
-        // --------------------------------------------------
 
         let role_id = null;
 
@@ -980,19 +963,11 @@ export const getUsers = async (req, res) => {
             }
         }
 
-        // --------------------------------------------------
-        // SEARCH
-        // --------------------------------------------------
-
         const search =
             req.query.search !== undefined &&
             String(req.query.search).trim() !== ""
                 ? String(req.query.search).trim()
                 : null;
-
-        // --------------------------------------------------
-        // LOCATION FILTERS
-        // --------------------------------------------------
 
         const country =
             req.query.country !== undefined &&
@@ -1011,10 +986,6 @@ export const getUsers = async (req, res) => {
             String(req.query.city).trim() !== ""
                 ? String(req.query.city).trim()
                 : null;
-
-        // --------------------------------------------------
-        // STATUS FILTER
-        // --------------------------------------------------
 
         let status = null;
 
@@ -1044,10 +1015,6 @@ export const getUsers = async (req, res) => {
             }
         }
 
-        // --------------------------------------------------
-        // LOGGED-IN USER
-        // --------------------------------------------------
-
         const loggedInUserId = Number(req.user?.id);
         const loggedInRoleId = Number(req.user?.role_id);
 
@@ -1064,14 +1031,9 @@ export const getUsers = async (req, res) => {
         if (!Number.isInteger(loggedInRoleId)) {
             return res.status(401).json({
                 success: false,
-                message:
-                    "Invalid logged-in user role",
+                message: "Invalid logged-in user role",
             });
         }
-
-        // --------------------------------------------------
-        // STAFF ROLE ACCESS
-        // --------------------------------------------------
 
         let staffRoleAccess = false;
 
@@ -1079,25 +1041,18 @@ export const getUsers = async (req, res) => {
             if (role_id === null) {
                 return res.status(403).json({
                     success: false,
-                    message:
-                        "Staff must select an authorized role",
+                    message: "Staff must select an authorized role",
                 });
             }
 
-            const [
-                staffUser,
-                requestedRole,
-            ] = await Promise.all([
+            const [staffUser, requestedRole] = await Promise.all([
                 db("users")
                     .select(
                         "id",
                         "role_id",
                         "role_permission_id"
                     )
-                    .where(
-                        "id",
-                        loggedInUserId
-                    )
+                    .where("id", loggedInUserId)
                     .first(),
 
                 getRoleForPermission(role_id),
@@ -1106,15 +1061,13 @@ export const getUsers = async (req, res) => {
             if (!staffUser) {
                 return res.status(404).json({
                     success: false,
-                    message:
-                        "Logged-in staff user not found",
+                    message: "Logged-in staff user not found",
                 });
             }
 
-            const permissions =
-                await getStaffPermissions(
-                    staffUser
-                );
+            const permissions = await getStaffPermissions(
+                staffUser
+            );
 
             if (
                 !hasStaffRolePermission(
@@ -1124,17 +1077,12 @@ export const getUsers = async (req, res) => {
             ) {
                 return res.status(403).json({
                     success: false,
-                    message:
-                        "You are not allowed to access this role",
+                    message: "You are not allowed to access this role",
                 });
             }
 
             staffRoleAccess = true;
         }
-
-        // --------------------------------------------------
-        // GET USERS
-        // --------------------------------------------------
 
         const result = await getAllUsers(
             limit,
@@ -1150,86 +1098,73 @@ export const getUsers = async (req, res) => {
             staffRoleAccess
         );
 
-        // --------------------------------------------------
-        // FORMAT USERS
-        // --------------------------------------------------
-
         const users = await Promise.all(
             result.users.map(async (user) => {
-                // ------------------------------------------
-                // PARSE ROLE PERMISSION
-                // ------------------------------------------
-
                 let parsedPermission = {};
 
                 if (user.role_permission) {
                     try {
                         parsedPermission =
-                            typeof user.role_permission ===
-                            "string"
-                                ? JSON.parse(
-                                      user.role_permission
-                                  )
+                            typeof user.role_permission === "string"
+                                ? JSON.parse(user.role_permission)
                                 : user.role_permission;
 
                         if (
                             !parsedPermission ||
-                            typeof parsedPermission !==
-                                "object" ||
-                            Array.isArray(
-                                parsedPermission
-                            )
+                            typeof parsedPermission !== "object" ||
+                            Array.isArray(parsedPermission)
                         ) {
                             parsedPermission = {};
                         }
-                    } catch (error) {
+                    } catch {
                         parsedPermission = {};
                     }
                 }
 
-                // ------------------------------------------
-                // DEFAULT PARENT DATA
-                // ------------------------------------------
+                let wallet_balance = user.wallet_balance || [];
 
-                let parent_name =
-                    user.parent_name || null;
+                if (typeof wallet_balance === "string") {
+                    try {
+                        wallet_balance = JSON.parse(wallet_balance);
+                    } catch {
+                        wallet_balance = [];
+                    }
+                }
+
+                if (
+                    !wallet_balance ||
+                    typeof wallet_balance !== "object"
+                ) {
+                    wallet_balance = [];
+                }
+
+                let parent_name = user.parent_name || null;
 
                 let parent_organization_name =
-                    user.parent_organization_name ||
-                    null;
-
-                // ------------------------------------------
-                // CNF PARENT
-                // ROLE 2 = CNF
-                // ------------------------------------------
+                    user.parent_organization_name || null;
 
                 if (
                     Number(user.role_id) === 2 &&
                     user.parent_id
                 ) {
                     try {
-                        const parentUser =
-                            await db("users")
-                                .select(
-                                    "name",
-                                    "organization_name"
-                                )
-                                .where(
-                                    "id",
-                                    Number(
-                                        user.parent_id
-                                    )
-                                )
-                                .first();
+                        const parentUser = await db("users")
+                            .select(
+                                "name",
+                                "organization_name"
+                            )
+                            .where(
+                                "id",
+                                Number(user.parent_id)
+                            )
+                            .first();
 
                         if (parentUser) {
                             parent_name =
-                                parentUser.name ||
-                                null;
+                                parentUser.name || null;
 
                             parent_organization_name =
-                                parentUser.organization_name ||
-                                null;
+                                parentUser.organization_name || null;
                         }
                     } catch (parentError) {
                         console.error(
@@ -1239,75 +1174,40 @@ export const getUsers = async (req, res) => {
                     }
                 }
 
-                // ------------------------------------------
-                // FINAL USER
-                // ------------------------------------------
-
                 return {
                     ...user,
-
+                    wallet_balance,
                     parent_name,
-
                     parent_organization_name,
-
-                    // --------------------------------------
-                    // ROLE PERMISSION
-                    // --------------------------------------
-
                     role_permission: {
-                        id:
-                            user.role_permission_id ||
-                            null,
-
-                        profile_id:
-                            user.profile_id ||
-                            null,
-
-                        profile_name:
-                            user.profile_name ||
-                            null,
-
-                        permission:
-                            parsedPermission,
+                        id: user.role_permission_id || null,
+                        profile_id: user.profile_id || null,
+                        profile_name: user.profile_name || null,
+                        permission: parsedPermission,
                     },
                 };
             })
         );
 
-        // --------------------------------------------------
-        // RESPONSE
-        // --------------------------------------------------
-
         return res.status(200).json({
             success: true,
-
             pagination: {
                 currentPage: page,
-
-                totalPages:
-                    Math.ceil(
-                        result.total / limit
-                    ),
-
+                totalPages: Math.ceil(
+                    result.total / limit
+                ),
                 limit,
-
-                totalUsers:
-                    result.total,
+                totalUsers: result.total,
             },
-
             data: users,
         });
     } catch (error) {
-        console.error(
-            "GET USERS ERROR:",
-            error
-        );
+        console.error("GET USERS ERROR:", error);
 
         return res.status(500).json({
             success: false,
             message:
-                error?.message ||
-                "Failed to get users",
+                error?.message || "Failed to get users",
         });
     }
 };
@@ -2596,7 +2496,6 @@ export const loginAsUser = async (req, res) => {
   }
 };
 
-
 export const getModules = async (req, res) => {
     try {
         const { search, status } = req.query;
@@ -2641,7 +2540,6 @@ export const getModules = async (req, res) => {
         });
     }
 };
-
 
 export const updateModule = async (req, res) => {
     try {
@@ -2996,6 +2894,58 @@ export const getRoles = async (req, res) => {
     }
 };
 
+// update status active /inactive
+
+export const updateRoleStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        if (!id) {
+            return res.status(400).json({
+                success: false,
+                message: "Role ID is required",
+            });
+        }
+
+        if (![0, 1].includes(Number(status))) {
+            return res.status(400).json({
+                success: false,
+                message: "Status must be 0 or 1",
+            });
+        }
+
+        const role = await db("roles")
+            .where("id", id)
+            .first();
+
+        if (!role) {
+            return res.status(404).json({
+                success: false,
+                message: "Role not found",
+            });
+        }
+
+        await db("roles")
+            .where("id", id)
+            .update({
+                status: Number(status),
+                updated_at: db.fn.now(),
+            });
+
+        return res.status(200).json({
+            success: true,
+            message: "Role status updated successfully",
+        });
+    } catch (error) {
+        console.error("UPDATE ROLE STATUS ERROR:", error);
+
+        return res.status(500).json({
+            success: false,
+            message: "Internal server error",
+        });
+    }
+};
 
 //GET 
 export const getProfiles = async (req, res) => {
@@ -3494,7 +3444,6 @@ export const getStates = async (req, res) => {
     }
 };
 
-
 //get city api according to the state
 export const getCities = async (req, res) => {
     try {
@@ -3721,302 +3670,449 @@ export const updateKeySetting = async (req, res) => {
 
 //transer point
 export const transferWalletPoints = async (req, res) => {
-  const trx = await db.transaction();
+    const trx = await db.transaction();
 
-  try {
-    const fromUserId = Number(req.user.id);
-    const {
-      to_user_id,
-      key_setting_id,
-      points_sent,
-    } = req.body;
+    try {
+        const fromUserId = Number(req.user?.id);
 
-    if (!fromUserId) {
-      await trx.rollback();
+        const {
+            to_user_id,
+            key_setting_id,
+            points_sent,
+            transaction_type,
+        } = req.body;
 
-      return res.status(401).json({
-        success: false,
-        message: "Unauthorized",
-      });
-    }
+        if (!fromUserId) {
+            await trx.rollback();
 
-    const toUserId = Number(to_user_id);
-    const keySettingId = Number(key_setting_id);
-    const points = Number(points_sent);
+            return res.status(401).json({
+                success: false,
+                message: "Unauthorized",
+            });
+        }
 
-    if (
-      !Number.isInteger(toUserId) ||
-      toUserId <= 0
-    ) {
-      await trx.rollback();
+        const toUserId = Number(to_user_id);
+        const keySettingId = Number(key_setting_id);
+        const points = Number(points_sent);
+        const transactionType = Number(transaction_type);
 
-      return res.status(400).json({
-        success: false,
-        message: "Valid receiver user id is required",
-      });
-    }
+        if (
+            !Number.isInteger(toUserId) ||
+            toUserId <= 0
+        ) {
+            await trx.rollback();
 
-    if (
-      !Number.isInteger(keySettingId) ||
-      keySettingId <= 0
-    ) {
-      await trx.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Valid user id is required",
+            });
+        }
 
-      return res.status(400).json({
-        success: false,
-        message: "Valid key setting id is required",
-      });
-    }
+        if (
+            !Number.isInteger(keySettingId) ||
+            keySettingId <= 0
+        ) {
+            await trx.rollback();
 
-    if (
-      !Number.isFinite(points) ||
-      points <= 0
-    ) {
-      await trx.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Valid key setting id is required",
+            });
+        }
 
-      return res.status(400).json({
-        success: false,
-        message: "Transfer points must be greater than 0",
-      });
-    }
+        if (
+            !Number.isFinite(points) ||
+            points <= 0
+        ) {
+            await trx.rollback();
 
-    if (fromUserId === toUserId) {
-      await trx.rollback();
+            return res.status(400).json({
+                success: false,
+                message: "Points must be greater than 0",
+            });
+        }
 
-      return res.status(400).json({
-        success: false,
-        message: "You cannot transfer points to yourself",
-      });
-    }
+        if (
+            ![0, 1, 2].includes(transactionType)
+        ) {
+            await trx.rollback();
 
-    const keySetting = await trx("key_setting")
-      .select("id", "name", "status")
-      .where("id", keySettingId)
-      .first();
+            return res.status(400).json({
+                success: false,
+                message: "Valid transaction type is required",
+            });
+        }
 
-    if (!keySetting) {
-      await trx.rollback();
+        if (fromUserId === toUserId) {
+            await trx.rollback();
 
-      return res.status(404).json({
-        success: false,
-        message: "Key setting not found",
-      });
-    }
+            return res.status(400).json({
+                success: false,
+                message: "You cannot select yourself",
+            });
+        }
 
-    if (Number(keySetting.status) !== 1) {
-      await trx.rollback();
+        const keySetting = await trx("key_setting")
+            .select(
+                "id",
+                "name",
+                "status"
+            )
+            .where("id", keySettingId)
+            .first();
 
-      return res.status(400).json({
-        success: false,
-        message: "Selected key setting is inactive",
-      });
-    }
+        if (!keySetting) {
+            await trx.rollback();
 
-    const sender = await trx("users")
-      .select(
-        "id",
-        "role_id",
-        "parent_id",
-        "wallet_balance"
-      )
-      .where("id", fromUserId)
-      .forUpdate()
-      .first();
+            return res.status(404).json({
+                success: false,
+                message: "Key setting not found",
+            });
+        }
 
-    if (!sender) {
-      await trx.rollback();
+        if (Number(keySetting.status) !== 1) {
+            await trx.rollback();
 
-      return res.status(404).json({
-        success: false,
-        message: "Sender user not found",
-      });
-    }
+            return res.status(400).json({
+                success: false,
+                message: "Selected key setting is inactive",
+            });
+        }
 
-    const receiver = await trx("users")
-      .select(
-        "id",
-        "role_id",
-        "parent_id",
-        "wallet_balance"
-      )
-      .where("id", toUserId)
-      .forUpdate()
-      .first();
+        const sender = await trx("users")
+            .select(
+                "id",
+                "role_id",
+                "parent_id",
+                "wallet_balance"
+            )
+            .where("id", fromUserId)
+            .forUpdate()
+            .first();
 
-    if (!receiver) {
-      await trx.rollback();
+        if (!sender) {
+            await trx.rollback();
 
-      return res.status(404).json({
-        success: false,
-        message: "Receiver user not found",
-      });
-    }
+            return res.status(404).json({
+                success: false,
+                message: "Sender user not found",
+            });
+        }
 
-    let senderWallet = sender.wallet_balance || [];
-    let receiverWallet = receiver.wallet_balance || [];
+        const receiver = await trx("users")
+            .select(
+                "id",
+                "role_id",
+                "parent_id",
+                "wallet_balance"
+            )
+            .where("id", toUserId)
+            .forUpdate()
+            .first();
 
-    if (typeof senderWallet === "string") {
-      try {
-        senderWallet = JSON.parse(senderWallet);
-      } catch (error) {
-        senderWallet = [];
-      }
-    }
+        if (!receiver) {
+            await trx.rollback();
 
-    if (typeof receiverWallet === "string") {
-      try {
-        receiverWallet = JSON.parse(receiverWallet);
-      } catch (error) {
-        receiverWallet = [];
-      }
-    }
+            return res.status(404).json({
+                success: false,
+                message: "Selected user not found",
+            });
+        }
 
-    if (!Array.isArray(senderWallet)) {
-      senderWallet = [];
-    }
+        let senderWallet = sender.wallet_balance || [];
+        let receiverWallet = receiver.wallet_balance || [];
 
-    if (!Array.isArray(receiverWallet)) {
-      receiverWallet = [];
-    }
+        if (typeof senderWallet === "string") {
+            try {
+                senderWallet = JSON.parse(senderWallet);
+            } catch {
+                senderWallet = [];
+            }
+        }
 
-    const keyName = String(
-      keySetting.name || ""
-    )
-      .trim()
-      .toLowerCase();
+        if (typeof receiverWallet === "string") {
+            try {
+                receiverWallet = JSON.parse(
+                    receiverWallet
+                );
+            } catch {
+                receiverWallet = [];
+            }
+        }
 
-    const senderWalletIndex = senderWallet.findIndex(
-      (item) =>
-        String(item?.name || "")
-          .trim()
-          .toLowerCase() === keyName
-    );
+        if (!Array.isArray(senderWallet)) {
+            senderWallet = [];
+        }
 
-    const receiverWalletIndex =
-      receiverWallet.findIndex(
-        (item) =>
-          String(item?.name || "")
+        if (!Array.isArray(receiverWallet)) {
+            receiverWallet = [];
+        }
+
+        const keyName = String(
+            keySetting.name || ""
+        )
             .trim()
-            .toLowerCase() === keyName
-      );
+            .toLowerCase();
 
-    const fromBalanceBefore =
-      senderWalletIndex >= 0
-        ? Number(
-            senderWallet[senderWalletIndex]?.balance || 0
-          )
-        : 0;
+        const senderWalletIndex =
+            senderWallet.findIndex(
+                (item) =>
+                    String(item?.name || "")
+                        .trim()
+                        .toLowerCase() === keyName
+            );
 
-    const toBalanceBefore =
-      receiverWalletIndex >= 0
-        ? Number(
-            receiverWallet[receiverWalletIndex]?.balance || 0
-          )
-        : 0;
+        const receiverWalletIndex =
+            receiverWallet.findIndex(
+                (item) =>
+                    String(item?.name || "")
+                        .trim()
+                        .toLowerCase() === keyName
+            );
 
-    if (
-      !Number.isFinite(fromBalanceBefore) ||
-      fromBalanceBefore < points
-    ) {
-      await trx.rollback();
+        const senderBalance =
+            senderWalletIndex >= 0
+                ? Number(
+                      senderWallet[
+                          senderWalletIndex
+                      ]?.balance || 0
+                  )
+                : 0;
 
-      return res.status(400).json({
-        success: false,
-        message: "Insufficient wallet balance",
-        available_balance: fromBalanceBefore,
-        requested_points: points,
-      });
+        const receiverBalance =
+            receiverWalletIndex >= 0
+                ? Number(
+                      receiverWallet[
+                          receiverWalletIndex
+                      ]?.balance || 0
+                  )
+                : 0;
+
+        let fromBalanceBefore = senderBalance;
+        let fromBalanceAfter = senderBalance;
+
+        let toBalanceBefore = receiverBalance;
+        let toBalanceAfter = receiverBalance;
+
+        if (transactionType === 2) {
+            if (
+                receiverBalance < points
+            ) {
+                await trx.rollback();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected user has insufficient balance",
+                    available_balance:
+                        receiverBalance,
+                    requested_points: points,
+                });
+            }
+
+            if (
+                senderWalletIndex < 0
+            ) {
+                await trx.rollback();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected key setting balance not found in sender wallet",
+                });
+            }
+
+            fromBalanceBefore =
+                senderBalance;
+
+            toBalanceBefore =
+                receiverBalance;
+
+            fromBalanceAfter =
+                senderBalance + points;
+
+            toBalanceAfter =
+                receiverBalance - points;
+
+            senderWallet[
+                senderWalletIndex
+            ] = {
+                ...senderWallet[
+                    senderWalletIndex
+                ],
+                balance: fromBalanceAfter,
+            };
+
+            if (
+                receiverWalletIndex < 0
+            ) {
+                await trx.rollback();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected key setting balance not found in selected user wallet",
+                });
+            }
+
+            receiverWallet[
+                receiverWalletIndex
+            ] = {
+                ...receiverWallet[
+                    receiverWalletIndex
+                ],
+                balance: toBalanceAfter,
+            };
+        } else {
+            if (
+                senderBalance < points
+            ) {
+                await trx.rollback();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Insufficient wallet balance",
+                    available_balance:
+                        senderBalance,
+                    requested_points: points,
+                });
+            }
+
+            if (
+                senderWalletIndex < 0
+            ) {
+                await trx.rollback();
+
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected key setting balance not found in sender wallet",
+                });
+            }
+
+            fromBalanceBefore =
+                senderBalance;
+
+            toBalanceBefore =
+                receiverBalance;
+
+            fromBalanceAfter =
+                senderBalance - points;
+
+            toBalanceAfter =
+                receiverBalance + points;
+
+            senderWallet[
+                senderWalletIndex
+            ] = {
+                ...senderWallet[
+                    senderWalletIndex
+                ],
+                balance: fromBalanceAfter,
+            };
+
+            if (
+                receiverWalletIndex >= 0
+            ) {
+                receiverWallet[
+                    receiverWalletIndex
+                ] = {
+                    ...receiverWallet[
+                        receiverWalletIndex
+                    ],
+                    balance: toBalanceAfter,
+                };
+            } else {
+                receiverWallet.push({
+                    name: keySetting.name,
+                    balance: toBalanceAfter,
+                });
+            }
+        }
+
+        await trx("users")
+            .where("id", fromUserId)
+            .update({
+                wallet_balance:
+                    JSON.stringify(
+                        senderWallet
+                    ),
+            });
+
+        await trx("users")
+            .where("id", toUserId)
+            .update({
+                wallet_balance:
+                    JSON.stringify(
+                        receiverWallet
+                    ),
+            });
+
+        const [transactionId] =
+            await trx("wallet").insert({
+                from_user_id: fromUserId,
+                to_user_id: toUserId,
+                key_setting_id: keySettingId,
+                points_sent: points,
+                from_balance_before:
+                    fromBalanceBefore,
+                from_balance_after:
+                    fromBalanceAfter,
+                to_balance_before:
+                    toBalanceBefore,
+                to_balance_after:
+                    toBalanceAfter,
+                transaction_type:
+                    transactionType,
+                created_by: fromUserId,
+            });
+
+        await trx.commit();
+
+        return res.status(200).json({
+            success: true,
+            message:
+                transactionType === 2
+                    ? "Points reverted successfully"
+                    : "Points transferred successfully",
+            data: {
+                transaction_id:
+                    transactionId,
+                from_user_id:
+                    fromUserId,
+                to_user_id:
+                    toUserId,
+                key_setting_id:
+                    keySettingId,
+                key_name:
+                    keySetting.name,
+                points_sent: points,
+                from_balance_before:
+                    fromBalanceBefore,
+                from_balance_after:
+                    fromBalanceAfter,
+                to_balance_before:
+                    toBalanceBefore,
+                to_balance_after:
+                    toBalanceAfter,
+                transaction_type:
+                    transactionType,
+            },
+        });
+    } catch (error) {
+        await trx.rollback();
+
+        console.error(
+            "TRANSFER WALLET POINTS ERROR:",
+            error
+        );
+
+        return res.status(500).json({
+            success: false,
+            message:
+                "Failed to transfer wallet points",
+            error: error.message,
+        });
     }
-
-    const fromBalanceAfter =
-      fromBalanceBefore - points;
-
-    const toBalanceAfter =
-      toBalanceBefore + points;
-
-    if (senderWalletIndex >= 0) {
-      senderWallet[senderWalletIndex] = {
-        ...senderWallet[senderWalletIndex],
-        balance: fromBalanceAfter,
-      };
-    } else {
-      await trx.rollback();
-
-      return res.status(400).json({
-        success: false,
-        message:
-          "Selected key setting balance not found in sender wallet",
-      });
-    }
-
-    if (receiverWalletIndex >= 0) {
-      receiverWallet[receiverWalletIndex] = {
-        ...receiverWallet[receiverWalletIndex],
-        balance: toBalanceAfter,
-      };
-    } else {
-      receiverWallet.push({
-        name: keySetting.name,
-        balance: toBalanceAfter,
-      });
-    }
-
-    await trx("users")
-      .where("id", fromUserId)
-      .update({
-        wallet_balance: JSON.stringify(senderWallet),
-      });
-
-    await trx("users")
-      .where("id", toUserId)
-      .update({
-        wallet_balance: JSON.stringify(receiverWallet),
-      });
-
-    const [transactionId] = await trx("wallet").insert({
-      from_user_id: fromUserId,
-      to_user_id: toUserId,
-      key_setting_id: keySettingId,
-      points_sent: points,
-      from_balance_before: fromBalanceBefore,
-      from_balance_after: fromBalanceAfter,
-      to_balance_before: toBalanceBefore,
-      to_balance_after: toBalanceAfter,
-      transaction_type: "TRANSFER",
-      created_by: fromUserId,
-    });
-
-    await trx.commit();
-
-    return res.status(200).json({
-      success: true,
-      message: "Points transferred successfully",
-      data: {
-        transaction_id: transactionId,
-        from_user_id: fromUserId,
-        to_user_id: toUserId,
-        key_setting_id: keySettingId,
-        key_name: keySetting.name,
-        points_sent: points,
-        from_balance_before: fromBalanceBefore,
-        from_balance_after: fromBalanceAfter,
-        to_balance_before: toBalanceBefore,
-        to_balance_after: toBalanceAfter,
-      },
-    });
-  } catch (error) {
-    await trx.rollback();
-
-    console.error(
-      "TRANSFER WALLET POINTS ERROR:",
-      error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to transfer wallet points",
-      error: error.message,
-    });
-  }
 };
-

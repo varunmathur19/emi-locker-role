@@ -26,7 +26,8 @@ import {
     getCities,
     getKeySettings,
     updateKeySetting,
-    transferWalletPoints
+    transferWalletPoints,
+    updateRoleStatus
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -236,6 +237,13 @@ router.get("/sub-modules", authMiddleware,getAllSubModules);
 router.put("/sub-modules/:id", authMiddleware, updateSubModule);
 
 router.get("/roles",authMiddleware, getRoles);
+
+//upadte status active / inactive
+router.patch(
+    "/roles/:id/status",
+    authMiddleware,
+    updateRoleStatus
+);
 
 //get api for profile data
 router.get("/profiles",authMiddleware, getProfiles);
