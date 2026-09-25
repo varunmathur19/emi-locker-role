@@ -27,7 +27,8 @@ import {
     getKeySettings,
     updateKeySetting,
     transferWalletPoints,
-    updateRoleStatus
+    updateRoleStatus,
+    getWalletTransactions
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -288,11 +289,18 @@ router.get(
 router.put("/key-setting/:id",authMiddleware, updateKeySetting);
 
 
-//wallet transfer
+//post the transactione data
 router.post(
   "/wallet/transfer",
   authMiddleware,
   transferWalletPoints
+);
+
+//get the transaction data
+router.get(
+    "/transactions-histroy",
+    authMiddleware,
+    getWalletTransactions
 );
 
 
