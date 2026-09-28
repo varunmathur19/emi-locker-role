@@ -133,8 +133,7 @@ export const createuserrole = async (req, res) => {
         if (!/^[A-Z]/.test(password)) {
             return res.status(400).json({
                 success: false,
-                message:
-                    "Password must start with a capital letter",
+                message: "Password must start with a capital letter",
             });
         }
 
@@ -159,6 +158,19 @@ export const createuserrole = async (req, res) => {
             });
         }
 
+        if (requestedRoleId === 9) {
+            if (
+                profile_id === undefined ||
+                profile_id === null ||
+                profile_id === ""
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Assigned role is required for Staff",
+                });
+            }
+        }
+
         const creator = await db("users")
             .where("id", created_by)
             .first();
@@ -180,8 +192,7 @@ export const createuserrole = async (req, res) => {
         ) {
             return res.status(403).json({
                 success: false,
-                message:
-                    "You are not allowed to create this role",
+                message: "You are not allowed to create this role",
             });
         }
 
@@ -376,118 +387,108 @@ export const createuserrole = async (req, res) => {
         let permissionData = {};
 
         if (requestedRoleId === 9) {
+            selectedProfileId = Number(profile_id);
+
             if (
-                profile_id !== undefined &&
-                profile_id !== null &&
-                profile_id !== ""
+                !Number.isInteger(selectedProfileId) ||
+                selectedProfileId <= 0
             ) {
-                selectedProfileId = Number(profile_id);
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid assigned role",
+                });
+            }
+
+            const profile = await db("profile")
+                .where("id", selectedProfileId)
+                .where("status", 1)
+                .first();
+
+            if (!profile) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Active profile not found",
+                });
+            }
+
+            if (
+                role_permission !== undefined &&
+                role_permission !== null &&
+                role_permission !== ""
+            ) {
+                if (typeof role_permission === "string") {
+                    try {
+                        permissionData =
+                            JSON.parse(role_permission);
+                    } catch {
+                        return res.status(400).json({
+                            success: false,
+                            message:
+                                "Invalid role_permission format",
+                        });
+                    }
+                } else {
+                    permissionData = role_permission;
+                }
 
                 if (
-                    !Number.isInteger(selectedProfileId) ||
-                    selectedProfileId <= 0
+                    typeof permissionData !== "object" ||
+                    Array.isArray(permissionData)
                 ) {
                     return res.status(400).json({
                         success: false,
-                        message: "Invalid profile",
+                        message:
+                            "role_permission must be a valid object",
                     });
                 }
+            }
 
-                const profile = await db("profile")
-                    .where("id", selectedProfileId)
-                    .where("status", 1)
+            const existingRolePermission =
+                await db("role_permission")
+                    .where(
+                        "profile_id",
+                        selectedProfileId
+                    )
                     .first();
 
-                if (!profile) {
-                    return res.status(404).json({
-                        success: false,
-                        message: "Active profile not found",
-                    });
-                }
+            if (existingRolePermission) {
+                rolePermissionId =
+                    existingRolePermission.id;
 
                 if (
                     role_permission !== undefined &&
                     role_permission !== null &&
                     role_permission !== ""
                 ) {
-                    if (typeof role_permission === "string") {
-                        try {
-                            permissionData =
-                                JSON.parse(
-                                    role_permission
-                                );
-                        } catch {
-                            return res.status(400).json({
-                                success: false,
-                                message:
-                                    "Invalid role_permission format",
-                            });
-                        }
-                    } else {
-                        permissionData = role_permission;
-                    }
-
-                    if (
-                        typeof permissionData !== "object" ||
-                        Array.isArray(permissionData)
-                    ) {
-                        return res.status(400).json({
-                            success: false,
-                            message:
-                                "role_permission must be a valid object",
-                        });
-                    }
-                }
-
-                const existingRolePermission =
                     await db("role_permission")
                         .where(
-                            "profile_id",
-                            selectedProfileId
+                            "id",
+                            existingRolePermission.id
                         )
-                        .first();
-
-                if (existingRolePermission) {
-                    rolePermissionId =
-                        existingRolePermission.id;
-
-                    if (
-                        role_permission !== undefined &&
-                        role_permission !== null &&
-                        role_permission !== ""
-                    ) {
-                        await db("role_permission")
-                            .where(
-                                "id",
-                                existingRolePermission.id
-                            )
-                            .update({
-                                permission:
-                                    JSON.stringify(
-                                        permissionData
-                                    ),
-                                updated_at: db.fn.now(),
-                            });
-                    }
-                } else {
-                    const [
-                        newRolePermissionId,
-                    ] = await db(
-                        "role_permission"
-                    ).insert({
-                        profile_id:
-                            selectedProfileId,
-                        permission:
-                            JSON.stringify(
-                                permissionData
-                            ),
-                        created_at: db.fn.now(),
-                        updated_at: db.fn.now(),
-                    });
-
-                    rolePermissionId =
-                        newRolePermissionId;
+                        .update({
+                            permission:
+                                JSON.stringify(
+                                    permissionData
+                                ),
+                            updated_at: db.fn.now(),
+                        });
                 }
+            } else {
+                const [newRolePermissionId] =
+                    await db("role_permission")
+                        .insert({
+                            profile_id:
+                                selectedProfileId,
+                            permission:
+                                JSON.stringify(
+                                    permissionData
+                                ),
+                            created_at: db.fn.now(),
+                            updated_at: db.fn.now(),
+                        });
+
+                rolePermissionId =
+                    newRolePermissionId;
             }
         }
 
