@@ -1344,6 +1344,7 @@ export const updatedstaffdata = async (req, res) => {
             name,
             email,
             phone,
+            country_code,
             company_address,
             country,
             state,
@@ -1384,9 +1385,55 @@ export const updatedstaffdata = async (req, res) => {
             });
         }
 
-        // --------------------------------------------------
-        // ROLE
-        // --------------------------------------------------
+        let normalizedPhone = undefined;
+
+        if (phone !== undefined) {
+            const rawPhone = String(phone || "").trim();
+            const selectedCountryCode = String(
+                country_code || ""
+            )
+                .trim()
+                .toUpperCase();
+
+            const parsedPhone = rawPhone.startsWith("+")
+                ? parsePhoneNumberFromString(rawPhone)
+                : parsePhoneNumberFromString(
+                    rawPhone,
+                    selectedCountryCode || undefined
+                );
+
+            if (!parsedPhone?.isValid()) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Invalid phone number for selected country",
+                });
+            }
+
+            if (
+                selectedCountryCode &&
+                parsedPhone.country !== selectedCountryCode
+            ) {
+                return res.status(400).json({
+                    success: false,
+                    message: "Phone number does not match selected country",
+                });
+            }
+
+            normalizedPhone = parsedPhone.number;
+
+            const existingPhone = await db("users")
+                .select("id")
+                .where("phone", normalizedPhone)
+                .whereNot("id", userId)
+                .first();
+
+            if (existingPhone) {
+                return res.status(409).json({
+                    success: false,
+                    message: "Phone number already exists",
+                });
+            }
+        }
 
         const currentRoleId = Number(
             role_id ?? existingUser.role_id
@@ -1402,10 +1449,6 @@ export const updatedstaffdata = async (req, res) => {
                 message: "Invalid role ID",
             });
         }
-
-        // --------------------------------------------------
-        // PARENT
-        // --------------------------------------------------
 
         let normalizedParentId =
             existingUser.parent_id ?? null;
@@ -1482,20 +1525,6 @@ export const updatedstaffdata = async (req, res) => {
             }
         }
 
-        // --------------------------------------------------
-        // PROFILE
-        //
-        // Profile is NOT stored in users.
-        //
-        // profile_id
-        //      ↓
-        // role_permission.profile_id
-        //      ↓
-        // role_permission.id
-        //      ↓
-        // users.role_permission_id
-        // --------------------------------------------------
-
         const hasProfileId =
             profile_id !== undefined &&
             profile_id !== null &&
@@ -1550,10 +1579,7 @@ export const updatedstaffdata = async (req, res) => {
             }
         }
 
-        // --------------------------------------------------
-        // ROLE PERMISSION INPUT
-        // --------------------------------------------------
-
+   
         const hasRolePermission =
             role_permission !== undefined &&
             role_permission !== null &&
@@ -1599,29 +1625,12 @@ export const updatedstaffdata = async (req, res) => {
             }
         }
 
-        // --------------------------------------------------
-        // TRANSACTION
-        // --------------------------------------------------
-
         const result = await db.transaction(
             async (trx) => {
-                /*
-                |--------------------------------------------------------------------------
-                | KEEP EXISTING ROLE PERMISSION
-                |--------------------------------------------------------------------------
-                */
-
+               
                 let rolePermissionId =
                     existingUser.role_permission_id ??
                     null;
-
-                /*
-                |--------------------------------------------------------------------------
-                | PROFILE SELECTED
-                |
-                | Find role_permission using profile_id.
-                |--------------------------------------------------------------------------
-                */
 
                 if (hasProfileId) {
                     const profilePermission =
@@ -1639,21 +1648,12 @@ export const updatedstaffdata = async (req, res) => {
                             )
                             .first();
 
-                    /*
-                    |--------------------------------------------------------------------------
-                    | EXISTING PROFILE PERMISSION
-                    |--------------------------------------------------------------------------
-                    */
 
                     if (profilePermission) {
                         rolePermissionId =
                             profilePermission.id;
 
-                        /*
-                        | Only change permission if
-                        | permission was explicitly sent.
-                        */
-
+                    
                         if (
                             hasRolePermission
                         ) {
@@ -1674,12 +1674,7 @@ export const updatedstaffdata = async (req, res) => {
                                 });
                         }
                     } else {
-                        /*
-                        |--------------------------------------------------------------------------
-                        | CREATE NEW PROFILE PERMISSION
-                        |--------------------------------------------------------------------------
-                        */
-
+                       
                         const inserted =
                             await trx(
                                 "role_permission"
@@ -1707,14 +1702,6 @@ export const updatedstaffdata = async (req, res) => {
                             );
                     }
                 }
-
-                /*
-                |--------------------------------------------------------------------------
-                | NO PROFILE CHANGE
-                |
-                | But permission explicitly changed.
-                |--------------------------------------------------------------------------
-                */
 
                 else if (
                     hasRolePermission
@@ -1751,9 +1738,7 @@ export const updatedstaffdata = async (req, res) => {
                                         trx.fn.now(),
                                 });
                         } else {
-                            /*
-                            | Broken reference
-                            */
+                            
 
                             const inserted =
                                 await trx(
@@ -1775,10 +1760,7 @@ export const updatedstaffdata = async (req, res) => {
                                 );
                         }
                     } else {
-                        /*
-                        | No permission record
-                        */
-
+                     
                         const inserted =
                             await trx(
                                 "role_permission"
@@ -1800,10 +1782,6 @@ export const updatedstaffdata = async (req, res) => {
                     }
                 }
 
-                // --------------------------------------------------
-                // USER UPDATE
-                // --------------------------------------------------
-
                 const updateData = {};
 
                 if (
@@ -1821,13 +1799,7 @@ export const updatedstaffdata = async (req, res) => {
                         currentRoleId;
                 }
 
-                /*
-                |--------------------------------------------------------------------------
-                | IMPORTANT:
-                | DO NOT update users.profile_id
-                |--------------------------------------------------------------------------
-                */
-
+             
                 if (name !== undefined) {
                     updateData.name = name;
                 }
@@ -1837,7 +1809,7 @@ export const updatedstaffdata = async (req, res) => {
                 }
 
                 if (phone !== undefined) {
-                    updateData.phone = phone;
+                    updateData.phone = normalizedPhone;
                 }
 
                 if (
@@ -1863,10 +1835,7 @@ export const updatedstaffdata = async (req, res) => {
                         city;
                 }
 
-                // --------------------------------------------------
-                // PARENT
-                // --------------------------------------------------
-
+               
                 if (
                     parent_id !== undefined
                 ) {
@@ -1874,10 +1843,7 @@ export const updatedstaffdata = async (req, res) => {
                         normalizedParentId;
                 }
 
-                // --------------------------------------------------
-                // ROLE PERMISSION ID
-                // --------------------------------------------------
-
+             
                 if (
                     rolePermissionId !== null
                 ) {
@@ -1885,10 +1851,7 @@ export const updatedstaffdata = async (req, res) => {
                         rolePermissionId;
                 }
 
-                // --------------------------------------------------
-                // DEVICE FLAGS
-                // --------------------------------------------------
-
+               
                 if (
                     new_device !== undefined
                 ) {
@@ -1942,10 +1905,7 @@ export const updatedstaffdata = async (req, res) => {
                         ) || 0;
                 }
 
-                // --------------------------------------------------
-                // PASSWORD
-                // --------------------------------------------------
-
+              
                 if (
                     password !== undefined &&
                     password !== null &&
@@ -1955,24 +1915,18 @@ export const updatedstaffdata = async (req, res) => {
                         password;
                 }
 
-                // --------------------------------------------------
-                // UPDATED AT
-                // --------------------------------------------------
+             
 
                 updateData.updated_at =
                     trx.fn.now();
 
-                // --------------------------------------------------
-                // UPDATE USER
-                // --------------------------------------------------
+              
 
                 await trx("users")
                     .where("id", userId)
                     .update(updateData);
 
-                // --------------------------------------------------
-                // GET UPDATED USER
-                // --------------------------------------------------
+
 
                 const updatedUser =
                     await trx("users")
@@ -2002,10 +1956,7 @@ export const updatedstaffdata = async (req, res) => {
                         .where("id", userId)
                         .first();
 
-                // --------------------------------------------------
-                // GET ROLE PERMISSION + PROFILE
-                // --------------------------------------------------
-
+              
                 let finalRolePermission = null;
 
                 if (
@@ -2067,10 +2018,7 @@ export const updatedstaffdata = async (req, res) => {
                     }
                 }
 
-                // --------------------------------------------------
-                // FINAL RESULT
-                // --------------------------------------------------
-
+             
                 return {
                     ...updatedUser,
 
@@ -2079,10 +2027,6 @@ export const updatedstaffdata = async (req, res) => {
                 };
             }
         );
-
-        // --------------------------------------------------
-        // SUCCESS
-        // --------------------------------------------------
 
         return res.status(200).json({
             success: true,
@@ -2126,11 +2070,7 @@ export const getStaffDataById = async (req, res) => {
       });
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | GET USER
-    |--------------------------------------------------------------------------
-    */
+
 
     const user = await db({ u: "users" })
       .leftJoin(
