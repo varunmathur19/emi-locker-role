@@ -28,7 +28,10 @@ import {
     updateKeySetting,
     transferWalletPoints,
     updateRoleStatus,
-    getWalletTransactions
+    getWalletTransactions,
+    addCompanySetting,
+    getCompanySetting,
+    updateCompanySetting
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -301,6 +304,29 @@ router.get(
     "/transactions-histroy",
     authMiddleware,
     getWalletTransactions
+);
+
+//company setting  name and logo
+router.post(
+  "/add-company-setting",
+  authMiddleware,
+  uploadModuleIcon,
+ addCompanySetting
+);
+
+//company setting  name and logo
+router.get(
+  "/get-company-setting",
+  authMiddleware,
+  getCompanySetting
+);
+
+//update company setting 
+router.put(
+  "/edit-company-setting",
+  authMiddleware,
+  uploadModuleIcon,
+  updateCompanySetting
 );
 
 

@@ -4098,3 +4098,161 @@ export const getWalletTransactions = async (req, res) => {
   }
 };
 
+//company setting  name and logo
+
+export const addCompanySetting = async (req, res) => {
+  try {
+    const { key, value } = req.body;
+
+    if (!key || !key.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Key is required",
+      });
+    }
+
+    if (
+      value === undefined ||
+      value === null ||
+      !String(value).trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Value is required",
+      });
+    }
+
+    const cleanKey = key.trim().toLowerCase();
+    const cleanValue = String(value).trim();
+
+    const [settingId] = await db("companysetting").insert({
+      key: cleanKey,
+      value: cleanValue,
+    });
+
+    const companySetting = await db("companysetting")
+      .where("id", settingId)
+      .select("id", "key", "value")
+      .first();
+
+    return res.status(201).json({
+      success: true,
+      message: "Company setting added successfully",
+      data: companySetting,
+    });
+  } catch (error) {
+    console.error("Add Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add company setting",
+      error: error.message,
+    });
+  }
+};
+//company setting get data
+export const getCompanySetting = async (req, res) => {
+  try {
+    const companySettings = await db("companysetting")
+      .whereIn("key", ["company_name", "company_logo"])
+      .select("id", "key", "value");
+
+    const settings = {
+      company_name: "",
+      company_logo: null,
+    };
+
+    companySettings.forEach((item) => {
+      settings[item.key] = item.value;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting fetched successfully",
+      data: settings,
+    });
+  } catch (error) {
+    console.error("Get Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch company setting",
+      error: error.message,
+    });
+  }
+};
+
+
+// update company setting get data
+export const updateCompanySetting = async (req, res) => {
+  try {
+    const { key, value } = req.body;
+
+    if (!key || !key.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Key is required",
+      });
+    }
+
+    const cleanKey = key.trim().toLowerCase();
+
+    let cleanValue = value;
+
+    if (req.file) {
+      cleanValue = `/uploads/modules/${req.file.filename}`;
+    }
+
+    if (
+      cleanValue === undefined ||
+      cleanValue === null ||
+      !String(cleanValue).trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Value is required",
+      });
+    }
+
+    cleanValue = String(cleanValue).trim();
+
+    const existingSetting = await db("companysetting")
+      .where("key", cleanKey)
+      .first();
+
+    if (existingSetting) {
+      await db("companysetting")
+        .where("key", cleanKey)
+        .update({
+          value: cleanValue,
+        });
+    } else {
+      await db("companysetting").insert({
+        key: cleanKey,
+        value: cleanValue,
+      });
+    }
+
+    const updatedSetting = await db("companysetting")
+      .where("key", cleanKey)
+      .select("id", "key", "value")
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting updated successfully",
+      data: updatedSetting,
+    });
+  } catch (error) {
+    console.error(
+      "Update Company Setting Error:",
+      error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update company setting",
+      error: error.message,
+    });
+  }
+};
