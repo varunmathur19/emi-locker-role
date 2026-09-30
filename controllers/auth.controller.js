@@ -11,6 +11,7 @@ import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
 import jwt from "jsonwebtoken";
 import { ROLES } from "../constants/roles.js";
+import { BOOLEAN } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
@@ -4153,9 +4154,49 @@ export const addCompanySetting = async (req, res) => {
 //company setting get data
 export const getCompanySetting = async (req, res) => {
   try {
+    const roleId = Number(req.user?.role_id);
+
+    if (Number.isNaN(roleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    const companySettings = await db("companysetting")
+      .where("role_id", roleId)
+      .select(
+        "id",
+        "key",
+        "value",
+        "role_id",
+        "created_at",
+        "updated_at"
+      )
+      .orderBy("id", "asc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting fetched successfully",
+      data: companySettings,
+    });
+  } catch (error) {
+    console.error("Get Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch company setting",
+      error: error.message,
+    });
+  }
+};
+
+export const getNormalCompanySetting = async (req, res) => {
+  try {
     const companySettings = await db("companysetting")
       .whereIn("key", ["company_name", "company_logo"])
-      .select("id", "key", "value");
+      .select("id", "key", "value", "role_id")
+      .orderBy("id", "asc");
 
     const settings = {
       company_name: "",
@@ -4186,7 +4227,15 @@ export const getCompanySetting = async (req, res) => {
 // update company setting get data
 export const updateCompanySetting = async (req, res) => {
   try {
+    const roleId = Number(req.user?.role_id);
     const { key, value } = req.body;
+
+    if (Number.isNaN(roleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
 
     if (!key || !key.trim()) {
       return res.status(400).json({
@@ -4203,26 +4252,52 @@ export const updateCompanySetting = async (req, res) => {
       cleanValue = `/uploads/modules/${req.file.filename}`;
     }
 
-    if (
-      cleanValue === undefined ||
-      cleanValue === null ||
-      !String(cleanValue).trim()
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "Value is required",
-      });
-    }
+    const booleanKeys = ["maintenance"];
 
-    cleanValue = String(cleanValue).trim();
+    if (booleanKeys.includes(cleanKey)) {
+      if (
+        value === true ||
+        value === "true" ||
+        value === 1 ||
+        value === "1"
+      ) {
+        cleanValue = BOOLEAN.TRUE;
+      } else if (
+        value === false ||
+        value === "false" ||
+        value === 0 ||
+        value === "0"
+      ) {
+        cleanValue = BOOLEAN.FALSE;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Boolean value must be true or false",
+        });
+      }
+    } else {
+      if (
+        cleanValue === undefined ||
+        cleanValue === null ||
+        !String(cleanValue).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Value is required",
+        });
+      }
+
+      cleanValue = String(cleanValue).trim();
+    }
 
     const existingSetting = await db("companysetting")
       .where("key", cleanKey)
+      .where("role_id", roleId)
       .first();
 
     if (existingSetting) {
       await db("companysetting")
-        .where("key", cleanKey)
+        .where("id", existingSetting.id)
         .update({
           value: cleanValue,
         });
@@ -4230,12 +4305,21 @@ export const updateCompanySetting = async (req, res) => {
       await db("companysetting").insert({
         key: cleanKey,
         value: cleanValue,
+        role_id: roleId,
       });
     }
 
     const updatedSetting = await db("companysetting")
       .where("key", cleanKey)
-      .select("id", "key", "value")
+      .where("role_id", roleId)
+      .select(
+        "id",
+        "key",
+        "value",
+        "role_id",
+        "created_at",
+        "updated_at"
+      )
       .first();
 
     return res.status(200).json({
@@ -4244,10 +4328,7 @@ export const updateCompanySetting = async (req, res) => {
       data: updatedSetting,
     });
   } catch (error) {
-    console.error(
-      "Update Company Setting Error:",
-      error
-    );
+    console.error("Update Company Setting Error:", error);
 
     return res.status(500).json({
       success: false,

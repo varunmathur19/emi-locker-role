@@ -31,7 +31,8 @@ import {
     getWalletTransactions,
     addCompanySetting,
     getCompanySetting,
-    updateCompanySetting
+    updateCompanySetting,
+    getNormalCompanySetting
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -319,6 +320,13 @@ router.get(
   "/get-company-setting",
   authMiddleware,
   getCompanySetting
+);
+
+//company setting  name and logo
+router.get(
+  "/normal-company-setting",
+  authMiddleware,
+  getNormalCompanySetting
 );
 
 //update company setting 
