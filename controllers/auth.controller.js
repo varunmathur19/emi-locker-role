@@ -4352,23 +4352,3 @@ export const updateCompanySetting = async (req, res) => {
   }
 };
 
-// export const maintenanceController = async (req, res) => {
-//   try {
-//     return res.status(200).json({
-//       success: true,
-//       message: "Dashboard data fetched successfully",
-//       data: {
-//         user_id: req.user?.id,
-//         role_id: req.user?.role_id,
-//       },
-//     });
-//   } catch (error) {
-//     console.error("Get Dashboard Data Error:", error);
-
-//     return res.status(500).json({
-//       success: false,
-//       message: "Failed to fetch dashboard data",
-//       error: error.message,
-//     });
-//   }
-// };
