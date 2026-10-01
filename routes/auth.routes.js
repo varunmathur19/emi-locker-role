@@ -32,9 +32,9 @@ import {
     addCompanySetting,
     getCompanySetting,
     updateCompanySetting,
-    getNormalCompanySetting
+    getNormalCompanySetting,
 } from "../controllers/auth.controller.js";
-import { authMiddleware } from "../middleware/auth.middleware.js";
+import { authMiddleware, maintenanceMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
 import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
@@ -192,7 +192,7 @@ router.post("/login",
 router.get(
     "/getAllStaffData",
     authMiddleware,
-    getUsers
+    getUsers,
 );
 
 // logout
@@ -336,6 +336,7 @@ router.put(
   uploadModuleIcon,
   updateCompanySetting
 );
+
 
 
 

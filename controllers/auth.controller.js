@@ -631,13 +631,10 @@ export const createuserrole = async (req, res) => {
     }
 };
 // Login staff
+
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // ==========================================
-    // VALIDATION
-    // ==========================================
 
     if (!email || !String(email).trim()) {
       return res.status(400).json({
@@ -653,10 +650,6 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // FIND USER
-    // ==========================================
-
     const user = await findUserByEmail(
       String(email).trim().toLowerCase()
     );
@@ -668,20 +661,12 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // ACCOUNT STATUS
-    // ==========================================
-
     if (Number(user.userStatus) === 0) {
       return res.status(403).json({
         success: false,
         message: "Your account is inactive",
       });
     }
-
-    // ==========================================
-    // PASSWORD CHECK
-    // ==========================================
 
     const passwordMatch = await bcrypt.compare(
       password,
@@ -695,13 +680,33 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // STAFF PERMISSION
-    // ==========================================
+    const maintenanceSetting = await db("companysetting")
+      .where("key", "maintenance")
+      .where("role_id", 0)
+      .select("value")
+      .first();
+
+    const isMaintenance =
+      Number(maintenanceSetting?.value) === 1;
+
+    const roleId = Number(user.role_id);
+
+    const isMasterAdmin = roleId === 0;
+
+    const isUserUnderMaintenance =
+      isMaintenance && !isMasterAdmin;
+
+    if (isUserUnderMaintenance) {
+      return res.status(503).json({
+        success: false,
+        maintenance: true,
+        message: "Application is under maintenance",
+      });
+    }
 
     let staffPermission = null;
 
-    const isStaff = Number(user.role_id) === 9;
+    const isStaff = roleId === 9;
 
     if (isStaff && user.role_permission_id) {
       const rolePermission = await db("role_permission")
@@ -717,10 +722,8 @@ export const loginUser = async (req, res) => {
         .first();
 
       if (rolePermission) {
-        let permission =
-          rolePermission.permission;
+        let permission = rolePermission.permission;
 
-        // Convert JSON string to object
         if (typeof permission === "string") {
           try {
             permission = JSON.parse(permission);
@@ -734,7 +737,6 @@ export const loginUser = async (req, res) => {
           }
         }
 
-        // Ensure permission is always an object
         if (
           !permission ||
           typeof permission !== "object" ||
@@ -751,10 +753,6 @@ export const loginUser = async (req, res) => {
       }
     }
 
-    // ==========================================
-    // JWT TOKEN
-    // ==========================================
-
     const token = jwt.sign(
       {
         id: user.id,
@@ -766,10 +764,6 @@ export const loginUser = async (req, res) => {
         expiresIn: "7d",
       }
     );
-
-    // ==========================================
-    // USER RESPONSE
-    // ==========================================
 
     const userResponse = {
       id: user.id,
@@ -804,10 +798,6 @@ export const loginUser = async (req, res) => {
       parent_staff_id:
         user.parent_staff_id,
 
-      // ========================================
-      // STAFF PERMISSION ONLY
-      // ========================================
-
       role_permission_id: isStaff
         ? user.role_permission_id
         : null,
@@ -817,12 +807,9 @@ export const loginUser = async (req, res) => {
         : null,
     };
 
-    // ==========================================
-    // LOGIN RESPONSE
-    // ==========================================
-
     return res.status(200).json({
       success: true,
+      maintenance: false,
       message: "Login Successful",
       token,
       user: userResponse,
@@ -841,6 +828,8 @@ export const loginUser = async (req, res) => {
     });
   }
 };
+
+
 // GET ALL USERS
 export const getUsers = async (req, res) => {
     try {
@@ -4337,3 +4326,24 @@ export const updateCompanySetting = async (req, res) => {
     });
   }
 };
+
+// export const maintenanceController = async (req, res) => {
+//   try {
+//     return res.status(200).json({
+//       success: true,
+//       message: "Dashboard data fetched successfully",
+//       data: {
+//         user_id: req.user?.id,
+//         role_id: req.user?.role_id,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Get Dashboard Data Error:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch dashboard data",
+//       error: error.message,
+//     });
+//   }
+// };
