@@ -28,9 +28,13 @@ import {
     updateKeySetting,
     transferWalletPoints,
     updateRoleStatus,
-    getWalletTransactions
+    getWalletTransactions,
+    addCompanySetting,
+    getCompanySetting,
+    updateCompanySetting,
+    getNormalCompanySetting,
 } from "../controllers/auth.controller.js";
-import { authMiddleware } from "../middleware/auth.middleware.js";
+import { authMiddleware, maintenanceMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
 import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
@@ -188,7 +192,7 @@ router.post("/login",
 router.get(
     "/getAllStaffData",
     authMiddleware,
-    getUsers
+    getUsers,
 );
 
 // logout
@@ -302,6 +306,37 @@ router.get(
     authMiddleware,
     getWalletTransactions
 );
+
+//company setting  name and logo
+router.post(
+  "/add-company-setting",
+  authMiddleware,
+  uploadModuleIcon,
+ addCompanySetting
+);
+
+//company setting  name and logo
+router.get(
+  "/get-company-setting",
+  authMiddleware,
+  getCompanySetting
+);
+
+//company setting  name and logo
+router.get(
+  "/normal-company-setting",
+  authMiddleware,
+  getNormalCompanySetting
+);
+
+//update company setting 
+router.put(
+  "/edit-company-setting",
+  authMiddleware,
+  uploadModuleIcon,
+  updateCompanySetting
+);
+
 
 
 

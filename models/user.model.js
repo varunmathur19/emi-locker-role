@@ -27,6 +27,7 @@ export const createUser = async (data) => {
         email,
         phone,
         password,
+        transaction_pin,
         company_address,
         country,
         state,
@@ -35,7 +36,6 @@ export const createUser = async (data) => {
         created_by,
         parent_id = null,
         role_permission_id = null,
-
         new_device = 0,
         old_device = 0,
         supreme_device = 0,
@@ -46,25 +46,24 @@ export const createUser = async (data) => {
     } = data;
 
     const [userId] = await db("users").insert({
-        organization_name: organization_name || null,
-
+        organization_name:
+            organization_name || null,
         name,
-
         email,
-
         phone,
-
         password,
-
-        company_address: company_address || null,
-
-        country: country || null,
-
-        state: state || null,
-
-        city: city || null,
-
-        role_id: Number(role_id),
+        transaction_pin:
+            transaction_pin || null,
+        company_address:
+            company_address || null,
+        country:
+            country || null,
+        state:
+            state || null,
+        city:
+            city || null,
+        role_id:
+            Number(role_id),
 
         role_permission_id:
             role_permission_id !== null &&
@@ -73,7 +72,8 @@ export const createUser = async (data) => {
                 ? Number(role_permission_id)
                 : null,
 
-        created_by: Number(created_by),
+        created_by:
+            Number(created_by),
 
         parent_id:
             parent_id !== null &&
@@ -82,19 +82,20 @@ export const createUser = async (data) => {
                 ? Number(parent_id)
                 : null,
 
-        new_device: Number(new_device ?? 0),
-
-        old_device: Number(old_device ?? 0),
-
-        supreme_device: Number(supreme_device ?? 0),
-
-        pro_star: Number(pro_star ?? 0),
-
-        lite: Number(lite ?? 0),
-
-        google_tv: Number(google_tv ?? 0),
-
-        supreme_lock: Number(supreme_lock ?? 0),
+        new_device:
+            Number(new_device ?? 0),
+        old_device:
+            Number(old_device ?? 0),
+        supreme_device:
+            Number(supreme_device ?? 0),
+        pro_star:
+            Number(pro_star ?? 0),
+        lite:
+            Number(lite ?? 0),
+        google_tv:
+            Number(google_tv ?? 0),
+        supreme_lock:
+            Number(supreme_lock ?? 0),
     });
 
     return userId;
@@ -119,50 +120,50 @@ const roleNameCase = db.raw(`
 `);
 
 const selectUserFields = [
-  "u.id",
-  "u.organization_name",
-  "u.name",
-  "u.email",
-  "u.phone",
-  "u.company_address",
-  "u.country",
-  "u.state",
-  "u.city",
-  "u.role_id",
-  "u.created_by",
-  "u.parent_id",
-  "u.userStatus",
-  "u.wallet_balance",
+    "u.id",
+    "u.organization_name",
+    "u.name",
+    "u.email",
+    "u.phone",
+    "u.transaction_pin",
+    "u.company_address",
+    "u.country",
+    "u.state",
+    "u.city",
+    "u.role_id",
+    "u.created_by",
+    "u.parent_id",
+    "u.userStatus",
+    "u.wallet_balance",
+    "u.role_permission_id",
 
-  "u.role_permission_id",
+    "p.id as profile_id",
+    "p.name as profile_name",
+    "p.status as profile_status",
 
-  "p.id as profile_id",
-  "p.name as profile_name",
-  "p.status as profile_status",
+    db.raw(`
+        CASE
+            WHEN u.role_id = 1 THEN creator.name
+            ELSE parent.name
+        END AS parent_name
+    `),
 
-  db.raw(`
-    CASE
-      WHEN u.role_id = 1 THEN creator.name
-      ELSE parent.name
-    END AS parent_name
-  `),
+    db.raw(`
+        CASE
+            WHEN u.role_id = 1 THEN creator.organization_name
+            ELSE parent.organization_name
+        END AS parent_organization_name
+    `),
 
-  db.raw(`
-    CASE
-      WHEN u.role_id = 1 THEN creator.organization_name
-      ELSE parent.organization_name
-    END AS parent_organization_name
-  `),
-
-  "u.new_device",
-  "u.old_device",
-  "u.supreme_device",
-  "u.pro_star",
-  "u.lite",
-  "u.google_tv",
-  "u.supreme_lock",
-  "u.created_at",
-  "u.updated_at",
+    "u.new_device",
+    "u.old_device",
+    "u.supreme_device",
+    "u.pro_star",
+    "u.lite",
+    "u.google_tv",
+    "u.supreme_lock",
+    "u.created_at",
+    "u.updated_at",
 ];
 
 

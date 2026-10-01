@@ -65,3 +65,39 @@ export const authMiddleware = (req, res, next) => {
     });
   }
 };
+
+export const maintenanceMiddleware = async (req, res, next) => {
+  try {
+    const roleId = Number(req.user?.role_id);
+
+    if (roleId === 0) {
+      return next();
+    }
+
+    const maintenance = await db("companysetting")
+      .where("key", "maintenance")
+      .where("role_id", 0)
+      .select("value")
+      .first();
+
+    const isMaintenance =
+      Number(maintenance?.value) === 1;
+
+    if (isMaintenance) {
+      return res.status(503).json({
+        success: false,
+        maintenance: true,
+        message: "Application is under maintenance",
+      });
+    }
+
+    next();
+  } catch (error) {
+    console.error(
+      "Maintenance Middleware Error:",
+      error
+    );
+
+    next();
+  }
+};

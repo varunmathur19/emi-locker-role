@@ -11,6 +11,7 @@ import db from "../config/db.js";
 import { isValidRole } from "../constants/roles.js";
 import jwt from "jsonwebtoken";
 import { ROLES } from "../constants/roles.js";
+import { BOOLEAN } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
@@ -93,6 +94,7 @@ export const createuserrole = async (req, res) => {
             phone,
             password,
             confirm_password,
+            transaction_pin,
             company_address,
             country,
             country_code,
@@ -114,12 +116,13 @@ export const createuserrole = async (req, res) => {
             !email ||
             !phone ||
             !password ||
-            !confirm_password
+            !confirm_password ||
+            !transaction_pin
         ) {
             return res.status(400).json({
                 success: false,
                 message:
-                    "Name, email, phone, password and confirm password are required",
+                    "Name, email, phone, password, confirm password and transaction PIN are required",
             });
         }
 
@@ -134,6 +137,17 @@ export const createuserrole = async (req, res) => {
             return res.status(400).json({
                 success: false,
                 message: "Password must start with a capital letter",
+            });
+        }
+
+        const normalizedTransactionPin = String(
+            transaction_pin
+        ).trim();
+
+        if (!/^\d{4}$/.test(normalizedTransactionPin)) {
+            return res.status(400).json({
+                success: false,
+                message: "Transaction PIN must be exactly 4 digits",
             });
         }
 
@@ -329,11 +343,10 @@ export const createuserrole = async (req, res) => {
         };
 
         if (!selectedCountryCode) {
-            const normalizedCountryName =
-                selectedCountry
-                    .replace(/\s+/g, " ")
-                    .trim()
-                    .toUpperCase();
+            const normalizedCountryName = selectedCountry
+                .replace(/\s+/g, " ")
+                .trim()
+                .toUpperCase();
 
             selectedCountryCode =
                 countryCodeMap[normalizedCountryName] || "";
@@ -530,59 +543,41 @@ export const createuserrole = async (req, res) => {
         const userData = {
             organization_name:
                 finalOrganizationName,
-
             role_id: requestedRoleId,
-
             role_permission_id:
                 requestedRoleId === 9
                     ? rolePermissionId
                     : null,
-
             parent_id: finalParentId,
-
             name: String(name).trim(),
-
             email: normalizedEmail,
-
             phone: normalizedPhone,
-
             password: hashedPassword,
-
+            transaction_pin: normalizedTransactionPin,
             company_address: company_address
                 ? String(company_address).trim()
                 : null,
-
             country: selectedCountry,
-
             state: state
                 ? String(state).trim()
                 : null,
-
             city: city
                 ? String(city).trim()
                 : null,
-
             new_device:
                 Number(new_device) || 0,
-
             old_device:
                 Number(old_device) || 0,
-
             supreme_device:
                 Number(supreme_device) || 0,
-
             pro_star:
                 Number(pro_star) || 0,
-
             lite:
                 Number(lite) || 0,
-
             google_tv:
                 Number(google_tv) || 0,
-
             supreme_lock:
                 Number(supreme_lock) || 0,
-
             created_by,
         };
 
@@ -618,6 +613,8 @@ export const createuserrole = async (req, res) => {
                 city: city
                     ? String(city).trim()
                     : null,
+                transaction_pin:
+                    normalizedTransactionPin,
             },
         });
     } catch (error) {
@@ -634,13 +631,10 @@ export const createuserrole = async (req, res) => {
     }
 };
 // Login staff
+
 export const loginUser = async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    // ==========================================
-    // VALIDATION
-    // ==========================================
 
     if (!email || !String(email).trim()) {
       return res.status(400).json({
@@ -656,10 +650,6 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // FIND USER
-    // ==========================================
-
     const user = await findUserByEmail(
       String(email).trim().toLowerCase()
     );
@@ -671,20 +661,12 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // ACCOUNT STATUS
-    // ==========================================
-
     if (Number(user.userStatus) === 0) {
       return res.status(403).json({
         success: false,
         message: "Your account is inactive",
       });
     }
-
-    // ==========================================
-    // PASSWORD CHECK
-    // ==========================================
 
     const passwordMatch = await bcrypt.compare(
       password,
@@ -698,13 +680,33 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // ==========================================
-    // STAFF PERMISSION
-    // ==========================================
+    const maintenanceSetting = await db("companysetting")
+      .where("key", "maintenance")
+      .where("role_id", 0)
+      .select("value")
+      .first();
+
+    const isMaintenance =
+      Number(maintenanceSetting?.value) === 1;
+
+    const roleId = Number(user.role_id);
+
+    const isMasterAdmin = roleId === 0;
+
+    const isUserUnderMaintenance =
+      isMaintenance && !isMasterAdmin;
+
+    if (isUserUnderMaintenance) {
+      return res.status(503).json({
+        success: false,
+        maintenance: true,
+        message: "Application is under maintenance",
+      });
+    }
 
     let staffPermission = null;
 
-    const isStaff = Number(user.role_id) === 9;
+    const isStaff = roleId === 9;
 
     if (isStaff && user.role_permission_id) {
       const rolePermission = await db("role_permission")
@@ -720,10 +722,8 @@ export const loginUser = async (req, res) => {
         .first();
 
       if (rolePermission) {
-        let permission =
-          rolePermission.permission;
+        let permission = rolePermission.permission;
 
-        // Convert JSON string to object
         if (typeof permission === "string") {
           try {
             permission = JSON.parse(permission);
@@ -737,7 +737,6 @@ export const loginUser = async (req, res) => {
           }
         }
 
-        // Ensure permission is always an object
         if (
           !permission ||
           typeof permission !== "object" ||
@@ -754,10 +753,6 @@ export const loginUser = async (req, res) => {
       }
     }
 
-    // ==========================================
-    // JWT TOKEN
-    // ==========================================
-
     const token = jwt.sign(
       {
         id: user.id,
@@ -769,10 +764,6 @@ export const loginUser = async (req, res) => {
         expiresIn: "7d",
       }
     );
-
-    // ==========================================
-    // USER RESPONSE
-    // ==========================================
 
     const userResponse = {
       id: user.id,
@@ -807,10 +798,6 @@ export const loginUser = async (req, res) => {
       parent_staff_id:
         user.parent_staff_id,
 
-      // ========================================
-      // STAFF PERMISSION ONLY
-      // ========================================
-
       role_permission_id: isStaff
         ? user.role_permission_id
         : null,
@@ -820,12 +807,9 @@ export const loginUser = async (req, res) => {
         : null,
     };
 
-    // ==========================================
-    // LOGIN RESPONSE
-    // ==========================================
-
     return res.status(200).json({
       success: true,
+      maintenance: false,
       message: "Login Successful",
       token,
       user: userResponse,
@@ -844,6 +828,8 @@ export const loginUser = async (req, res) => {
     });
   }
 };
+
+
 // GET ALL USERS
 export const getUsers = async (req, res) => {
     try {
@@ -2071,8 +2057,6 @@ export const getStaffDataById = async (req, res) => {
       });
     }
 
-
-
     const user = await db({ u: "users" })
       .leftJoin(
         { rp: "role_permission" },
@@ -2088,11 +2072,8 @@ export const getStaffDataById = async (req, res) => {
         "u.id",
         "u.organization_name",
         "u.role_id",
-
-        // Role Permission
         "u.role_permission_id",
 
-        // Profile
         "p.id as profile_id",
         "p.name as profile_name",
         "p.status as profile_status",
@@ -2100,6 +2081,7 @@ export const getStaffDataById = async (req, res) => {
         "u.name",
         "u.email",
         "u.phone",
+        "u.transaction_pin",
         "u.company_address",
         "u.country",
         "u.state",
@@ -2123,12 +2105,6 @@ export const getStaffDataById = async (req, res) => {
         message: "User not found",
       });
     }
-
-    /*
-    |--------------------------------------------------------------------------
-    | GET PARENT CHAIN
-    |--------------------------------------------------------------------------
-    */
 
     const parentChain = [];
 
@@ -2170,31 +2146,18 @@ export const getStaffDataById = async (req, res) => {
       level++;
     }
 
-    /*
-    |--------------------------------------------------------------------------
-    | REVERSE PARENT CHAIN
-    |--------------------------------------------------------------------------
-    */
-
     parentChain.reverse();
-
-    /*
-    |--------------------------------------------------------------------------
-    | RESPONSE
-    |--------------------------------------------------------------------------
-    */
 
     return res.status(200).json({
       success: true,
       message: "Staff data fetched successfully",
       data: {
         ...user,
-
+        transaction_pin: user.transaction_pin || "",
         direct_parent:
           parentChain.length > 0
             ? parentChain[parentChain.length - 1]
             : null,
-
         parent_chain: parentChain,
       },
     });
@@ -3381,15 +3344,15 @@ export const getKeySettings = async (req, res) => {
       walletBalance = [];
     }
 
-    console.log(
-      "USER ID:",
-      userId
-    );
+    // console.log(
+    //   "USER ID:",
+    //   userId
+    // );
 
-    console.log(
-      "WALLET BALANCE:",
-      walletBalance
-    );
+    // console.log(
+    //   "WALLET BALANCE:",
+    //   walletBalance
+    // );
 
     // Key settings
     const keySettings = await db("key_setting")
@@ -3424,10 +3387,10 @@ export const getKeySettings = async (req, res) => {
       };
     });
 
-    console.log(
-      "KEY SETTINGS WITH BALANCE:",
-      data
-    );
+    // console.log(
+    //   "KEY SETTINGS WITH BALANCE:",
+    //   data
+    // );
 
     return res.status(200).json({
       success: true,
@@ -3524,6 +3487,7 @@ export const transferWalletPoints = async (req, res) => {
             key_setting_id,
             points_sent,
             transaction_type,
+            transaction_pin,
         } = req.body;
 
         if (!fromUserId) {
@@ -3532,6 +3496,19 @@ export const transferWalletPoints = async (req, res) => {
             return res.status(401).json({
                 success: false,
                 message: "Unauthorized",
+            });
+        }
+
+        if (
+            transaction_pin === undefined ||
+            transaction_pin === null ||
+            String(transaction_pin).trim() === ""
+        ) {
+            await trx.rollback();
+
+            return res.status(400).json({
+                success: false,
+                message: "Transaction PIN is required",
             });
         }
 
@@ -3628,7 +3605,8 @@ export const transferWalletPoints = async (req, res) => {
                 "id",
                 "role_id",
                 "parent_id",
-                "wallet_balance"
+                "wallet_balance",
+                "transaction_pin"
             )
             .where("id", fromUserId)
             .forUpdate()
@@ -3640,6 +3618,18 @@ export const transferWalletPoints = async (req, res) => {
             return res.status(404).json({
                 success: false,
                 message: "Sender user not found",
+            });
+        }
+
+        if (
+            String(sender.transaction_pin) !==
+            String(transaction_pin).trim()
+        ) {
+            await trx.rollback();
+
+            return res.status(400).json({
+                success: false,
+                message: "Invalid transaction PIN",
             });
         }
 
@@ -3676,9 +3666,7 @@ export const transferWalletPoints = async (req, res) => {
 
         if (typeof receiverWallet === "string") {
             try {
-                receiverWallet = JSON.parse(
-                    receiverWallet
-                );
+                receiverWallet = JSON.parse(receiverWallet);
             } catch {
                 receiverWallet = [];
             }
@@ -3739,24 +3727,19 @@ export const transferWalletPoints = async (req, res) => {
         let toBalanceAfter = receiverBalance;
 
         if (transactionType === 2) {
-            if (
-                receiverBalance < points
-            ) {
+            if (receiverBalance < points) {
                 await trx.rollback();
 
                 return res.status(400).json({
                     success: false,
                     message:
                         "Selected user has insufficient balance",
-                    available_balance:
-                        receiverBalance,
+                    available_balance: receiverBalance,
                     requested_points: points,
                 });
             }
 
-            if (
-                senderWalletIndex < 0
-            ) {
+            if (senderWalletIndex < 0) {
                 await trx.rollback();
 
                 return res.status(400).json({
@@ -3766,11 +3749,18 @@ export const transferWalletPoints = async (req, res) => {
                 });
             }
 
-            fromBalanceBefore =
-                senderBalance;
+            if (receiverWalletIndex < 0) {
+                await trx.rollback();
 
-            toBalanceBefore =
-                receiverBalance;
+                return res.status(400).json({
+                    success: false,
+                    message:
+                        "Selected key setting balance not found in selected user wallet",
+                });
+            }
+
+            fromBalanceBefore = senderBalance;
+            toBalanceBefore = receiverBalance;
 
             fromBalanceAfter =
                 senderBalance + points;
@@ -3787,18 +3777,6 @@ export const transferWalletPoints = async (req, res) => {
                 balance: fromBalanceAfter,
             };
 
-            if (
-                receiverWalletIndex < 0
-            ) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Selected key setting balance not found in selected user wallet",
-                });
-            }
-
             receiverWallet[
                 receiverWalletIndex
             ] = {
@@ -3808,24 +3786,18 @@ export const transferWalletPoints = async (req, res) => {
                 balance: toBalanceAfter,
             };
         } else {
-            if (
-                senderBalance < points
-            ) {
+            if (senderBalance < points) {
                 await trx.rollback();
 
                 return res.status(400).json({
                     success: false,
-                    message:
-                        "Insufficient wallet balance",
-                    available_balance:
-                        senderBalance,
+                    message: "Insufficient wallet balance",
+                    available_balance: senderBalance,
                     requested_points: points,
                 });
             }
 
-            if (
-                senderWalletIndex < 0
-            ) {
+            if (senderWalletIndex < 0) {
                 await trx.rollback();
 
                 return res.status(400).json({
@@ -3835,11 +3807,8 @@ export const transferWalletPoints = async (req, res) => {
                 });
             }
 
-            fromBalanceBefore =
-                senderBalance;
-
-            toBalanceBefore =
-                receiverBalance;
+            fromBalanceBefore = senderBalance;
+            toBalanceBefore = receiverBalance;
 
             fromBalanceAfter =
                 senderBalance - points;
@@ -3856,9 +3825,7 @@ export const transferWalletPoints = async (req, res) => {
                 balance: fromBalanceAfter,
             };
 
-            if (
-                receiverWalletIndex >= 0
-            ) {
+            if (receiverWalletIndex >= 0) {
                 receiverWallet[
                     receiverWalletIndex
                 ] = {
@@ -3879,18 +3846,14 @@ export const transferWalletPoints = async (req, res) => {
             .where("id", fromUserId)
             .update({
                 wallet_balance:
-                    JSON.stringify(
-                        senderWallet
-                    ),
+                    JSON.stringify(senderWallet),
             });
 
         await trx("users")
             .where("id", toUserId)
             .update({
                 wallet_balance:
-                    JSON.stringify(
-                        receiverWallet
-                    ),
+                    JSON.stringify(receiverWallet),
             });
 
         const [transactionId] =
@@ -3921,16 +3884,11 @@ export const transferWalletPoints = async (req, res) => {
                     ? "Points reverted successfully"
                     : "Points transferred successfully",
             data: {
-                transaction_id:
-                    transactionId,
-                from_user_id:
-                    fromUserId,
-                to_user_id:
-                    toUserId,
-                key_setting_id:
-                    keySettingId,
-                key_name:
-                    keySetting.name,
+                transaction_id: transactionId,
+                from_user_id: fromUserId,
+                to_user_id: toUserId,
+                key_setting_id: keySettingId,
+                key_name: keySetting.name,
                 points_sent: points,
                 from_balance_before:
                     fromBalanceBefore,
@@ -4130,3 +4088,262 @@ export const getWalletTransactions = async (req, res) => {
   }
 };
 
+//company setting  name and logo
+
+export const addCompanySetting = async (req, res) => {
+  try {
+    const { key, value } = req.body;
+
+    if (!key || !key.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Key is required",
+      });
+    }
+
+    if (
+      value === undefined ||
+      value === null ||
+      !String(value).trim()
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Value is required",
+      });
+    }
+
+    const cleanKey = key.trim().toLowerCase();
+    const cleanValue = String(value).trim();
+
+    const [settingId] = await db("companysetting").insert({
+      key: cleanKey,
+      value: cleanValue,
+    });
+
+    const companySetting = await db("companysetting")
+      .where("id", settingId)
+      .select("id", "key", "value")
+      .first();
+
+    return res.status(201).json({
+      success: true,
+      message: "Company setting added successfully",
+      data: companySetting,
+    });
+  } catch (error) {
+    console.error("Add Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add company setting",
+      error: error.message,
+    });
+  }
+};
+//company setting get data
+export const getCompanySetting = async (req, res) => {
+  try {
+    const roleId = Number(req.user?.role_id);
+
+    if (Number.isNaN(roleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    const companySettings = await db("companysetting")
+      .where("role_id", roleId)
+      .select(
+        "id",
+        "key",
+        "value",
+        "role_id",
+        "created_at",
+        "updated_at"
+      )
+      .orderBy("id", "asc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting fetched successfully",
+      data: companySettings,
+    });
+  } catch (error) {
+    console.error("Get Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch company setting",
+      error: error.message,
+    });
+  }
+};
+
+export const getNormalCompanySetting = async (req, res) => {
+  try {
+    const companySettings = await db("companysetting")
+      .whereIn("key", ["company_name", "company_logo"])
+      .select("id", "key", "value", "role_id")
+      .orderBy("id", "asc");
+
+    const settings = {
+      company_name: "",
+      company_logo: null,
+    };
+
+    companySettings.forEach((item) => {
+      settings[item.key] = item.value;
+    });
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting fetched successfully",
+      data: settings,
+    });
+  } catch (error) {
+    console.error("Get Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch company setting",
+      error: error.message,
+    });
+  }
+};
+
+
+// update company setting get data
+export const updateCompanySetting = async (req, res) => {
+  try {
+    const roleId = Number(req.user?.role_id);
+    const { key, value } = req.body;
+
+    if (Number.isNaN(roleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid user role",
+      });
+    }
+
+    if (!key || !key.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: "Key is required",
+      });
+    }
+
+    const cleanKey = key.trim().toLowerCase();
+
+    let cleanValue = value;
+
+    if (req.file) {
+      cleanValue = `/uploads/modules/${req.file.filename}`;
+    }
+
+    const booleanKeys = ["maintenance"];
+
+    if (booleanKeys.includes(cleanKey)) {
+      if (
+        value === true ||
+        value === "true" ||
+        value === 1 ||
+        value === "1"
+      ) {
+        cleanValue = BOOLEAN.TRUE;
+      } else if (
+        value === false ||
+        value === "false" ||
+        value === 0 ||
+        value === "0"
+      ) {
+        cleanValue = BOOLEAN.FALSE;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Boolean value must be true or false",
+        });
+      }
+    } else {
+      if (
+        cleanValue === undefined ||
+        cleanValue === null ||
+        !String(cleanValue).trim()
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Value is required",
+        });
+      }
+
+      cleanValue = String(cleanValue).trim();
+    }
+
+    const existingSetting = await db("companysetting")
+      .where("key", cleanKey)
+      .where("role_id", roleId)
+      .first();
+
+    if (existingSetting) {
+      await db("companysetting")
+        .where("id", existingSetting.id)
+        .update({
+          value: cleanValue,
+        });
+    } else {
+      await db("companysetting").insert({
+        key: cleanKey,
+        value: cleanValue,
+        role_id: roleId,
+      });
+    }
+
+    const updatedSetting = await db("companysetting")
+      .where("key", cleanKey)
+      .where("role_id", roleId)
+      .select(
+        "id",
+        "key",
+        "value",
+        "role_id",
+        "created_at",
+        "updated_at"
+      )
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "Company setting updated successfully",
+      data: updatedSetting,
+    });
+  } catch (error) {
+    console.error("Update Company Setting Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update company setting",
+      error: error.message,
+    });
+  }
+};
+
+// export const maintenanceController = async (req, res) => {
+//   try {
+//     return res.status(200).json({
+//       success: true,
+//       message: "Dashboard data fetched successfully",
+//       data: {
+//         user_id: req.user?.id,
+//         role_id: req.user?.role_id,
+//       },
+//     });
+//   } catch (error) {
+//     console.error("Get Dashboard Data Error:", error);
+
+//     return res.status(500).json({
+//       success: false,
+//       message: "Failed to fetch dashboard data",
+//       error: error.message,
+//     });
+//   }
+// };
