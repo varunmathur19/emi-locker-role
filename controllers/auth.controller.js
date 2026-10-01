@@ -765,47 +765,27 @@ export const loginUser = async (req, res) => {
       }
     );
 
-    const userResponse = {
-      id: user.id,
-      name: user.name,
-      email: user.email,
-      role_id: user.role_id,
-      userStatus: Number(user.userStatus),
-
-      parent_id: user.parent_id,
-
-      parent_admin_id:
-        user.parent_admin_id,
-
-      parent_cnf_id:
-        user.parent_cnf_id,
-
-      parent_super_distributor_id:
-        user.parent_super_distributor_id,
-
-      parent_distributor_id:
-        user.parent_distributor_id,
-
-      parent_fos_id:
-        user.parent_fos_id,
-
-      parent_retailer_id:
-        user.parent_retailer_id,
-
-      parent_employee_id:
-        user.parent_employee_id,
-
-      parent_staff_id:
-        user.parent_staff_id,
-
-      role_permission_id: isStaff
-        ? user.role_permission_id
-        : null,
-
-      staff_permission: isStaff
-        ? staffPermission
-        : null,
-    };
+   const userResponse = {
+  id: user.id,
+  name: user.name,
+  email: user.email,
+  role_id: user.role_id,
+  userStatus: Number(user.userStatus),
+  parent_id: user.parent_id,
+  parent_admin_id: user.parent_admin_id,
+  parent_cnf_id: user.parent_cnf_id,
+  parent_super_distributor_id:
+    user.parent_super_distributor_id,
+  parent_distributor_id:
+    user.parent_distributor_id,
+  parent_fos_id: user.parent_fos_id,
+  parent_retailer_id:
+    user.parent_retailer_id,
+  parent_employee_id:
+    user.parent_employee_id,
+  parent_staff_id:
+    user.parent_staff_id,
+};
 
     return res.status(200).json({
       success: true,
@@ -2185,6 +2165,25 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
+    const isCurrentlyImpersonating =
+      loggedInUser.is_impersonating === true ||
+      loggedInUser.is_impersonating === 1 ||
+      loggedInUser.is_impersonating === "true";
+
+    const originalRoleId =
+      isCurrentlyImpersonating &&
+      loggedInUser.original_role_id !== null &&
+      loggedInUser.original_role_id !== undefined
+        ? Number(loggedInUser.original_role_id)
+        : Number(loggedInUser.role_id);
+
+    const originalUserId =
+      isCurrentlyImpersonating &&
+      loggedInUser.original_user_id !== null &&
+      loggedInUser.original_user_id !== undefined
+        ? Number(loggedInUser.original_user_id)
+        : Number(loggedInUser.id);
+
     const targetUser = await db("users as u")
       .leftJoin(
         "role_permission as rp",
@@ -2210,34 +2209,35 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
-    const isCurrentlyImpersonating =
-      loggedInUser.is_impersonating === true ||
-      loggedInUser.is_impersonating === 1 ||
-      loggedInUser.is_impersonating === "true";
-
-    const originalRoleId =
-      isCurrentlyImpersonating &&
-      loggedInUser.original_role_id !== null &&
-      loggedInUser.original_role_id !== undefined
-        ? Number(loggedInUser.original_role_id)
-        : Number(loggedInUser.role_id);
-
-    const originalUserId =
-      isCurrentlyImpersonating &&
-      loggedInUser.original_user_id !== null &&
-      loggedInUser.original_user_id !== undefined
-        ? Number(loggedInUser.original_user_id)
-        : Number(loggedInUser.id);
-
     const targetRoleId = Number(targetUser.role_id);
 
+    const maintenanceSetting = await db("companysetting")
+      .where("key", "maintenance")
+      .where("role_id", 0)
+      .select("value")
+      .first();
+
+    const isMaintenance =
+      Number(maintenanceSetting?.value) === 1;
+
+    if (isMaintenance && originalRoleId !== 0) {
+      return res.status(503).json({
+        success: false,
+        maintenance: true,
+        message: "Application is under maintenance",
+      });
+    }
+
+    const isMasterAdmin = originalRoleId === 0;
+
     const isOriginalUser =
-      Number(targetUser.id) === Number(originalUserId);
+      Number(targetUser.id) === originalUserId;
 
     const isSameCurrentUser =
       Number(targetUser.id) === Number(loggedInUser.id);
 
     if (
+      !isMasterAdmin &&
       !isOriginalUser &&
       !isSameCurrentUser &&
       targetRoleId <= originalRoleId
@@ -2258,7 +2258,11 @@ export const loginAsUser = async (req, res) => {
       }
     }
 
-    if (!permission || typeof permission !== "object") {
+    if (
+      !permission ||
+      typeof permission !== "object" ||
+      Array.isArray(permission)
+    ) {
       permission = {};
     }
 
@@ -2280,17 +2284,18 @@ export const loginAsUser = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Login as user successful",
-      token,
+    //   token,
       user: {
         id: targetUser.id,
         name: targetUser.name,
         email: targetUser.email,
         role_id: targetRoleId,
         parent_id: targetUser.parent_id || null,
-        role_permission_id: targetUser.role_permission_id || null,
-        role_permission: {
-          permission,
-        },
+        // role_permission_id:
+        //   targetUser.role_permission_id || null,
+        // role_permission: {
+        //   permission,
+        // },
       },
     });
   } catch (error) {
