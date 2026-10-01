@@ -765,27 +765,47 @@ export const loginUser = async (req, res) => {
       }
     );
 
-   const userResponse = {
-  id: user.id,
-  name: user.name,
-  email: user.email,
-  role_id: user.role_id,
-  userStatus: Number(user.userStatus),
-  parent_id: user.parent_id,
-  parent_admin_id: user.parent_admin_id,
-  parent_cnf_id: user.parent_cnf_id,
-  parent_super_distributor_id:
-    user.parent_super_distributor_id,
-  parent_distributor_id:
-    user.parent_distributor_id,
-  parent_fos_id: user.parent_fos_id,
-  parent_retailer_id:
-    user.parent_retailer_id,
-  parent_employee_id:
-    user.parent_employee_id,
-  parent_staff_id:
-    user.parent_staff_id,
-};
+    const userResponse = {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      role_id: user.role_id,
+      userStatus: Number(user.userStatus),
+
+      parent_id: user.parent_id,
+
+      parent_admin_id:
+        user.parent_admin_id,
+
+      parent_cnf_id:
+        user.parent_cnf_id,
+
+      parent_super_distributor_id:
+        user.parent_super_distributor_id,
+
+      parent_distributor_id:
+        user.parent_distributor_id,
+
+      parent_fos_id:
+        user.parent_fos_id,
+
+      parent_retailer_id:
+        user.parent_retailer_id,
+
+      parent_employee_id:
+        user.parent_employee_id,
+
+      parent_staff_id:
+        user.parent_staff_id,
+
+      role_permission_id: isStaff
+        ? user.role_permission_id
+        : null,
+
+      staff_permission: isStaff
+        ? staffPermission
+        : null,
+    };
 
     return res.status(200).json({
       success: true,
