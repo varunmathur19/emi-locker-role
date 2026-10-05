@@ -2205,19 +2205,12 @@ export const loginAsUser = async (req, res) => {
         : Number(loggedInUser.id);
 
     const targetUser = await db("users as u")
-      .leftJoin(
-        "role_permission as rp",
-        "u.role_permission_id",
-        "rp.id"
-      )
       .select(
         "u.id",
         "u.name",
         "u.email",
         "u.role_id",
-        "u.parent_id",
-        "u.role_permission_id",
-        "rp.permission"
+        "u.parent_id"
       )
       .where("u.id", user_id)
       .first();
@@ -2268,24 +2261,6 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
-    let permission = targetUser.permission;
-
-    if (typeof permission === "string") {
-      try {
-        permission = JSON.parse(permission);
-      } catch {
-        permission = {};
-      }
-    }
-
-    if (
-      !permission ||
-      typeof permission !== "object" ||
-      Array.isArray(permission)
-    ) {
-      permission = {};
-    }
-
     const token = jwt.sign(
       {
         id: targetUser.id,
@@ -2304,18 +2279,13 @@ export const loginAsUser = async (req, res) => {
     return res.status(200).json({
       success: true,
       message: "Login as user successful",
-    //   token,
+      token,
       user: {
         id: targetUser.id,
         name: targetUser.name,
         email: targetUser.email,
         role_id: targetRoleId,
         parent_id: targetUser.parent_id || null,
-        // role_permission_id:
-        //   targetUser.role_permission_id || null,
-        // role_permission: {
-        //   permission,
-        // },
       },
     });
   } catch (error) {
@@ -2323,7 +2293,7 @@ export const loginAsUser = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error.message,
+      message: error.message || "Internal server error",
     });
   }
 };
