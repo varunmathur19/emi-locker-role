@@ -9,6 +9,7 @@ import { connectDB } from "./config/db.js";
 
 import router from "./routes/auth.routes.js";
 import moduleRoutes from "./routes/auth.routes.js";
+import { checkSuspend, maintenanceMiddleware } from "./middleware/auth.middleware.js";
 
 connectDB();
 
@@ -50,6 +51,8 @@ app.use(
   )
 );
 
+app.use(checkSuspend);
+app.use("/api", maintenanceMiddleware);
 
 app.use(
   "/api",

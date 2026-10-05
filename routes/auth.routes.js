@@ -34,7 +34,7 @@ import {
     updateCompanySetting,
     getNormalCompanySetting,
 } from "../controllers/auth.controller.js";
-import { authMiddleware, maintenanceMiddleware } from "../middleware/auth.middleware.js";
+import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
 import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
@@ -316,11 +316,11 @@ router.post(
 );
 
 //company setting  name and logo
-router.get(
-  "/get-company-setting",
-  authMiddleware,
-  getCompanySetting
-);
+    router.get(
+    "/get-company-setting",
+    authMiddleware,
+    getCompanySetting
+    );
 
 //company setting  name and logo
 router.get(

@@ -680,32 +680,9 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    const maintenanceSetting = await db("companysetting")
-      .where("key", "maintenance")
-      .where("role_id", 0)
-      .select("value")
-      .first();
-
-    const isMaintenance =
-      Number(maintenanceSetting?.value) === 1;
-
-    const roleId = Number(user.role_id);
-
-    const isMasterAdmin = roleId === 0;
-
-    const isUserUnderMaintenance =
-      isMaintenance && !isMasterAdmin;
-
-    if (isUserUnderMaintenance) {
-      return res.status(503).json({
-        success: false,
-        maintenance: true,
-        message: "Application is under maintenance",
-      });
-    }
-
     let staffPermission = null;
 
+    const roleId = Number(user.role_id);
     const isStaff = roleId === 9;
 
     if (isStaff && user.role_permission_id) {
@@ -809,7 +786,6 @@ export const loginUser = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      maintenance: false,
       message: "Login Successful",
       token,
       user: userResponse,
@@ -2223,23 +2199,6 @@ export const loginAsUser = async (req, res) => {
     }
 
     const targetRoleId = Number(targetUser.role_id);
-
-    const maintenanceSetting = await db("companysetting")
-      .where("key", "maintenance")
-      .where("role_id", 0)
-      .select("value")
-      .first();
-
-    const isMaintenance =
-      Number(maintenanceSetting?.value) === 1;
-
-    if (isMaintenance && originalRoleId !== 0) {
-      return res.status(503).json({
-        success: false,
-        maintenance: true,
-        message: "Application is under maintenance",
-      });
-    }
 
     const isMasterAdmin = originalRoleId === 0;
 
@@ -4148,7 +4107,16 @@ export const getCompanySetting = async (req, res) => {
     }
 
     const companySettings = await db("companysetting")
-      .where("role_id", roleId)
+      .where(function () {
+        this.where("role_id", roleId)
+          .orWhere(function () {
+            this.where("role_id", 0)
+              .andWhere(function () {
+                this.where("key", "maintenance")
+                  .orWhere("key", "suspend");
+              });
+          });
+      })
       .select(
         "id",
         "key",
@@ -4236,7 +4204,7 @@ export const updateCompanySetting = async (req, res) => {
       cleanValue = `/uploads/modules/${req.file.filename}`;
     }
 
-    const booleanKeys = ["maintenance"];
+    const booleanKeys = ["maintenance", "suspend"];
 
     if (booleanKeys.includes(cleanKey)) {
       if (
@@ -4245,14 +4213,14 @@ export const updateCompanySetting = async (req, res) => {
         value === 1 ||
         value === "1"
       ) {
-        cleanValue = BOOLEAN.TRUE;
+        cleanValue = 1;
       } else if (
         value === false ||
         value === "false" ||
         value === 0 ||
         value === "0"
       ) {
-        cleanValue = BOOLEAN.FALSE;
+        cleanValue = 0;
       } else {
         return res.status(400).json({
           success: false,
@@ -4321,4 +4289,3 @@ export const updateCompanySetting = async (req, res) => {
     });
   }
 };
-
