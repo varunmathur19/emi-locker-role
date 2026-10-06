@@ -2180,13 +2180,18 @@ export const loginAsUser = async (req, res) => {
         ? Number(loggedInUser.original_user_id)
         : Number(loggedInUser.id);
 
+    // -----------------------------------------
+    // GET TARGET USER
+    // -----------------------------------------
     const targetUser = await db("users as u")
       .select(
         "u.id",
         "u.name",
         "u.email",
         "u.role_id",
-        "u.parent_id"
+        "u.parent_id",
+        "u.userStatus",
+        "u.role_permission_id"
       )
       .where("u.id", user_id)
       .first();
@@ -2208,6 +2213,9 @@ export const loginAsUser = async (req, res) => {
     const isSameCurrentUser =
       Number(targetUser.id) === Number(loggedInUser.id);
 
+    // -----------------------------------------
+    // ROLE CHECK
+    // -----------------------------------------
     if (
       !isMasterAdmin &&
       !isOriginalUser &&
@@ -2220,11 +2228,68 @@ export const loginAsUser = async (req, res) => {
       });
     }
 
+    // -----------------------------------------
+    // STAFF PERMISSION
+    // SAME LOGIC AS loginUser
+    // -----------------------------------------
+    let staffPermission = null;
+
+    const isStaff = targetRoleId === 9;
+
+    if (isStaff && targetUser.role_permission_id) {
+      const rolePermission = await db("role_permission")
+        .select(
+          "id",
+          "profile_id",
+          "permission"
+        )
+        .where(
+          "id",
+          Number(targetUser.role_permission_id)
+        )
+        .first();
+
+      if (rolePermission) {
+        let permission = rolePermission.permission;
+
+        if (typeof permission === "string") {
+          try {
+            permission = JSON.parse(permission);
+          } catch (error) {
+            console.error(
+              "STAFF PERMISSION PARSE ERROR:",
+              error
+            );
+
+            permission = {};
+          }
+        }
+
+        if (
+          !permission ||
+          typeof permission !== "object" ||
+          Array.isArray(permission)
+        ) {
+          permission = {};
+        }
+
+        staffPermission = {
+          id: rolePermission.id,
+          profile_id: rolePermission.profile_id,
+          permission,
+        };
+      }
+    }
+
+    // -----------------------------------------
+    // JWT
+    // -----------------------------------------
     const token = jwt.sign(
       {
         id: targetUser.id,
         role_id: targetRoleId,
         email: targetUser.email,
+
         original_user_id: originalUserId,
         original_role_id: originalRoleId,
         is_impersonating: true,
@@ -2235,28 +2300,47 @@ export const loginAsUser = async (req, res) => {
       }
     );
 
+    // -----------------------------------------
+    // USER RESPONSE
+    // -----------------------------------------
+    const userResponse = {
+      id: targetUser.id,
+      name: targetUser.name,
+      email: targetUser.email,
+      role_id: targetRoleId,
+      userStatus: Number(targetUser.userStatus),
+
+      parent_id: targetUser.parent_id,
+
+      role_permission_id: isStaff
+        ? targetUser.role_permission_id
+        : null,
+
+      staff_permission: isStaff
+        ? staffPermission
+        : null,
+    };
+
     return res.status(200).json({
       success: true,
       message: "Login as user successful",
       token,
-      user: {
-        id: targetUser.id,
-        name: targetUser.name,
-        email: targetUser.email,
-        role_id: targetRoleId,
-        parent_id: targetUser.parent_id || null,
-      },
+      user: userResponse,
     });
   } catch (error) {
-    console.error("Login As User Error:", error);
+    console.error(
+      "Login As User Error:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
-      message: error.message || "Internal server error",
+      message:
+        error.message ||
+        "Internal server error",
     });
   }
 };
-
 export const getModules = async (req, res) => {
     try {
         const { search, status } = req.query;
