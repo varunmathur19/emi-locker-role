@@ -17,22 +17,45 @@ import path from "path";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
 
 const isPermissionEnabled = (value) => {
-    if (typeof value === "boolean") return value;
-    if (typeof value === "number") return value === 1;
-    if (typeof value === "string") {
-        return value === "1" || value.toLowerCase() === "true";
+    if (typeof value === "boolean") {
+        return value;
     }
+
+    if (typeof value === "number") {
+        return value === 1;
+    }
+
+    if (typeof value === "string") {
+        return (
+            value === "1" ||
+            value.toLowerCase() === "true"
+        );
+    }
+
     if (value && typeof value === "object") {
-        if (value.status !== undefined) return Number(value.status) === 1;
-        if (value.view !== undefined) return Number(value.view) === 1;
-        if (value.access !== undefined) return Number(value.access) === 1;
+        if (value.status !== undefined) {
+            return Number(value.status) === 1;
+        }
+
+        if (value.view !== undefined) {
+            return Number(value.view) === 1;
+        }
+
+        if (value.access !== undefined) {
+            return Number(value.access) === 1;
+        }
+
         return true;
     }
+
     return false;
 };
 
 const getStaffPermissions = async (user) => {
-    if (Number(user?.role_id) !== ROLES.STAFF || !user?.role_permission_id) {
+    if (
+        Number(user?.role_id) !== ROLES.STAFF ||
+        !user?.role_permission_id
+    ) {
         return null;
     }
 
@@ -41,45 +64,97 @@ const getStaffPermissions = async (user) => {
         .where("id", Number(user.role_permission_id))
         .first();
 
-    if (!rolePermission?.permission) return null;
+    if (!rolePermission?.permission) {
+        return null;
+    }
 
     try {
-        const permission = typeof rolePermission.permission === "string"
-            ? JSON.parse(rolePermission.permission)
-            : rolePermission.permission;
-        return permission && typeof permission === "object" && !Array.isArray(permission)
-            ? permission
-            : null;
+        const permission =
+            typeof rolePermission.permission === "string"
+                ? JSON.parse(rolePermission.permission)
+                : rolePermission.permission;
+
+        if (
+            !permission ||
+            typeof permission !== "object" ||
+            Array.isArray(permission)
+        ) {
+            return null;
+        }
+
+        return permission;
     } catch {
         return null;
     }
 };
 
-const hasStaffRolePermission = (permissions, role, action = null) => {
-    if (!permissions || !role) return false;
+const hasStaffPermission = (
+    permissions,
+    moduleId,
+    subModuleId
+) => {
+    if (!permissions) {
+        return false;
+    }
 
-    const keys = [role.slug, role.name]
-        .filter(Boolean)
-        .map((value) => String(value).trim().toLowerCase());
+    if (
+        moduleId === undefined ||
+        moduleId === null ||
+        subModuleId === undefined ||
+        subModuleId === null
+    ) {
+        return false;
+    }
 
-    return keys.some((key) => {
-        if (action) {
-            return isPermissionEnabled(permissions[`${key}.${action}`]) ||
-                isPermissionEnabled(permissions[`${key}.manage`]) ||
-                // Kept for old profiles which used a role-level permission.
-                isPermissionEnabled(permissions[key]);
-        }
+    const key = `${moduleId}.${subModuleId}`;
 
-        return Object.keys(permissions).some((permissionKey) => {
-            const normalizedKey = String(permissionKey).trim().toLowerCase();
-            return (normalizedKey === key || normalizedKey.startsWith(`${key}.`)) &&
-                isPermissionEnabled(permissions[permissionKey]);
-        });
-    });
+    return isPermissionEnabled(
+        permissions[key]
+    );
 };
 
+const hasAnyStaffModulePermission = (
+    permissions,
+    moduleId
+) => {
+    if (!permissions) {
+        return false;
+    }
+
+    if (
+        moduleId === undefined ||
+        moduleId === null
+    ) {
+        return false;
+    }
+
+    const prefix = `${moduleId}.`;
+
+    return Object.entries(permissions).some(
+        ([key, value]) => {
+            if (!key.startsWith(prefix)) {
+                return false;
+            }
+
+            return isPermissionEnabled(value);
+        }
+    );
+};
+
+
+
 const getRoleForPermission = (roleId) =>
-    db("roles").select("role_id", "name", "slug").where("role_id", Number(roleId)).first();
+    db("roles")
+        .select(
+            "role_id",
+            "name",
+            "slug"
+        )
+        .where(
+            "role_id",
+            Number(roleId)
+        )
+        .first();
 
 // ADD STAFF
 
@@ -911,18 +986,19 @@ export const getUsers = async (req, res) => {
                 });
             }
 
-            const [staffUser, requestedRole] = await Promise.all([
-                db("users")
-                    .select(
-                        "id",
-                        "role_id",
-                        "role_permission_id"
-                    )
-                    .where("id", loggedInUserId)
-                    .first(),
+            const [staffUser, requestedRole] =
+                await Promise.all([
+                    db("users")
+                        .select(
+                            "id",
+                            "role_id",
+                            "role_permission_id"
+                        )
+                        .where("id", loggedInUserId)
+                        .first(),
 
-                getRoleForPermission(role_id),
-            ]);
+                    getRoleForPermission(role_id),
+                ]);
 
             if (!staffUser) {
                 return res.status(404).json({
@@ -931,19 +1007,81 @@ export const getUsers = async (req, res) => {
                 });
             }
 
-            const permissions = await getStaffPermissions(
-                staffUser
-            );
+            if (!requestedRole) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Requested role not found",
+                });
+            }
 
-            if (
-                !hasStaffRolePermission(
-                    permissions,
-                    requestedRole
-                )
-            ) {
+            const permissions =
+                await getStaffPermissions(
+                    staffUser
+                );
+
+            const roleSlug = String(
+                requestedRole?.slug || ""
+            )
+                .trim()
+                .toLowerCase();
+
+            const roleName = String(
+                requestedRole?.name || ""
+            )
+                .trim()
+                .toLowerCase();
+
+            let requestedModule = null;
+
+            if (roleSlug) {
+                requestedModule =
+                    await db("modules")
+                        .select(
+                            "id",
+                            "name",
+                            "slug"
+                        )
+                        .whereRaw(
+                            "LOWER(TRIM(slug)) = ?",
+                            [roleSlug]
+                        )
+                        .first();
+            }
+
+            if (!requestedModule && roleName) {
+                requestedModule =
+                    await db("modules")
+                        .select(
+                            "id",
+                            "name",
+                            "slug"
+                        )
+                        .whereRaw(
+                            "LOWER(TRIM(name)) = ?",
+                            [roleName]
+                        )
+                        .first();
+            }
+
+            if (!requestedModule) {
                 return res.status(403).json({
                     success: false,
-                    message: "You are not allowed to access this role",
+                    message:
+                        "Module not found for requested role",
+                });
+            }
+
+            const hasAccess =
+                hasAnyStaffModulePermission(
+                    permissions,
+                    requestedModule.id
+                );
+
+            if (!hasAccess) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not allowed to access this role",
                 });
             }
 
@@ -972,7 +1110,9 @@ export const getUsers = async (req, res) => {
                     try {
                         parsedPermission =
                             typeof user.role_permission === "string"
-                                ? JSON.parse(user.role_permission)
+                                ? JSON.parse(
+                                      user.role_permission
+                                  )
                                 : user.role_permission;
 
                         if (
@@ -987,11 +1127,18 @@ export const getUsers = async (req, res) => {
                     }
                 }
 
-                let wallet_balance = user.wallet_balance || [];
+                let wallet_balance =
+                    user.wallet_balance || [];
 
-                if (typeof wallet_balance === "string") {
+                if (
+                    typeof wallet_balance ===
+                    "string"
+                ) {
                     try {
-                        wallet_balance = JSON.parse(wallet_balance);
+                        wallet_balance =
+                            JSON.parse(
+                                wallet_balance
+                            );
                     } catch {
                         wallet_balance = [];
                     }
@@ -999,38 +1146,46 @@ export const getUsers = async (req, res) => {
 
                 if (
                     !wallet_balance ||
-                    typeof wallet_balance !== "object"
+                    typeof wallet_balance !==
+                        "object"
                 ) {
                     wallet_balance = [];
                 }
 
-                let parent_name = user.parent_name || null;
+                let parent_name =
+                    user.parent_name || null;
 
                 let parent_organization_name =
-                    user.parent_organization_name || null;
+                    user.parent_organization_name ||
+                    null;
 
                 if (
                     Number(user.role_id) === 2 &&
                     user.parent_id
                 ) {
                     try {
-                        const parentUser = await db("users")
-                            .select(
-                                "name",
-                                "organization_name"
-                            )
-                            .where(
-                                "id",
-                                Number(user.parent_id)
-                            )
-                            .first();
+                        const parentUser =
+                            await db("users")
+                                .select(
+                                    "name",
+                                    "organization_name"
+                                )
+                                .where(
+                                    "id",
+                                    Number(
+                                        user.parent_id
+                                    )
+                                )
+                                .first();
 
                         if (parentUser) {
                             parent_name =
-                                parentUser.name || null;
+                                parentUser.name ||
+                                null;
 
                             parent_organization_name =
-                                parentUser.organization_name || null;
+                                parentUser.organization_name ||
+                                null;
                         }
                     } catch (parentError) {
                         console.error(
@@ -1042,14 +1197,28 @@ export const getUsers = async (req, res) => {
 
                 return {
                     ...user,
+
                     wallet_balance,
+
                     parent_name,
+
                     parent_organization_name,
+
                     role_permission: {
-                        id: user.role_permission_id || null,
-                        profile_id: user.profile_id || null,
-                        profile_name: user.profile_name || null,
-                        permission: parsedPermission,
+                        id:
+                            user.role_permission_id ||
+                            null,
+
+                        profile_id:
+                            user.profile_id ||
+                            null,
+
+                        profile_name:
+                            user.profile_name ||
+                            null,
+
+                        permission:
+                            parsedPermission,
                     },
                 };
             })
@@ -1057,27 +1226,37 @@ export const getUsers = async (req, res) => {
 
         return res.status(200).json({
             success: true,
+
             pagination: {
                 currentPage: page,
-                totalPages: Math.ceil(
-                    result.total / limit
-                ),
+
+                totalPages:
+                    Math.ceil(
+                        result.total / limit
+                    ),
+
                 limit,
-                totalUsers: result.total,
+
+                totalUsers:
+                    result.total,
             },
+
             data: users,
         });
     } catch (error) {
-        console.error("GET USERS ERROR:", error);
+        console.error(
+            "GET USERS ERROR:",
+            error
+        );
 
         return res.status(500).json({
             success: false,
             message:
-                error?.message || "Failed to get users",
+                error?.message ||
+                "Failed to get users",
         });
     }
 };
-
 // Logout api
   export const logoutUser = async(req,res)=>{
 
@@ -2593,22 +2772,22 @@ export const getAllSubModules = async (req, res) => {
                 "created_at",
                 "updated_at"
             )
+            .where("status", 1)
             .orderBy("id", "asc");
 
         return res.status(200).json({
             success: true,
-            data: subModules
+            data: subModules,
         });
     } catch (error) {
         console.error("GET ALL SUB MODULES ERROR:", error);
 
         return res.status(500).json({
             success: false,
-            message: "Internal server error"
+            message: "Internal server error",
         });
     }
 };
-
 //delete submodule
 export const deleteSubModule = async (req, res) => {
     try {
@@ -3155,7 +3334,6 @@ export const saveRolePermissions = async (req, res) => {
 //get permission
 export const getRolePermissions = async (req, res) => {
   try {
-
     const profileId = Number(req.params.profile_id);
 
     const data = await db("role_permission")
@@ -3167,8 +3345,7 @@ export const getRolePermissions = async (req, res) => {
       data: data || null,
     });
   } catch (error) {
-    console.error("ROLE PERMISSION ERROR:");
-    console.error(error);
+    console.error("ROLE PERMISSION ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -3177,7 +3354,6 @@ export const getRolePermissions = async (req, res) => {
     });
   }
 };
-
 //country get api
 export const getCountries = async (req, res) => {
     try {
