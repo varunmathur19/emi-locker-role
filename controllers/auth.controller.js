@@ -2526,6 +2526,7 @@ export const getModules = async (req, res) => {
 
         let query = db("modules").select(
             "id",
+            "role_id",
             "name",
             "slug",
             "icon",
