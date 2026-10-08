@@ -2750,7 +2750,6 @@ export const getAllSubModules = async (req, res) => {
                 "created_at",
                 "updated_at"
             )
-            .where("status", 1)
             .orderBy("id", "asc");
 
         return res.status(200).json({
