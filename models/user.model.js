@@ -243,6 +243,159 @@ const applyFilters = (
   return query;
 };
 
+const getHierarchyAnchorUserId = async (userId, roleId = null) => {
+  const currentUser = await db("users")
+    .select("id", "role_id", "parent_id", "created_by")
+    .where("id", Number(userId))
+    .first();
+
+  if (!currentUser) {
+    return Number(userId);
+  }
+
+  const normalizedRoleId = Number(roleId ?? currentUser.role_id ?? 0);
+  const creatorId =
+    currentUser.created_by !== null &&
+    currentUser.created_by !== undefined &&
+    currentUser.created_by !== ""
+      ? Number(currentUser.created_by)
+      : null;
+
+  const parentId =
+    currentUser.parent_id !== null &&
+    currentUser.parent_id !== undefined &&
+    currentUser.parent_id !== ""
+      ? Number(currentUser.parent_id)
+      : null;
+
+  // Staff follows the person who created the staff record.
+  if (normalizedRoleId === 9) {
+    if (creatorId) {
+      return creatorId;
+    }
+
+    if (parentId) {
+      return parentId;
+    }
+
+    return Number(currentUser.id);
+  }
+
+  // For all non-staff hierarchy users, the current user is the root of the branch.
+  // The returned branch contains records where this user sits as the ancestor.
+  if (parentId) {
+    return Number(currentUser.id);
+  }
+
+  if (creatorId) {
+    return Number(currentUser.id);
+  }
+
+  return Number(currentUser.id);
+};
+
+const getEffectiveHierarchyScope = async (userId, roleId) => {
+  const normalizedRoleId = Number(roleId);
+
+  if (normalizedRoleId !== 9) {
+    return {
+      userId: Number(userId),
+      roleId: normalizedRoleId,
+    };
+  }
+
+  const currentUser = await db("users")
+    .select("id", "created_by", "role_id")
+    .where("id", Number(userId))
+    .first();
+
+  if (!currentUser) {
+    return {
+      userId: Number(userId),
+      roleId: normalizedRoleId,
+    };
+  }
+
+  const creatorId =
+    currentUser.created_by !== null &&
+    currentUser.created_by !== undefined &&
+    currentUser.created_by !== ""
+      ? Number(currentUser.created_by)
+      : null;
+
+  if (!creatorId) {
+    return {
+      userId: Number(currentUser.id),
+      roleId: Number(currentUser.role_id ?? normalizedRoleId),
+    };
+  }
+
+  const creator = await db("users")
+    .select("id", "role_id")
+    .where("id", creatorId)
+    .first();
+
+  if (!creator) {
+    return {
+      userId: Number(currentUser.id),
+      roleId: Number(currentUser.role_id ?? normalizedRoleId),
+    };
+  }
+
+  return {
+    userId: Number(creator.id),
+    roleId: Number(creator.role_id ?? normalizedRoleId),
+  };
+};
+
+const buildConnectedUserChain = (startUserId, includeCreatedBy = false) =>
+  db.withRecursive(
+    "user_chain",
+    ["id"],
+    (query) => {
+      query
+        .select("id")
+        .from("users")
+        .where("id", Number(startUserId))
+        .unionAll((childQuery) => {
+          childQuery
+            .select("child.id")
+            .from({ current: "user_chain" })
+            .join({ child: "users" }, function () {
+              if (includeCreatedBy) {
+                this.on("child.parent_id", "=", "current.id")
+                  .orOn("child.created_by", "=", "current.id");
+                return;
+              }
+
+              this.on("child.parent_id", "=", "current.id");
+            });
+        });
+    }
+  );
+
+const getStaffCreatorUserId = async (staffUserId) => {
+  const staffUser = await db("users")
+    .select("id", "created_by")
+    .where("id", Number(staffUserId))
+    .first();
+
+  if (!staffUser) {
+    return Number(staffUserId);
+  }
+
+  if (
+    staffUser.created_by !== null &&
+    staffUser.created_by !== undefined &&
+    staffUser.created_by !== ""
+  ) {
+    return Number(staffUser.created_by);
+  }
+
+  return Number(staffUser.id);
+};
+
+
 export const getAllUsers = async (
   limit,
   offset,
@@ -257,8 +410,8 @@ export const getAllUsers = async (
   staffRoleAccess = false
 ) => {
   try {
-    limit = Number(limit) || 10;
-    offset = Number(offset) || 0;
+    limit = Math.max(Number(limit) || 10, 1);
+    offset = Math.max(Number(offset) || 0, 0);
 
     loggedInUserId = Number(loggedInUserId);
     loggedInRoleId = Number(loggedInRoleId);
@@ -274,33 +427,23 @@ export const getAllUsers = async (
       throw new Error("Logged-in user role ID is required");
     }
 
-    search =
-      search !== null &&
-      search !== undefined &&
-      String(search).trim() !== ""
-        ? String(search).trim()
-        : null;
+    // Normalize filters
+    const normalizeFilter = (value) => {
+      if (
+        value === null ||
+        value === undefined ||
+        String(value).trim() === ""
+      ) {
+        return null;
+      }
 
-    country =
-      country !== null &&
-      country !== undefined &&
-      String(country).trim() !== ""
-        ? String(country).trim()
-        : null;
+      return String(value).trim();
+    };
 
-    state =
-      state !== null &&
-      state !== undefined &&
-      String(state).trim() !== ""
-        ? String(state).trim()
-        : null;
-
-    city =
-      city !== null &&
-      city !== undefined &&
-      String(city).trim() !== ""
-        ? String(city).trim()
-        : null;
+    search = normalizeFilter(search);
+    country = normalizeFilter(country);
+    state = normalizeFilter(state);
+    city = normalizeFilter(city);
 
     const filters = {
       role_id,
@@ -311,276 +454,170 @@ export const getAllUsers = async (
       status,
     };
 
-    if (staffRoleAccess && loggedInRoleId === 9) {
-      const staffUser = await db("users")
-        .select("parent_id")
-        .where("id", loggedInUserId)
-        .first();
+    /*
+     * MASTER ADMIN:
+     * Role 0 can see all users.
+     *
+     * ADMIN AND OTHER ROLES:
+     * Only users returned by the logged-in user's
+     * connected hierarchy are visible.
+     *
+     * STAFF:
+     * Existing permission validation remains in getUsers.
+     */
+    const canSeeAllUsers =
+      loggedInRoleId === 0 ||
+      loggedInRoleId === 1;
 
-      const parentId = Number(staffUser?.parent_id);
+    // Keep staff permission access restricted.
+    if (
+      loggedInRoleId === 9 &&
+      !staffRoleAccess
+    ) {
+      throw new Error(
+        "Staff is not authorized to access this user list"
+      );
+    }
 
-      if (!Number.isInteger(parentId) || parentId <= 0) {
-        return {
-          users: [],
-          total: 0,
-        };
+    /*
+     * Build the query with existing joins and selected fields.
+     */
+    const buildUsersQuery = (useHierarchy) => {
+      let query;
+
+      if (useHierarchy) {
+        if (loggedInRoleId === 9) {
+          query = db
+            .from({ u: "users" })
+            .where("u.created_by", Number(staffCreatorUserId));
+        } else {
+          query = buildConnectedUserChain(
+            hierarchyAnchorId,
+            false
+          )
+            .from({ u: "users" })
+            .join(
+              { uc: "user_chain" },
+              "uc.id",
+              "u.id"
+            );
+        }
+      } else {
+        query = db.from({ u: "users" });
       }
 
-      const buildStaffChain = () =>
-        db.withRecursive(
-          "user_chain",
-          ["id", "parent_id", "created_by", "role_id"],
-          (query) => {
-            query
-              .select(
-                "id",
-                "parent_id",
-                "created_by",
-                "role_id"
-              )
-              .from("users")
-              .where("id", parentId)
-
-              .unionAll((query) => {
-                query
-                  .select(
-                    "child.id",
-                    "child.parent_id",
-                    "child.created_by",
-                    "child.role_id"
-                  )
-                  .from({ child: "users" })
-                  .join(
-                    { parent: "user_chain" },
-                    "child.parent_id",
-                    "parent.id"
-                  );
-              });
-          }
+      return query
+        .leftJoin(
+          { parent: "users" },
+          "parent.id",
+          "u.parent_id"
+        )
+        .leftJoin(
+          { creator: "users" },
+          "creator.id",
+          "u.created_by"
+        )
+        .leftJoin(
+          { rp: "role_permission" },
+          "rp.id",
+          "u.role_permission_id"
+        )
+        .leftJoin(
+          { p: "profile" },
+          "p.id",
+          "rp.profile_id"
         );
+    };
 
-      let countQuery = buildStaffChain()
+    /*
+     * MASTER ADMIN:
+     * Global data.
+     *
+     * EVERY OTHER ROLE:
+     * Hierarchy-scoped data.
+     */
+    const useHierarchy = !canSeeAllUsers;
+
+    const effectiveScope = useHierarchy
+      ? await getEffectiveHierarchyScope(loggedInUserId, loggedInRoleId)
+      : null;
+
+    const staffCreatorUserId =
+      loggedInRoleId === 9
+        ? await getStaffCreatorUserId(loggedInUserId)
+        : null;
+
+    const hierarchyAnchorId = useHierarchy
+      ? loggedInRoleId === 9
+        ? staffCreatorUserId
+        : await getHierarchyAnchorUserId(
+            effectiveScope?.userId ?? loggedInUserId,
+            effectiveScope?.roleId ?? loggedInRoleId
+          )
+      : null;
+
+    // Count query: same scope and filters as the list query.
+    let countQuery;
+
+    if (useHierarchy) {
+      if (loggedInRoleId === 9) {
+        countQuery = db
+          .from({ u: "users" })
+          .where("u.created_by", Number(staffCreatorUserId))
+          .whereNot("u.id", loggedInUserId)
+          .countDistinct({ total: "u.id" });
+      } else {
+        countQuery = buildConnectedUserChain(
+          hierarchyAnchorId,
+          false
+        )
+          .from({ u: "users" })
+          .join(
+            { uc: "user_chain" },
+            "uc.id",
+            "u.id"
+          )
+          .whereNot("u.id", loggedInUserId)
+          .countDistinct({ total: "u.id" });
+      }
+    } else {
+      countQuery = db
         .from({ u: "users" })
-        .join(
-          { uc: "user_chain" },
-          "uc.id",
-          "u.id"
-        )
-        .whereNot("u.id", loggedInUserId)
-        .count("* as total");
-
-      applyFilters(countQuery, filters);
-
-      const countResult = await countQuery.first();
-
-      const total = Number(countResult?.total || 0);
-
-      let usersQuery = buildStaffChain()
-        .from({ u: "users" })
-
-        .join(
-          { uc: "user_chain" },
-          "uc.id",
-          "u.id"
-        )
-
-        .leftJoin(
-          { parent: "users" },
-          "parent.id",
-          "u.parent_id"
-        )
-
-        .leftJoin(
-          { creator: "users" },
-          "creator.id",
-          "u.created_by"
-        )
-
-        .leftJoin(
-          { rp: "role_permission" },
-          "rp.id",
-          "u.role_permission_id"
-        )
-
-        .leftJoin(
-          { p: "profile" },
-          "p.id",
-          "rp.profile_id"
-        )
-
-        .select(selectUserFields)
-
-        .whereNot("u.id", loggedInUserId)
-
-        .orderBy("u.id", "desc")
-
-        .limit(limit)
-        .offset(offset);
-
-      applyFilters(usersQuery, filters);
-
-      const users = await usersQuery;
-
-      return {
-        users,
-        total,
-      };
+        .countDistinct({ total: "u.id" });
     }
-
-    if (loggedInRoleId === 0 || loggedInRoleId === 1) {
-      let usersQuery = db
-        .from({ u: "users" })
-
-        .leftJoin(
-          { parent: "users" },
-          "parent.id",
-          "u.parent_id"
-        )
-
-        .leftJoin(
-          { creator: "users" },
-          "creator.id",
-          "u.created_by"
-        )
-
-        .leftJoin(
-          { rp: "role_permission" },
-          "rp.id",
-          "u.role_permission_id"
-        )
-
-        .leftJoin(
-          { p: "profile" },
-          "p.id",
-          "rp.profile_id"
-        )
-
-        .select(selectUserFields)
-        .orderBy("u.id", "desc")
-        .limit(limit)
-        .offset(offset);
-
-      applyFilters(usersQuery, filters);
-
-      const users = await usersQuery;
-
-      let countQuery = db
-        .from({ u: "users" })
-        .count("* as total");
-
-      applyFilters(countQuery, filters);
-
-      const countResult = await countQuery.first();
-
-      const total = Number(countResult?.total || 0);
-
-      return {
-        users,
-        total,
-      };
-    }
-
-    const buildUserChain = () =>
-      db.withRecursive(
-        "user_chain",
-        ["id", "parent_id", "created_by", "role_id"],
-        (query) => {
-          query
-            .select(
-              "id",
-              "parent_id",
-              "created_by",
-              "role_id"
-            )
-            .from("users")
-            .where("id", loggedInUserId)
-
-            .unionAll((query) => {
-              query
-                .select(
-                  "child.id",
-                  "child.parent_id",
-                  "child.created_by",
-                  "child.role_id"
-                )
-                .from({ child: "users" })
-                .join(
-                  { parent: "user_chain" },
-                  "child.parent_id",
-                  "parent.id"
-                );
-            });
-        }
-      );
-
-    let countQuery = buildUserChain()
-      .from({ u: "users" })
-      .join(
-        { uc: "user_chain" },
-        "uc.id",
-        "u.id"
-      )
-      .whereNot("u.id", loggedInUserId)
-      .count("* as total");
 
     applyFilters(countQuery, filters);
 
     const countResult = await countQuery.first();
-
     const total = Number(countResult?.total || 0);
 
-    let usersQuery = buildUserChain()
-      .from({ u: "users" })
-
-      .join(
-        { uc: "user_chain" },
-        "uc.id",
-        "u.id"
-      )
-
-      .leftJoin(
-        { parent: "users" },
-        "parent.id",
-        "u.parent_id"
-      )
-
-      .leftJoin(
-        { creator: "users" },
-        "creator.id",
-        "u.created_by"
-      )
-
-      .leftJoin(
-        { rp: "role_permission" },
-        "rp.id",
-        "u.role_permission_id"
-      )
-
-      .leftJoin(
-        { p: "profile" },
-        "p.id",
-        "rp.profile_id"
-      )
-
+    // User list query
+    let usersQuery = buildUsersQuery(useHierarchy)
       .select(selectUserFields)
+      .distinct("u.id")
+      .orderBy("u.id", "desc");
 
-      .whereNot("u.id", loggedInUserId)
-
-      .orderBy("u.id", "desc")
-
-      .limit(limit)
-      .offset(offset);
+    // Do not include the currently logged-in user in their downline.
+    if (useHierarchy) {
+      usersQuery.whereNot("u.id", loggedInUserId);
+    }
 
     applyFilters(usersQuery, filters);
 
-    const users = await usersQuery;
+    const users = await usersQuery
+      .limit(limit)
+      .offset(offset);
 
     return {
       users,
       total,
     };
   } catch (error) {
-    console.error("GET ALL USERS MODEL ERROR:", error);
+    console.error(
+      "GET ALL USERS MODEL ERROR:",
+      error
+    );
+
     throw error;
   }
 };
