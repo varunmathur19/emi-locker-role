@@ -465,9 +465,38 @@ export const getAllUsers = async (
      * STAFF:
      * Existing permission validation remains in getUsers.
      */
+    let staffInheritedAdminAccess = false;
+
+    if (loggedInRoleId === 9) {
+      const staffCreator = await db("users")
+        .select("created_by")
+        .where("id", Number(loggedInUserId))
+        .first();
+
+      const creatorUserId =
+        staffCreator &&
+        staffCreator.created_by !== null &&
+        staffCreator.created_by !== undefined &&
+        staffCreator.created_by !== ""
+          ? Number(staffCreator.created_by)
+          : null;
+
+      if (creatorUserId) {
+        const creator = await db("users")
+          .select("role_id")
+          .where("id", Number(creatorUserId))
+          .first();
+
+        staffInheritedAdminAccess =
+          Number(creator?.role_id) === 0 ||
+          Number(creator?.role_id) === 1;
+      }
+    }
+
     const canSeeAllUsers =
       loggedInRoleId === 0 ||
-      loggedInRoleId === 1;
+      loggedInRoleId === 1 ||
+      staffInheritedAdminAccess;
 
     // Keep staff permission access restricted.
     if (
@@ -486,7 +515,7 @@ export const getAllUsers = async (
       let query;
 
       if (useHierarchy) {
-        if (loggedInRoleId === 9) {
+        if (loggedInRoleId === 9 && !staffInheritedAdminAccess) {
           query = db
             .from({ u: "users" })
             .where("u.created_by", Number(staffCreatorUserId));
@@ -548,7 +577,7 @@ export const getAllUsers = async (
         : null;
 
     const hierarchyAnchorId = useHierarchy
-      ? loggedInRoleId === 9
+      ? loggedInRoleId === 9 && !staffInheritedAdminAccess
         ? staffCreatorUserId
         : await getHierarchyAnchorUserId(
             effectiveScope?.userId ?? loggedInUserId,
@@ -560,7 +589,7 @@ export const getAllUsers = async (
     let countQuery;
 
     if (useHierarchy) {
-      if (loggedInRoleId === 9) {
+      if (loggedInRoleId === 9 && !staffInheritedAdminAccess) {
         countQuery = db
           .from({ u: "users" })
           .where("u.created_by", Number(staffCreatorUserId))
