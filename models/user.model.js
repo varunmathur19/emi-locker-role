@@ -252,30 +252,18 @@ const buildConnectedUserChain = (startUserId) =>
         .select("id")
         .from("users")
         .where("id", Number(startUserId))
-
-        .union((childQuery) => {
-          childQuery
-            .select("parent.id")
-            .from({ current: "user_chain" })
-            .join({ user: "users" }, "user.id", "current.id")
-            .join({ parent: "users" }, function () {
-              this.on("parent.id", "=", "user.parent_id")
-                .orOn("parent.id", "=", "user.created_by");
-            });
-        })
-
-        .union((childQuery) => {
+        .unionAll((childQuery) => {
           childQuery
             .select("child.id")
             .from({ current: "user_chain" })
-            .join({ user: "users" }, "user.id", "current.id")
             .join({ child: "users" }, function () {
-              this.on("child.parent_id", "=", "user.id")
-                .orOn("child.created_by", "=", "user.id");
+              this.on("child.parent_id", "=", "current.id")
+                .orOn("child.created_by", "=", "current.id");
             });
         });
     }
   );
+
 
 export const getAllUsers = async (
   limit,
@@ -291,8 +279,8 @@ export const getAllUsers = async (
   staffRoleAccess = false
 ) => {
   try {
-    limit = Number(limit) || 10;
-    offset = Number(offset) || 0;
+    limit = Math.max(Number(limit) || 10, 1);
+    offset = Math.max(Number(offset) || 0, 0);
 
     loggedInUserId = Number(loggedInUserId);
     loggedInRoleId = Number(loggedInRoleId);
@@ -308,33 +296,23 @@ export const getAllUsers = async (
       throw new Error("Logged-in user role ID is required");
     }
 
-    search =
-      search !== null &&
-      search !== undefined &&
-      String(search).trim() !== ""
-        ? String(search).trim()
-        : null;
+    // Normalize filters
+    const normalizeFilter = (value) => {
+      if (
+        value === null ||
+        value === undefined ||
+        String(value).trim() === ""
+      ) {
+        return null;
+      }
 
-    country =
-      country !== null &&
-      country !== undefined &&
-      String(country).trim() !== ""
-        ? String(country).trim()
-        : null;
+      return String(value).trim();
+    };
 
-    state =
-      state !== null &&
-      state !== undefined &&
-      String(state).trim() !== ""
-        ? String(state).trim()
-        : null;
-
-    city =
-      city !== null &&
-      city !== undefined &&
-      String(city).trim() !== ""
-        ? String(city).trim()
-        : null;
+    search = normalizeFilter(search);
+    country = normalizeFilter(country);
+    state = normalizeFilter(state);
+    city = normalizeFilter(city);
 
     const filters = {
       role_id,
@@ -345,200 +323,135 @@ export const getAllUsers = async (
       status,
     };
 
-    if (staffRoleAccess && loggedInRoleId === 9) {
-      const buildStaffChain = () => buildConnectedUserChain(loggedInUserId);
+    /*
+     * MASTER ADMIN:
+     * Role 0 can see all users.
+     *
+     * ADMIN AND OTHER ROLES:
+     * Only users returned by the logged-in user's
+     * connected hierarchy are visible.
+     *
+     * STAFF:
+     * Existing permission validation remains in getUsers.
+     */
+    const canSeeAllUsers =
+      loggedInRoleId === 0 ||
+      loggedInRoleId === 1;
 
-      let countQuery = buildStaffChain()
-        .from({ u: "users" })
-        .join(
-          { uc: "user_chain" },
-          "uc.id",
-          "u.id"
+    // Keep staff permission access restricted.
+    if (
+      loggedInRoleId === 9 &&
+      !staffRoleAccess
+    ) {
+      throw new Error(
+        "Staff is not authorized to access this user list"
+      );
+    }
+
+    /*
+     * Build the query with existing joins and selected fields.
+     */
+    const buildUsersQuery = (useHierarchy) => {
+      let query;
+
+      if (useHierarchy) {
+        query = buildConnectedUserChain(
+          loggedInUserId
         )
-        .whereNot("u.id", loggedInUserId)
-        .count("* as total");
+          .from({ u: "users" })
+          .join(
+            { uc: "user_chain" },
+            "uc.id",
+            "u.id"
+          );
+      } else {
+        query = db.from({ u: "users" });
+      }
 
-      applyFilters(countQuery, filters);
-
-      const countResult = await countQuery.first();
-
-      const total = Number(countResult?.total || 0);
-
-      let usersQuery = buildStaffChain()
-        .from({ u: "users" })
-
-        .join(
-          { uc: "user_chain" },
-          "uc.id",
-          "u.id"
-        )
-
+      return query
         .leftJoin(
           { parent: "users" },
           "parent.id",
           "u.parent_id"
         )
-
         .leftJoin(
           { creator: "users" },
           "creator.id",
           "u.created_by"
         )
-
         .leftJoin(
           { rp: "role_permission" },
           "rp.id",
           "u.role_permission_id"
         )
-
         .leftJoin(
           { p: "profile" },
           "p.id",
           "rp.profile_id"
-        )
+        );
+    };
 
-        .select(selectUserFields)
+    /*
+     * MASTER ADMIN:
+     * Global data.
+     *
+     * EVERY OTHER ROLE:
+     * Hierarchy-scoped data.
+     */
+    const useHierarchy = !canSeeAllUsers;
 
-        .whereNot("u.id", loggedInUserId)
+    // Count query: same scope and filters as the list query.
+    let countQuery;
 
-        .orderBy("u.id", "desc")
-
-        .limit(limit)
-        .offset(offset);
-
-      applyFilters(usersQuery, filters);
-
-      const users = await usersQuery;
-
-      return {
-        users,
-        total,
-      };
-    }
-
-    if (loggedInRoleId === 0 || loggedInRoleId === 1) {
-      let usersQuery = db
-        .from({ u: "users" })
-
-        .leftJoin(
-          { parent: "users" },
-          "parent.id",
-          "u.parent_id"
-        )
-
-        .leftJoin(
-          { creator: "users" },
-          "creator.id",
-          "u.created_by"
-        )
-
-        .leftJoin(
-          { rp: "role_permission" },
-          "rp.id",
-          "u.role_permission_id"
-        )
-
-        .leftJoin(
-          { p: "profile" },
-          "p.id",
-          "rp.profile_id"
-        )
-
-        .select(selectUserFields)
-        .orderBy("u.id", "desc")
-        .limit(limit)
-        .offset(offset);
-
-      applyFilters(usersQuery, filters);
-
-      const users = await usersQuery;
-
-      let countQuery = db
-        .from({ u: "users" })
-        .count("* as total");
-
-      applyFilters(countQuery, filters);
-
-      const countResult = await countQuery.first();
-
-      const total = Number(countResult?.total || 0);
-
-      return {
-        users,
-        total,
-      };
-    }
-
-    const buildUserChain = () => buildConnectedUserChain(loggedInUserId);
-
-    let countQuery = buildUserChain()
-      .from({ u: "users" })
-      .join(
-        { uc: "user_chain" },
-        "uc.id",
-        "u.id"
+    if (useHierarchy) {
+      countQuery = buildConnectedUserChain(
+        loggedInUserId
       )
-      .whereNot("u.id", loggedInUserId)
-      .count("* as total");
+        .from({ u: "users" })
+        .join(
+          { uc: "user_chain" },
+          "uc.id",
+          "u.id"
+        )
+        .whereNot("u.id", loggedInUserId)
+        .countDistinct({ total: "u.id" });
+    } else {
+      countQuery = db
+        .from({ u: "users" })
+        .countDistinct({ total: "u.id" });
+    }
 
     applyFilters(countQuery, filters);
 
     const countResult = await countQuery.first();
-
     const total = Number(countResult?.total || 0);
 
-    let usersQuery = buildUserChain()
-      .from({ u: "users" })
-
-      .join(
-        { uc: "user_chain" },
-        "uc.id",
-        "u.id"
-      )
-
-      .leftJoin(
-        { parent: "users" },
-        "parent.id",
-        "u.parent_id"
-      )
-
-      .leftJoin(
-        { creator: "users" },
-        "creator.id",
-        "u.created_by"
-      )
-
-      .leftJoin(
-        { rp: "role_permission" },
-        "rp.id",
-        "u.role_permission_id"
-      )
-
-      .leftJoin(
-        { p: "profile" },
-        "p.id",
-        "rp.profile_id"
-      )
-
+    // User list query
+    let usersQuery = buildUsersQuery(useHierarchy)
       .select(selectUserFields)
+      .orderBy("u.id", "desc");
 
-      .whereNot("u.id", loggedInUserId)
-
-      .orderBy("u.id", "desc")
-
-      .limit(limit)
-      .offset(offset);
+    // Do not include the currently logged-in user in their downline.
+    if (useHierarchy) {
+      usersQuery.whereNot("u.id", loggedInUserId);
+    }
 
     applyFilters(usersQuery, filters);
 
-    const users = await usersQuery;
+    const users = await usersQuery
+      .limit(limit)
+      .offset(offset);
 
     return {
       users,
       total,
     };
   } catch (error) {
-    console.error("GET ALL USERS MODEL ERROR:", error);
+    console.error(
+      "GET ALL USERS MODEL ERROR:",
+      error
+    );
+
     throw error;
   }
 };
