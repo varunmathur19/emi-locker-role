@@ -243,7 +243,7 @@ const applyFilters = (
   return query;
 };
 
-const getHierarchyAnchorUserId = async (userId) => {
+const getHierarchyAnchorUserId = async (userId, roleId = null) => {
   const currentUser = await db("users")
     .select("id", "role_id", "parent_id", "created_by")
     .where("id", Number(userId))
@@ -253,8 +253,7 @@ const getHierarchyAnchorUserId = async (userId) => {
     return Number(userId);
   }
 
-  const isStaff = Number(currentUser.role_id) === 9;
-
+  const normalizedRoleId = Number(roleId ?? currentUser.role_id ?? 0);
   const creatorId =
     currentUser.created_by !== null &&
     currentUser.created_by !== undefined &&
@@ -269,22 +268,87 @@ const getHierarchyAnchorUserId = async (userId) => {
       ? Number(currentUser.parent_id)
       : null;
 
-  if (isStaff && creatorId) {
-    return creatorId;
+  // Staff follows the person who created the staff record.
+  if (normalizedRoleId === 9) {
+    if (creatorId) {
+      return creatorId;
+    }
+
+    if (parentId) {
+      return parentId;
+    }
+
+    return Number(currentUser.id);
   }
 
+  // For all non-staff hierarchy users, the current user is the root of the branch.
+  // The returned branch contains records where this user sits as the ancestor.
   if (parentId) {
-    return parentId;
+    return Number(currentUser.id);
   }
 
   if (creatorId) {
-    return creatorId;
+    return Number(currentUser.id);
   }
 
   return Number(currentUser.id);
 };
 
-const buildConnectedUserChain = (startUserId) =>
+const getEffectiveHierarchyScope = async (userId, roleId) => {
+  const normalizedRoleId = Number(roleId);
+
+  if (normalizedRoleId !== 9) {
+    return {
+      userId: Number(userId),
+      roleId: normalizedRoleId,
+    };
+  }
+
+  const currentUser = await db("users")
+    .select("id", "created_by", "role_id")
+    .where("id", Number(userId))
+    .first();
+
+  if (!currentUser) {
+    return {
+      userId: Number(userId),
+      roleId: normalizedRoleId,
+    };
+  }
+
+  const creatorId =
+    currentUser.created_by !== null &&
+    currentUser.created_by !== undefined &&
+    currentUser.created_by !== ""
+      ? Number(currentUser.created_by)
+      : null;
+
+  if (!creatorId) {
+    return {
+      userId: Number(currentUser.id),
+      roleId: Number(currentUser.role_id ?? normalizedRoleId),
+    };
+  }
+
+  const creator = await db("users")
+    .select("id", "role_id")
+    .where("id", creatorId)
+    .first();
+
+  if (!creator) {
+    return {
+      userId: Number(currentUser.id),
+      roleId: Number(currentUser.role_id ?? normalizedRoleId),
+    };
+  }
+
+  return {
+    userId: Number(creator.id),
+    roleId: Number(creator.role_id ?? normalizedRoleId),
+  };
+};
+
+const buildConnectedUserChain = (startUserId, includeCreatedBy = false) =>
   db.withRecursive(
     "user_chain",
     ["id"],
@@ -298,12 +362,38 @@ const buildConnectedUserChain = (startUserId) =>
             .select("child.id")
             .from({ current: "user_chain" })
             .join({ child: "users" }, function () {
-              this.on("child.parent_id", "=", "current.id")
-                .orOn("child.created_by", "=", "current.id");
+              if (includeCreatedBy) {
+                this.on("child.parent_id", "=", "current.id")
+                  .orOn("child.created_by", "=", "current.id");
+                return;
+              }
+
+              this.on("child.parent_id", "=", "current.id");
             });
         });
     }
   );
+
+const getStaffCreatorUserId = async (staffUserId) => {
+  const staffUser = await db("users")
+    .select("id", "created_by")
+    .where("id", Number(staffUserId))
+    .first();
+
+  if (!staffUser) {
+    return Number(staffUserId);
+  }
+
+  if (
+    staffUser.created_by !== null &&
+    staffUser.created_by !== undefined &&
+    staffUser.created_by !== ""
+  ) {
+    return Number(staffUser.created_by);
+  }
+
+  return Number(staffUser.id);
+};
 
 
 export const getAllUsers = async (
@@ -396,15 +486,22 @@ export const getAllUsers = async (
       let query;
 
       if (useHierarchy) {
-        query = buildConnectedUserChain(
-          hierarchyAnchorId
-        )
-          .from({ u: "users" })
-          .join(
-            { uc: "user_chain" },
-            "uc.id",
-            "u.id"
-          );
+        if (loggedInRoleId === 9) {
+          query = db
+            .from({ u: "users" })
+            .where("u.created_by", Number(staffCreatorUserId));
+        } else {
+          query = buildConnectedUserChain(
+            hierarchyAnchorId,
+            false
+          )
+            .from({ u: "users" })
+            .join(
+              { uc: "user_chain" },
+              "uc.id",
+              "u.id"
+            );
+        }
       } else {
         query = db.from({ u: "users" });
       }
@@ -441,25 +538,48 @@ export const getAllUsers = async (
      */
     const useHierarchy = !canSeeAllUsers;
 
+    const effectiveScope = useHierarchy
+      ? await getEffectiveHierarchyScope(loggedInUserId, loggedInRoleId)
+      : null;
+
+    const staffCreatorUserId =
+      loggedInRoleId === 9
+        ? await getStaffCreatorUserId(loggedInUserId)
+        : null;
+
     const hierarchyAnchorId = useHierarchy
-      ? await getHierarchyAnchorUserId(loggedInUserId)
+      ? loggedInRoleId === 9
+        ? staffCreatorUserId
+        : await getHierarchyAnchorUserId(
+            effectiveScope?.userId ?? loggedInUserId,
+            effectiveScope?.roleId ?? loggedInRoleId
+          )
       : null;
 
     // Count query: same scope and filters as the list query.
     let countQuery;
 
     if (useHierarchy) {
-      countQuery = buildConnectedUserChain(
-        hierarchyAnchorId
-      )
-        .from({ u: "users" })
-        .join(
-          { uc: "user_chain" },
-          "uc.id",
-          "u.id"
+      if (loggedInRoleId === 9) {
+        countQuery = db
+          .from({ u: "users" })
+          .where("u.created_by", Number(staffCreatorUserId))
+          .whereNot("u.id", loggedInUserId)
+          .countDistinct({ total: "u.id" });
+      } else {
+        countQuery = buildConnectedUserChain(
+          hierarchyAnchorId,
+          false
         )
-        .whereNot("u.id", loggedInUserId)
-        .countDistinct({ total: "u.id" });
+          .from({ u: "users" })
+          .join(
+            { uc: "user_chain" },
+            "uc.id",
+            "u.id"
+          )
+          .whereNot("u.id", loggedInUserId)
+          .countDistinct({ total: "u.id" });
+      }
     } else {
       countQuery = db
         .from({ u: "users" })
