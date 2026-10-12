@@ -243,6 +243,40 @@ const applyFilters = (
   return query;
 };
 
+const buildConnectedUserChain = (startUserId) =>
+  db.withRecursive(
+    "user_chain",
+    ["id"],
+    (query) => {
+      query
+        .select("id")
+        .from("users")
+        .where("id", Number(startUserId))
+
+        .union((childQuery) => {
+          childQuery
+            .select("parent.id")
+            .from({ current: "user_chain" })
+            .join({ user: "users" }, "user.id", "current.id")
+            .join({ parent: "users" }, function () {
+              this.on("parent.id", "=", "user.parent_id")
+                .orOn("parent.id", "=", "user.created_by");
+            });
+        })
+
+        .union((childQuery) => {
+          childQuery
+            .select("child.id")
+            .from({ current: "user_chain" })
+            .join({ user: "users" }, "user.id", "current.id")
+            .join({ child: "users" }, function () {
+              this.on("child.parent_id", "=", "user.id")
+                .orOn("child.created_by", "=", "user.id");
+            });
+        });
+    }
+  );
+
 export const getAllUsers = async (
   limit,
   offset,
@@ -312,52 +346,7 @@ export const getAllUsers = async (
     };
 
     if (staffRoleAccess && loggedInRoleId === 9) {
-      const staffUser = await db("users")
-        .select("parent_id")
-        .where("id", loggedInUserId)
-        .first();
-
-      const parentId = Number(staffUser?.parent_id);
-
-      if (!Number.isInteger(parentId) || parentId <= 0) {
-        return {
-          users: [],
-          total: 0,
-        };
-      }
-
-      const buildStaffChain = () =>
-        db.withRecursive(
-          "user_chain",
-          ["id", "parent_id", "created_by", "role_id"],
-          (query) => {
-            query
-              .select(
-                "id",
-                "parent_id",
-                "created_by",
-                "role_id"
-              )
-              .from("users")
-              .where("id", parentId)
-
-              .unionAll((query) => {
-                query
-                  .select(
-                    "child.id",
-                    "child.parent_id",
-                    "child.created_by",
-                    "child.role_id"
-                  )
-                  .from({ child: "users" })
-                  .join(
-                    { parent: "user_chain" },
-                    "child.parent_id",
-                    "parent.id"
-                  );
-              });
-          }
-        );
+      const buildStaffChain = () => buildConnectedUserChain(loggedInUserId);
 
       let countQuery = buildStaffChain()
         .from({ u: "users" })
@@ -480,38 +469,7 @@ export const getAllUsers = async (
       };
     }
 
-    const buildUserChain = () =>
-      db.withRecursive(
-        "user_chain",
-        ["id", "parent_id", "created_by", "role_id"],
-        (query) => {
-          query
-            .select(
-              "id",
-              "parent_id",
-              "created_by",
-              "role_id"
-            )
-            .from("users")
-            .where("id", loggedInUserId)
-
-            .unionAll((query) => {
-              query
-                .select(
-                  "child.id",
-                  "child.parent_id",
-                  "child.created_by",
-                  "child.role_id"
-                )
-                .from({ child: "users" })
-                .join(
-                  { parent: "user_chain" },
-                  "child.parent_id",
-                  "parent.id"
-                );
-            });
-        }
-      );
+    const buildUserChain = () => buildConnectedUserChain(loggedInUserId);
 
     let countQuery = buildUserChain()
       .from({ u: "users" })
