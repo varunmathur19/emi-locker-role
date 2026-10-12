@@ -979,113 +979,97 @@ export const getUsers = async (req, res) => {
         let staffRoleAccess = false;
 
         if (loggedInRoleId === ROLES.STAFF) {
-            if (role_id === null) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Staff must select an authorized role",
-                });
-            }
-
-            const [staffUser, requestedRole] =
-                await Promise.all([
-                    db("users")
-                        .select(
-                            "id",
-                            "role_id",
-                            "role_permission_id"
-                        )
-                        .where("id", loggedInUserId)
-                        .first(),
-
-                    getRoleForPermission(role_id),
-                ]);
-
-            if (!staffUser) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Logged-in staff user not found",
-                });
-            }
-
-            if (!requestedRole) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Requested role not found",
-                });
-            }
-
-            const permissions =
-                await getStaffPermissions(
-                    staffUser
-                );
-
-            const roleSlug = String(
-                requestedRole?.slug || ""
-            )
-                .trim()
-                .toLowerCase();
-
-            const roleName = String(
-                requestedRole?.name || ""
-            )
-                .trim()
-                .toLowerCase();
-
-            let requestedModule = null;
-
-            if (roleSlug) {
-                requestedModule =
-                    await db("modules")
-                        .select(
-                            "id",
-                            "name",
-                            "slug"
-                        )
-                        .whereRaw(
-                            "LOWER(TRIM(slug)) = ?",
-                            [roleSlug]
-                        )
-                        .first();
-            }
-
-            if (!requestedModule && roleName) {
-                requestedModule =
-                    await db("modules")
-                        .select(
-                            "id",
-                            "name",
-                            "slug"
-                        )
-                        .whereRaw(
-                            "LOWER(TRIM(name)) = ?",
-                            [roleName]
-                        )
-                        .first();
-            }
-
-            if (!requestedModule) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Module not found for requested role",
-                });
-            }
-
-            const hasAccess =
-                hasAnyStaffModulePermission(
-                    permissions,
-                    requestedModule.id
-                );
-
-            if (!hasAccess) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "You are not allowed to access this role",
-                });
-            }
-
             staffRoleAccess = true;
+
+            if (role_id !== null) {
+                const [staffUser, requestedRole] =
+                    await Promise.all([
+                        db("users")
+                            .select(
+                                "id",
+                                "role_id",
+                                "role_permission_id"
+                            )
+                            .where("id", loggedInUserId)
+                            .first(),
+
+                        getRoleForPermission(role_id),
+                    ]);
+
+                if (!staffUser) {
+                    return res.status(404).json({
+                        success: false,
+                        message: "Logged-in staff user not found",
+                    });
+                }
+
+                if (requestedRole) {
+                    const permissions =
+                        await getStaffPermissions(
+                            staffUser
+                        );
+
+                    const roleSlug = String(
+                        requestedRole?.slug || ""
+                    )
+                        .trim()
+                        .toLowerCase();
+
+                    const roleName = String(
+                        requestedRole?.name || ""
+                    )
+                        .trim()
+                        .toLowerCase();
+
+                    let requestedModule = null;
+
+                    if (roleSlug) {
+                        requestedModule =
+                            await db("modules")
+                                .select(
+                                    "id",
+                                    "name",
+                                    "slug"
+                                )
+                                .whereRaw(
+                                    "LOWER(TRIM(slug)) = ?",
+                                    [roleSlug]
+                                )
+                                .first();
+                    }
+
+                    if (!requestedModule && roleName) {
+                        requestedModule =
+                            await db("modules")
+                                .select(
+                                    "id",
+                                    "name",
+                                    "slug"
+                                )
+                                .whereRaw(
+                                    "LOWER(TRIM(name)) = ?",
+                                    [roleName]
+                                )
+                                .first();
+                    }
+
+                    if (requestedModule) {
+                        const hasAccess =
+                            hasAnyStaffModulePermission(
+                                permissions,
+                                requestedModule.id
+                            );
+
+                        if (!hasAccess) {
+                            return res.status(403).json({
+                                success: false,
+                                message:
+                                    "You are not allowed to access this role",
+                            });
+                        }
+                    }
+                }
+            }
         }
 
         const result = await getAllUsers(

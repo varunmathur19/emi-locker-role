@@ -243,6 +243,47 @@ const applyFilters = (
   return query;
 };
 
+const getHierarchyAnchorUserId = async (userId) => {
+  const currentUser = await db("users")
+    .select("id", "role_id", "parent_id", "created_by")
+    .where("id", Number(userId))
+    .first();
+
+  if (!currentUser) {
+    return Number(userId);
+  }
+
+  const isStaff = Number(currentUser.role_id) === 9;
+
+  const creatorId =
+    currentUser.created_by !== null &&
+    currentUser.created_by !== undefined &&
+    currentUser.created_by !== ""
+      ? Number(currentUser.created_by)
+      : null;
+
+  const parentId =
+    currentUser.parent_id !== null &&
+    currentUser.parent_id !== undefined &&
+    currentUser.parent_id !== ""
+      ? Number(currentUser.parent_id)
+      : null;
+
+  if (isStaff && creatorId) {
+    return creatorId;
+  }
+
+  if (parentId) {
+    return parentId;
+  }
+
+  if (creatorId) {
+    return creatorId;
+  }
+
+  return Number(currentUser.id);
+};
+
 const buildConnectedUserChain = (startUserId) =>
   db.withRecursive(
     "user_chain",
@@ -356,7 +397,7 @@ export const getAllUsers = async (
 
       if (useHierarchy) {
         query = buildConnectedUserChain(
-          loggedInUserId
+          hierarchyAnchorId
         )
           .from({ u: "users" })
           .join(
@@ -400,12 +441,16 @@ export const getAllUsers = async (
      */
     const useHierarchy = !canSeeAllUsers;
 
+    const hierarchyAnchorId = useHierarchy
+      ? await getHierarchyAnchorUserId(loggedInUserId)
+      : null;
+
     // Count query: same scope and filters as the list query.
     let countQuery;
 
     if (useHierarchy) {
       countQuery = buildConnectedUserChain(
-        loggedInUserId
+        hierarchyAnchorId
       )
         .from({ u: "users" })
         .join(
@@ -429,6 +474,7 @@ export const getAllUsers = async (
     // User list query
     let usersQuery = buildUsersQuery(useHierarchy)
       .select(selectUserFields)
+      .distinct("u.id")
       .orderBy("u.id", "desc");
 
     // Do not include the currently logged-in user in their downline.
