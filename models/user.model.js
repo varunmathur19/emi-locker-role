@@ -413,6 +413,7 @@ export const getAllUsers = async (
   staffRoleAccess = false
 ) => {
   try {
+    // Pagination
     limit = Math.max(Number(limit) || 10, 1);
     offset = Math.max(Number(offset) || 0, 0);
 
@@ -430,6 +431,7 @@ export const getAllUsers = async (
       throw new Error("Logged-in user role ID is required");
     }
 
+    // Normalize filters
     const normalizeFilter = (value) => {
       if (
         value === null ||
@@ -443,13 +445,25 @@ export const getAllUsers = async (
     };
 
     const filters = {
-      role_id,
+      role_id:
+        role_id === null ||
+        role_id === undefined ||
+        String(role_id).trim() === ""
+          ? null
+          : Number(role_id),
       search: normalizeFilter(search),
       country: normalizeFilter(country),
       state: normalizeFilter(state),
       city: normalizeFilter(city),
       status,
     };
+
+    if (
+      filters.role_id !== null &&
+      !Number.isInteger(filters.role_id)
+    ) {
+      throw new Error("Invalid role_id");
+    }
 
     const isStaff = loggedInRoleId === 9;
     const canSeeAllUsers = [0, 1].includes(loggedInRoleId);
@@ -462,7 +476,8 @@ export const getAllUsers = async (
     }
 
     /*
-     * Resolve the logged-in Staff creator.
+     * Identify the Staff creator.
+     * Staff uses the creator's hierarchy as its scope.
      */
     let staffCreatorUserId = null;
     let staffCreatorRoleId = null;
@@ -501,10 +516,7 @@ export const getAllUsers = async (
       }
     }
 
-    /*
-     * Resolve the hierarchy scope.
-     * Staff uses the same hierarchy anchor as its creator.
-     */
+    // Use creator's hierarchy for Staff; otherwise use the logged-in user.
     const scopeUserId = isStaff
       ? staffCreatorUserId
       : loggedInUserId;
@@ -527,30 +539,38 @@ export const getAllUsers = async (
         )
       : null;
 
+    if (
+      useHierarchy &&
+      (!Number.isInteger(Number(hierarchyAnchorId)) ||
+        Number(hierarchyAnchorId) <= 0)
+    ) {
+      throw new Error("Unable to resolve hierarchy scope");
+    }
+
     /*
-     * Apply access rules consistently to count and list queries.
+     * Build the base query once.
+     * Do not replace an existing query inside applyAccessScope.
+     */
+    const buildBaseQuery = () => {
+      if (canSeeAllUsers) {
+        return db.from({ u: "users" });
+      }
+
+      return buildConnectedUserChain(
+        Number(hierarchyAnchorId),
+        false
+      ).from({ u: "users" });
+    };
+
+    /*
+     * Apply additional access rules for non-Staff hierarchy users.
+     * Staff already uses the creator's connected hierarchy.
      */
     const applyAccessScope = (query) => {
-      if (canSeeAllUsers) {
+      if (canSeeAllUsers || isStaff) {
         return query;
       }
 
-      /*
-       * Staff receives the creator's hierarchy scope.
-       * The logged-in Staff account itself is excluded later.
-       */
-      if (isStaff) {
-        query = buildConnectedUserChain(
-          hierarchyAnchorId,
-          false
-        ).from({ u: "users" });
-
-        return query;
-      }
-
-      /*
-       * Non-admin users use their existing hierarchy scope.
-       */
       query.leftJoin(
         { uc: "user_chain" },
         "uc.id",
@@ -571,25 +591,12 @@ export const getAllUsers = async (
     };
 
     /*
-     * Build the base query.
-     */
-    const buildBaseQuery = () => {
-      let query = db.from({ u: "users" });
-
-      if (useHierarchy) {
-        query = buildConnectedUserChain(
-          hierarchyAnchorId,
-          false
-        ).from({ u: "users" });
-      }
-
-      return applyAccessScope(query);
-    };
-
-    /*
      * COUNT QUERY
+     * Apply the same hierarchy and filters as the list query.
      */
-    const countQuery = buildBaseQuery()
+    const countQuery = applyAccessScope(
+      buildBaseQuery()
+    )
       .whereNot("u.id", loggedInUserId)
       .countDistinct({ total: "u.id" });
 
@@ -601,7 +608,9 @@ export const getAllUsers = async (
     /*
      * USER LIST QUERY
      */
-    const usersQuery = buildBaseQuery()
+    const usersQuery = applyAccessScope(
+      buildBaseQuery()
+    )
       .leftJoin(
         { parent: "users" },
         "parent.id",

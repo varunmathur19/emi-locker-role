@@ -884,8 +884,16 @@ export const loginUser = async (req, res) => {
 // GET ALL USERS
 export const getUsers = async (req, res) => {
     try {
-        const page = Math.max(Number(req.query.page) || 1, 1);
-        const limit = Math.max(Number(req.query.limit) || 10, 1);
+        const page = Math.max(
+            Number(req.query.page) || 1,
+            1
+        );
+
+        const limit = Math.max(
+            Number(req.query.limit) || 10,
+            1
+        );
+
         const offset = (page - 1) * limit;
 
         let role_id = null;
@@ -904,48 +912,36 @@ export const getUsers = async (req, res) => {
             }
         }
 
-        const search =
-            req.query.search !== undefined &&
-            String(req.query.search).trim() !== ""
-                ? String(req.query.search).trim()
-                : null;
+        const readQueryValue = (key) => {
+            const value = req.query[key];
 
-        const country =
-            req.query.country !== undefined &&
-            String(req.query.country).trim() !== ""
-                ? String(req.query.country).trim()
+            return value !== undefined &&
+                String(value).trim() !== ""
+                ? String(value).trim()
                 : null;
+        };
 
-        const state =
-            req.query.state !== undefined &&
-            String(req.query.state).trim() !== ""
-                ? String(req.query.state).trim()
-                : null;
-
-        const city =
-            req.query.city !== undefined &&
-            String(req.query.city).trim() !== ""
-                ? String(req.query.city).trim()
-                : null;
+        const search = readQueryValue("search");
+        const country = readQueryValue("country");
+        const state = readQueryValue("state");
+        const city = readQueryValue("city");
 
         let status = null;
 
-        if (
-            req.query.status !== undefined &&
-            String(req.query.status).trim() !== ""
-        ) {
-            const statusValue = String(req.query.status)
-                .trim()
-                .toLowerCase();
+        const statusValue = readQueryValue("status");
+
+        if (statusValue !== null) {
+            const normalizedStatus =
+                statusValue.toLowerCase();
 
             if (
-                statusValue === "active" ||
-                statusValue === "1"
+                normalizedStatus === "active" ||
+                normalizedStatus === "1"
             ) {
                 status = 1;
             } else if (
-                statusValue === "inactive" ||
-                statusValue === "0"
+                normalizedStatus === "inactive" ||
+                normalizedStatus === "0"
             ) {
                 status = 0;
             } else {
@@ -976,102 +972,173 @@ export const getUsers = async (req, res) => {
             });
         }
 
-        let staffRoleAccess = false;
+        const NEXT_ROLE_BY_ROLE = {
+            1: 2, // Admin -> CNF
+            2: 3, // CNF -> Super Distributor
+            3: 4, // Super Distributor -> Distributor
+            4: 5, // Distributor -> FOS
+            5: 6, // FOS -> Retailer
+            6: 7, // Retailer -> Sub Retailer
+            7: 8, // Sub Retailer -> Employee
+            8: 9, // Employee -> Staff
+        };
 
+        let staffRoleAccess = false;
+        let staffCreatorId = null;
+        let transferTargetRoleId = null;
+
+        /*
+         * STAFF ACCESS
+         *
+         * Target role is determined from the Staff creator,
+         * not from the role_id supplied by the frontend.
+         */
         if (loggedInRoleId === ROLES.STAFF) {
             staffRoleAccess = true;
 
-            if (role_id !== null) {
-                const [staffUser, requestedRole] =
-                    await Promise.all([
-                        db("users")
-                            .select(
-                                "id",
-                                "role_id",
-                                "role_permission_id"
-                            )
-                            .where("id", loggedInUserId)
-                            .first(),
+            const staffUser = await db("users")
+                .select(
+                    "id",
+                    "role_id",
+                    "role_permission_id",
+                    "created_by",
+                    "parent_id"
+                )
+                .where("id", loggedInUserId)
+                .first();
 
-                        getRoleForPermission(role_id),
-                    ]);
+            if (!staffUser) {
+                return res.status(404).json({
+                    success: false,
+                    message: "Logged-in staff user not found",
+                });
+            }
 
-                if (!staffUser) {
-                    return res.status(404).json({
-                        success: false,
-                        message: "Logged-in staff user not found",
-                    });
-                }
+            // Prefer created_by when it is the canonical
+            // creator field in your users table.
+            staffCreatorId = Number(
+                staffUser.created_by ||
+                staffUser.parent_id
+            );
 
-                if (requestedRole) {
-                    const permissions =
-                        await getStaffPermissions(
-                            staffUser
-                        );
+            if (
+                !Number.isInteger(staffCreatorId) ||
+                staffCreatorId <= 0
+            ) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Staff creator not found",
+                });
+            }
 
-                    const roleSlug = String(
-                        requestedRole?.slug || ""
+            const creator = await db("users")
+                .select("id", "role_id")
+                .where("id", staffCreatorId)
+                .first();
+
+            if (!creator) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Staff creator not found",
+                });
+            }
+
+            transferTargetRoleId =
+                NEXT_ROLE_BY_ROLE[
+                    Number(creator.role_id)
+                ];
+
+            if (!transferTargetRoleId) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "No next-level role is available for this Staff account",
+                });
+            }
+
+            /*
+             * If frontend supplies a role_id, do not allow it
+             * to override the hierarchy-derived target role.
+             */
+            role_id = transferTargetRoleId;
+
+            const requestedRole =
+                await getRoleForPermission(role_id);
+
+            if (!requestedRole) {
+                return res.status(403).json({
+                    success: false,
+                    message: "Target role not found",
+                });
+            }
+
+            const permissions =
+                await getStaffPermissions(staffUser);
+
+            const roleSlug = String(
+                requestedRole.slug || ""
+            )
+                .trim()
+                .toLowerCase();
+
+            const roleName = String(
+                requestedRole.name || ""
+            )
+                .trim()
+                .toLowerCase();
+
+            let requestedModule = null;
+
+            if (roleSlug) {
+                requestedModule = await db("modules")
+                    .select("id", "name", "slug")
+                    .whereRaw(
+                        "LOWER(TRIM(slug)) = ?",
+                        [roleSlug]
                     )
-                        .trim()
-                        .toLowerCase();
+                    .first();
+            }
 
-                    const roleName = String(
-                        requestedRole?.name || ""
+            if (!requestedModule && roleName) {
+                requestedModule = await db("modules")
+                    .select("id", "name", "slug")
+                    .whereRaw(
+                        "LOWER(TRIM(name)) = ?",
+                        [roleName]
                     )
-                        .trim()
-                        .toLowerCase();
+                    .first();
+            }
 
-                    let requestedModule = null;
+            if (!requestedModule) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "Target role module not found",
+                });
+            }
 
-                    if (roleSlug) {
-                        requestedModule =
-                            await db("modules")
-                                .select(
-                                    "id",
-                                    "name",
-                                    "slug"
-                                )
-                                .whereRaw(
-                                    "LOWER(TRIM(slug)) = ?",
-                                    [roleSlug]
-                                )
-                                .first();
-                    }
+            const hasAccess =
+                hasAnyStaffModulePermission(
+                    permissions,
+                    requestedModule.id
+                );
 
-                    if (!requestedModule && roleName) {
-                        requestedModule =
-                            await db("modules")
-                                .select(
-                                    "id",
-                                    "name",
-                                    "slug"
-                                )
-                                .whereRaw(
-                                    "LOWER(TRIM(name)) = ?",
-                                    [roleName]
-                                )
-                                .first();
-                    }
-
-                    if (requestedModule) {
-                        const hasAccess =
-                            hasAnyStaffModulePermission(
-                                permissions,
-                                requestedModule.id
-                            );
-
-                        if (!hasAccess) {
-                            return res.status(403).json({
-                                success: false,
-                                message:
-                                    "You are not allowed to access this role",
-                            });
-                        }
-                    }
-                }
+            if (!hasAccess) {
+                return res.status(403).json({
+                    success: false,
+                    message:
+                        "You are not allowed to access this role",
+                });
             }
         }
 
+        /*
+         * Existing user-fetch helper.
+         *
+         * IMPORTANT:
+         * getAllUsers must apply staffCreatorId as a database
+         * hierarchy filter. See section 2 below.
+         */
         const result = await getAllUsers(
             limit,
             offset,
@@ -1083,7 +1150,8 @@ export const getUsers = async (req, res) => {
             state,
             city,
             status,
-            staffRoleAccess
+            staffRoleAccess,
+            staffCreatorId
         );
 
         const users = await Promise.all(
@@ -1094,9 +1162,7 @@ export const getUsers = async (req, res) => {
                     try {
                         parsedPermission =
                             typeof user.role_permission === "string"
-                                ? JSON.parse(
-                                      user.role_permission
-                                  )
+                                ? JSON.parse(user.role_permission)
                                 : user.role_permission;
 
                         if (
@@ -1114,15 +1180,10 @@ export const getUsers = async (req, res) => {
                 let wallet_balance =
                     user.wallet_balance || [];
 
-                if (
-                    typeof wallet_balance ===
-                    "string"
-                ) {
+                if (typeof wallet_balance === "string") {
                     try {
                         wallet_balance =
-                            JSON.parse(
-                                wallet_balance
-                            );
+                            JSON.parse(wallet_balance);
                     } catch {
                         wallet_balance = [];
                     }
@@ -1130,8 +1191,7 @@ export const getUsers = async (req, res) => {
 
                 if (
                     !wallet_balance ||
-                    typeof wallet_balance !==
-                        "object"
+                    typeof wallet_balance !== "object"
                 ) {
                     wallet_balance = [];
                 }
@@ -1140,36 +1200,30 @@ export const getUsers = async (req, res) => {
                     user.parent_name || null;
 
                 let parent_organization_name =
-                    user.parent_organization_name ||
-                    null;
+                    user.parent_organization_name || null;
 
                 if (
                     Number(user.role_id) === 2 &&
                     user.parent_id
                 ) {
                     try {
-                        const parentUser =
-                            await db("users")
-                                .select(
-                                    "name",
-                                    "organization_name"
-                                )
-                                .where(
-                                    "id",
-                                    Number(
-                                        user.parent_id
-                                    )
-                                )
-                                .first();
+                        const parentUser = await db("users")
+                            .select(
+                                "name",
+                                "organization_name"
+                            )
+                            .where(
+                                "id",
+                                Number(user.parent_id)
+                            )
+                            .first();
 
                         if (parentUser) {
                             parent_name =
-                                parentUser.name ||
-                                null;
+                                parentUser.name || null;
 
                             parent_organization_name =
-                                parentUser.organization_name ||
-                                null;
+                                parentUser.organization_name || null;
                         }
                     } catch (parentError) {
                         console.error(
@@ -1181,28 +1235,14 @@ export const getUsers = async (req, res) => {
 
                 return {
                     ...user,
-
                     wallet_balance,
-
                     parent_name,
-
                     parent_organization_name,
-
                     role_permission: {
-                        id:
-                            user.role_permission_id ||
-                            null,
-
-                        profile_id:
-                            user.profile_id ||
-                            null,
-
-                        profile_name:
-                            user.profile_name ||
-                            null,
-
-                        permission:
-                            parsedPermission,
+                        id: user.role_permission_id || null,
+                        profile_id: user.profile_id || null,
+                        profile_name: user.profile_name || null,
+                        permission: parsedPermission,
                     },
                 };
             })
@@ -1210,34 +1250,28 @@ export const getUsers = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-
             pagination: {
                 currentPage: page,
-
-                totalPages:
-                    Math.ceil(
-                        result.total / limit
-                    ),
-
+                totalPages: Math.ceil(
+                    result.total / limit
+                ),
                 limit,
-
-                totalUsers:
-                    result.total,
+                totalUsers: result.total,
             },
-
             data: users,
+
+            // Frontend can use this for the Transfer To label.
+            ...(staffRoleAccess
+                ? { transferTargetRoleId }
+                : {}),
         });
     } catch (error) {
-        console.error(
-            "GET USERS ERROR:",
-            error
-        );
+        console.error("GET USERS ERROR:", error);
 
         return res.status(500).json({
             success: false,
             message:
-                error?.message ||
-                "Failed to get users",
+                error?.message || "Failed to get users",
         });
     }
 };
@@ -3482,35 +3516,86 @@ export const getCities = async (req, res) => {
 };
 
 //get key-setting data
+
+
 export const getKeySettings = async (req, res) => {
   try {
-    const userId = req.user.id;
+    const loggedInUserId = req.user?.id;
 
-    // Logged-in user's wallet
-    const user = await db("users")
-      .select("wallet_balance")
-      .where("id", userId)
+    if (!loggedInUserId) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized user",
+      });
+    }
+
+    // Fetch logged-in user's details
+    const loggedInUser = await db("users")
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "created_by",
+        "wallet_balance"
+      )
+      .where("id", loggedInUserId)
       .first();
 
-    if (!user) {
+    if (!loggedInUser) {
       return res.status(404).json({
         success: false,
         message: "User not found",
       });
     }
 
-    let walletBalance = user.wallet_balance || [];
+    /*
+     * Staff (role 9):
+     * Use creator Admin's wallet.
+     * Fall back to parent_id if created_by is missing.
+     *
+     * Other roles:
+     * Use their own wallet.
+     */
+    let walletUserId = loggedInUser.id;
 
-    // JSON string ko array mein convert karo
+    if (Number(loggedInUser.role_id) === 9) {
+      walletUserId =
+        loggedInUser.created_by ||
+        loggedInUser.parent_id;
+    }
+
+    if (!walletUserId) {
+      return res.status(400).json({
+        success: false,
+        message: "Staff parent or creator user not found",
+      });
+    }
+
+    // Fetch the selected wallet owner's balance
+    let walletUser = loggedInUser;
+
+    if (Number(walletUserId) !== Number(loggedInUser.id)) {
+      walletUser = await db("users")
+        .select("id", "wallet_balance")
+        .where("id", walletUserId)
+        .first();
+    }
+
+    if (!walletUser) {
+      return res.status(404).json({
+        success: false,
+        message: "Wallet owner not found",
+      });
+    }
+
+    // Parse wallet_balance safely
+    let walletBalance = walletUser.wallet_balance ?? [];
+
     if (typeof walletBalance === "string") {
       try {
         walletBalance = JSON.parse(walletBalance);
       } catch (error) {
-        console.error(
-          "WALLET BALANCE JSON ERROR:",
-          error
-        );
-
+        console.error("WALLET BALANCE JSON ERROR:", error);
         walletBalance = [];
       }
     }
@@ -3519,17 +3604,7 @@ export const getKeySettings = async (req, res) => {
       walletBalance = [];
     }
 
-    // console.log(
-    //   "USER ID:",
-    //   userId
-    // );
-
-    // console.log(
-    //   "WALLET BALANCE:",
-    //   walletBalance
-    // );
-
-    // Key settings
+    // Fetch active keys
     const keySettings = await db("key_setting")
       .select(
         "id",
@@ -3538,52 +3613,42 @@ export const getKeySettings = async (req, res) => {
         "created_at",
         "updated_at"
       )
+      .where("status", 1)
       .orderBy("id", "asc");
 
+    // Match keys with the selected wallet owner's balances
     const data = keySettings.map((key) => {
       const walletItem = walletBalance.find(
         (item) =>
-          String(item.name).trim().toLowerCase() ===
-          String(key.name).trim().toLowerCase()
+          String(item?.name ?? "").trim().toLowerCase() ===
+          String(key.name ?? "").trim().toLowerCase()
       );
 
       return {
         id: key.id,
         name: key.name,
         status: key.status,
-
-        // User ka actual balance
-        balance: Number(
-          walletItem?.balance || 0
-        ),
-
+        balance: Number(walletItem?.balance ?? 0),
         created_at: key.created_at,
         updated_at: key.updated_at,
       };
     });
 
-    // console.log(
-    //   "KEY SETTINGS WITH BALANCE:",
-    //   data
-    // );
-
     return res.status(200).json({
       success: true,
-      message:
-        "Key settings fetched successfully",
+      message: "Key settings fetched successfully",
       data,
     });
   } catch (error) {
-    console.error(
-      "GET KEY SETTINGS ERROR:",
-      error
-    );
+    console.error("GET KEY SETTINGS ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message:
-        "Failed to fetch key settings",
-      error: error.message,
+      message: "Failed to fetch key settings",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
