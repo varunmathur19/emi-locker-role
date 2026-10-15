@@ -882,399 +882,377 @@ export const loginUser = async (req, res) => {
 
 
 // GET ALL USERS
+
+
 export const getUsers = async (req, res) => {
-    try {
-        const page = Math.max(
-            Number(req.query.page) || 1,
-            1
-        );
+  try {
+    // Pagination
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const limit = Math.max(Number(req.query.limit) || 10, 1);
+    const offset = (page - 1) * limit;
 
-        const limit = Math.max(
-            Number(req.query.limit) || 10,
-            1
-        );
+    // Role filter
+    let role_id = null;
 
-        const offset = (page - 1) * limit;
+    if (
+      req.query.role_id !== undefined &&
+      String(req.query.role_id).trim() !== ""
+    ) {
+      role_id = Number(req.query.role_id);
 
-        let role_id = null;
-
-        if (
-            req.query.role_id !== undefined &&
-            String(req.query.role_id).trim() !== ""
-        ) {
-            role_id = Number(req.query.role_id);
-
-            if (!Number.isInteger(role_id)) {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid role_id",
-                });
-            }
-        }
-
-        const readQueryValue = (key) => {
-            const value = req.query[key];
-
-            return value !== undefined &&
-                String(value).trim() !== ""
-                ? String(value).trim()
-                : null;
-        };
-
-        const search = readQueryValue("search");
-        const country = readQueryValue("country");
-        const state = readQueryValue("state");
-        const city = readQueryValue("city");
-
-        let status = null;
-
-        const statusValue = readQueryValue("status");
-
-        if (statusValue !== null) {
-            const normalizedStatus =
-                statusValue.toLowerCase();
-
-            if (
-                normalizedStatus === "active" ||
-                normalizedStatus === "1"
-            ) {
-                status = 1;
-            } else if (
-                normalizedStatus === "inactive" ||
-                normalizedStatus === "0"
-            ) {
-                status = 0;
-            } else {
-                return res.status(400).json({
-                    success: false,
-                    message: "Invalid status",
-                });
-            }
-        }
-
-        const loggedInUserId = Number(req.user?.id);
-        const loggedInRoleId = Number(req.user?.role_id);
-
-        if (
-            !Number.isInteger(loggedInUserId) ||
-            loggedInUserId <= 0
-        ) {
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized user",
-            });
-        }
-
-        if (!Number.isInteger(loggedInRoleId)) {
-            return res.status(401).json({
-                success: false,
-                message: "Invalid logged-in user role",
-            });
-        }
-
-        const NEXT_ROLE_BY_ROLE = {
-            1: 2, // Admin -> CNF
-            2: 3, // CNF -> Super Distributor
-            3: 4, // Super Distributor -> Distributor
-            4: 5, // Distributor -> FOS
-            5: 6, // FOS -> Retailer
-            6: 7, // Retailer -> Sub Retailer
-            7: 8, // Sub Retailer -> Employee
-            8: 9, // Employee -> Staff
-        };
-
-        let staffRoleAccess = false;
-        let staffCreatorId = null;
-        let transferTargetRoleId = null;
-
-        /*
-         * STAFF ACCESS
-         *
-         * Target role is determined from the Staff creator,
-         * not from the role_id supplied by the frontend.
-         */
-        if (loggedInRoleId === ROLES.STAFF) {
-            staffRoleAccess = true;
-
-            const staffUser = await db("users")
-                .select(
-                    "id",
-                    "role_id",
-                    "role_permission_id",
-                    "created_by",
-                    "parent_id"
-                )
-                .where("id", loggedInUserId)
-                .first();
-
-            if (!staffUser) {
-                return res.status(404).json({
-                    success: false,
-                    message: "Logged-in staff user not found",
-                });
-            }
-
-            // Prefer created_by when it is the canonical
-            // creator field in your users table.
-            staffCreatorId = Number(
-                staffUser.created_by ||
-                staffUser.parent_id
-            );
-
-            if (
-                !Number.isInteger(staffCreatorId) ||
-                staffCreatorId <= 0
-            ) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Staff creator not found",
-                });
-            }
-
-            const creator = await db("users")
-                .select("id", "role_id")
-                .where("id", staffCreatorId)
-                .first();
-
-            if (!creator) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Staff creator not found",
-                });
-            }
-
-            transferTargetRoleId =
-                NEXT_ROLE_BY_ROLE[
-                    Number(creator.role_id)
-                ];
-
-            if (!transferTargetRoleId) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "No next-level role is available for this Staff account",
-                });
-            }
-
-            /*
-             * If frontend supplies a role_id, do not allow it
-             * to override the hierarchy-derived target role.
-             */
-            role_id = transferTargetRoleId;
-
-            const requestedRole =
-                await getRoleForPermission(role_id);
-
-            if (!requestedRole) {
-                return res.status(403).json({
-                    success: false,
-                    message: "Target role not found",
-                });
-            }
-
-            const permissions =
-                await getStaffPermissions(staffUser);
-
-            const roleSlug = String(
-                requestedRole.slug || ""
-            )
-                .trim()
-                .toLowerCase();
-
-            const roleName = String(
-                requestedRole.name || ""
-            )
-                .trim()
-                .toLowerCase();
-
-            let requestedModule = null;
-
-            if (roleSlug) {
-                requestedModule = await db("modules")
-                    .select("id", "name", "slug")
-                    .whereRaw(
-                        "LOWER(TRIM(slug)) = ?",
-                        [roleSlug]
-                    )
-                    .first();
-            }
-
-            if (!requestedModule && roleName) {
-                requestedModule = await db("modules")
-                    .select("id", "name", "slug")
-                    .whereRaw(
-                        "LOWER(TRIM(name)) = ?",
-                        [roleName]
-                    )
-                    .first();
-            }
-
-            if (!requestedModule) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "Target role module not found",
-                });
-            }
-
-            const hasAccess =
-                hasAnyStaffModulePermission(
-                    permissions,
-                    requestedModule.id
-                );
-
-            if (!hasAccess) {
-                return res.status(403).json({
-                    success: false,
-                    message:
-                        "You are not allowed to access this role",
-                });
-            }
-        }
-
-        /*
-         * Existing user-fetch helper.
-         *
-         * IMPORTANT:
-         * getAllUsers must apply staffCreatorId as a database
-         * hierarchy filter. See section 2 below.
-         */
-        const result = await getAllUsers(
-            limit,
-            offset,
-            role_id,
-            loggedInUserId,
-            loggedInRoleId,
-            search,
-            country,
-            state,
-            city,
-            status,
-            staffRoleAccess,
-            staffCreatorId
-        );
-
-        const users = await Promise.all(
-            result.users.map(async (user) => {
-                let parsedPermission = {};
-
-                if (user.role_permission) {
-                    try {
-                        parsedPermission =
-                            typeof user.role_permission === "string"
-                                ? JSON.parse(user.role_permission)
-                                : user.role_permission;
-
-                        if (
-                            !parsedPermission ||
-                            typeof parsedPermission !== "object" ||
-                            Array.isArray(parsedPermission)
-                        ) {
-                            parsedPermission = {};
-                        }
-                    } catch {
-                        parsedPermission = {};
-                    }
-                }
-
-                let wallet_balance =
-                    user.wallet_balance || [];
-
-                if (typeof wallet_balance === "string") {
-                    try {
-                        wallet_balance =
-                            JSON.parse(wallet_balance);
-                    } catch {
-                        wallet_balance = [];
-                    }
-                }
-
-                if (
-                    !wallet_balance ||
-                    typeof wallet_balance !== "object"
-                ) {
-                    wallet_balance = [];
-                }
-
-                let parent_name =
-                    user.parent_name || null;
-
-                let parent_organization_name =
-                    user.parent_organization_name || null;
-
-                if (
-                    Number(user.role_id) === 2 &&
-                    user.parent_id
-                ) {
-                    try {
-                        const parentUser = await db("users")
-                            .select(
-                                "name",
-                                "organization_name"
-                            )
-                            .where(
-                                "id",
-                                Number(user.parent_id)
-                            )
-                            .first();
-
-                        if (parentUser) {
-                            parent_name =
-                                parentUser.name || null;
-
-                            parent_organization_name =
-                                parentUser.organization_name || null;
-                        }
-                    } catch (parentError) {
-                        console.error(
-                            "CNF PARENT FETCH ERROR:",
-                            parentError
-                        );
-                    }
-                }
-
-                return {
-                    ...user,
-                    wallet_balance,
-                    parent_name,
-                    parent_organization_name,
-                    role_permission: {
-                        id: user.role_permission_id || null,
-                        profile_id: user.profile_id || null,
-                        profile_name: user.profile_name || null,
-                        permission: parsedPermission,
-                    },
-                };
-            })
-        );
-
-        return res.status(200).json({
-            success: true,
-            pagination: {
-                currentPage: page,
-                totalPages: Math.ceil(
-                    result.total / limit
-                ),
-                limit,
-                totalUsers: result.total,
-            },
-            data: users,
-
-            // Frontend can use this for the Transfer To label.
-            ...(staffRoleAccess
-                ? { transferTargetRoleId }
-                : {}),
+      if (!Number.isInteger(role_id) || role_id < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role_id",
         });
-    } catch (error) {
-        console.error("GET USERS ERROR:", error);
-
-        return res.status(500).json({
-            success: false,
-            message:
-                error?.message || "Failed to get users",
-        });
+      }
     }
+
+    // Query filters
+    const readQueryValue = (key) => {
+      const value = req.query[key];
+
+      return value !== undefined && String(value).trim() !== ""
+        ? String(value).trim()
+        : null;
+    };
+
+    const search = readQueryValue("search");
+    const country = readQueryValue("country");
+    const state = readQueryValue("state");
+    const city = readQueryValue("city");
+
+    // Status filter
+    let status = null;
+    const statusValue = readQueryValue("status");
+
+    if (statusValue !== null) {
+      const normalizedStatus = statusValue.toLowerCase();
+
+      if (
+        normalizedStatus === "active" ||
+        normalizedStatus === "1"
+      ) {
+        status = 1;
+      } else if (
+        normalizedStatus === "inactive" ||
+        normalizedStatus === "0"
+      ) {
+        status = 0;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status",
+        });
+      }
+    }
+
+    // Logged-in user validation
+    const loggedInUserId = Number(req.user?.id);
+    const loggedInRoleId = Number(req.user?.role_id);
+
+    if (
+      !Number.isInteger(loggedInUserId) ||
+      loggedInUserId <= 0
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized user",
+      });
+    }
+
+    if (!Number.isInteger(loggedInRoleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid logged-in user role",
+      });
+    }
+
+    // Existing role hierarchy
+    const NEXT_ROLE_BY_ROLE = {
+      1: 2, // Admin -> CNF
+      2: 3, // CNF -> Super Distributor
+      3: 4, // Super Distributor -> Distributor
+      4: 5, // Distributor -> FOS
+      5: 6, // FOS -> Retailer
+      6: 7, // Retailer -> Sub Retailer
+      7: 8, // Sub Retailer -> Employee
+      8: 9, // Employee -> Staff
+    };
+
+    let staffRoleAccess = false;
+    let staffCreatorId = null;
+    let transferTargetRoleId = null;
+
+    /*
+     * STAFF ACCESS
+     *
+     * The target role is determined by the Staff creator.
+     * The frontend cannot override the target role.
+     * Staff must have permission for the Transfer Points module.
+     */
+
+    if (loggedInRoleId === ROLES.STAFF) {
+      staffRoleAccess = true;
+
+      const staffUser = await db("users")
+        .select(
+          "id",
+          "role_id",
+          "role_permission_id",
+          "created_by",
+          "parent_id"
+        )
+        .where("id", loggedInUserId)
+        .first();
+
+      if (!staffUser) {
+        return res.status(404).json({
+          success: false,
+          message: "Logged-in staff user not found",
+        });
+      }
+
+      // Resolve Staff creator
+      const creatorValue =
+        staffUser.created_by ?? staffUser.parent_id;
+
+      staffCreatorId = Number(creatorValue);
+
+      if (
+        !Number.isInteger(staffCreatorId) ||
+        staffCreatorId <= 0 ||
+        staffCreatorId === loggedInUserId
+      ) {
+        return res.status(403).json({
+          success: false,
+          message: "Staff creator not found",
+        });
+      }
+
+      const creator = await db("users")
+        .select("id", "role_id")
+        .where("id", staffCreatorId)
+        .first();
+
+      if (!creator) {
+        return res.status(403).json({
+          success: false,
+          message: "Staff creator not found",
+        });
+      }
+
+      // Derive the target role from the creator's role
+      transferTargetRoleId =
+        NEXT_ROLE_BY_ROLE[Number(creator.role_id)];
+
+      if (!transferTargetRoleId) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "No next-level role is available for this Staff account",
+        });
+      }
+
+      // Never trust the frontend role for Staff
+      role_id = transferTargetRoleId;
+
+      // Verify the target role exists
+      const requestedRole =
+        await getRoleForPermission(role_id);
+
+      if (!requestedRole) {
+        return res.status(403).json({
+          success: false,
+          message: "Target role not found",
+        });
+      }
+
+      // Load configured Staff permissions
+      const permissions = await getStaffPermissions(staffUser);
+
+      /*
+       * Find Transfer Points module.
+       * Support common slug/name variations.
+       */
+      const transferModule = await db("modules")
+        .select("id", "name", "slug")
+        .where(function () {
+          this.whereRaw(
+            "LOWER(TRIM(slug)) IN (?, ?, ?, ?)",
+            [
+              "transfer-point",
+              "transfer-points",
+              "transfer_point",
+              "transfer_points",
+            ]
+          ).orWhereRaw(
+            "LOWER(TRIM(name)) = ?",
+            ["transfer points"]
+          );
+        })
+        .first();
+
+      if (!transferModule) {
+        console.error(
+          "TRANSFER POINTS MODULE NOT FOUND"
+        );
+
+        return res.status(403).json({
+          success: false,
+          message:
+            "Transfer Points module not found. Please verify its slug in the modules table.",
+        });
+      }
+
+      // Verify Staff has permission for this module
+      const hasTransferPermission =
+        hasAnyStaffModulePermission(
+          permissions,
+          transferModule.id
+        );
+
+      if (!hasTransferPermission) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "You do not have permission to access Transfer Points",
+        });
+      }
+    }
+
+    /*
+     * Fetch users.
+     *
+     * getAllUsers must apply staffCreatorId as a database
+     * hierarchy filter for Staff requests.
+     */
+    const result = await getAllUsers(
+      limit,
+      offset,
+      role_id,
+      loggedInUserId,
+      loggedInRoleId,
+      search,
+      country,
+      state,
+      city,
+      status,
+      staffRoleAccess,
+      staffCreatorId
+    );
+
+    // Normalize returned user data
+    const users = await Promise.all(
+      (result.users || []).map(async (user) => {
+        let parsedPermission = {};
+
+        if (user.role_permission) {
+          try {
+            parsedPermission =
+              typeof user.role_permission === "string"
+                ? JSON.parse(user.role_permission)
+                : user.role_permission;
+
+            if (
+              !parsedPermission ||
+              typeof parsedPermission !== "object" ||
+              Array.isArray(parsedPermission)
+            ) {
+              parsedPermission = {};
+            }
+          } catch {
+            parsedPermission = {};
+          }
+        }
+
+        let wallet_balance = user.wallet_balance || [];
+
+        if (typeof wallet_balance === "string") {
+          try {
+            wallet_balance = JSON.parse(wallet_balance);
+          } catch {
+            wallet_balance = [];
+          }
+        }
+
+        if (
+          !wallet_balance ||
+          typeof wallet_balance !== "object"
+        ) {
+          wallet_balance = [];
+        }
+
+        let parent_name = user.parent_name || null;
+        let parent_organization_name =
+          user.parent_organization_name || null;
+
+        // Preserve existing CNF parent details
+        if (
+          Number(user.role_id) === 2 &&
+          user.parent_id
+        ) {
+          try {
+            const parentUser = await db("users")
+              .select("name", "organization_name")
+              .where("id", Number(user.parent_id))
+              .first();
+
+            if (parentUser) {
+              parent_name = parentUser.name || null;
+              parent_organization_name =
+                parentUser.organization_name || null;
+            }
+          } catch (parentError) {
+            console.error(
+              "CNF PARENT FETCH ERROR:",
+              parentError
+            );
+          }
+        }
+
+        return {
+          ...user,
+          wallet_balance,
+          parent_name,
+          parent_organization_name,
+          role_permission: {
+            id: user.role_permission_id || null,
+            profile_id: user.profile_id || null,
+            profile_name: user.profile_name || null,
+            permission: parsedPermission,
+          },
+        };
+      })
+    );
+
+    return res.status(200).json({
+      success: true,
+      pagination: {
+        currentPage: page,
+        totalPages: Math.ceil(
+          (result.total || 0) / limit
+        ),
+        limit,
+        totalUsers: result.total || 0,
+      },
+      data: users,
+      ...(staffRoleAccess
+        ? { transferTargetRoleId }
+        : {}),
+    });
+  } catch (error) {
+    console.error("GET USERS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message:
+        error?.message || "Failed to get users",
+    });
+  }
 };
+
+
 // Logout api
   export const logoutUser = async(req,res)=>{
 
