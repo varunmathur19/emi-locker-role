@@ -885,6 +885,8 @@ export const loginUser = async (req, res) => {
 
 
 
+
+
 export const getUsers = async (req, res) => {
   try {
     // Pagination
@@ -913,7 +915,8 @@ export const getUsers = async (req, res) => {
     const readQueryValue = (key) => {
       const value = req.query[key];
 
-      return value !== undefined && String(value).trim() !== ""
+      return value !== undefined &&
+        String(value).trim() !== ""
         ? String(value).trim()
         : null;
     };
@@ -969,16 +972,16 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // Existing role hierarchy
+    // Role hierarchy
     const NEXT_ROLE_BY_ROLE = {
-      1: 2, // Admin -> CNF
-      2: 3, // CNF -> Super Distributor
-      3: 4, // Super Distributor -> Distributor
-      4: 5, // Distributor -> FOS
-      5: 6, // FOS -> Retailer
-      6: 7, // Retailer -> Sub Retailer
-      7: 8, // Sub Retailer -> Employee
-      8: 9, // Employee -> Staff
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
     };
 
     let staffRoleAccess = false;
@@ -987,8 +990,7 @@ export const getUsers = async (req, res) => {
 
     /*
      * STAFF ACCESS
-     * Target role is determined by the Staff creator.
-     * Only the creator's direct next-level users should be shown.
+     * Staff uses its creator's hierarchy.
      */
     if (loggedInRoleId === ROLES.STAFF) {
       staffRoleAccess = true;
@@ -1040,30 +1042,26 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Determine target role from creator's role
       transferTargetRoleId =
-        NEXT_ROLE_BY_ROLE[Number(creator.role_id)];
+        NEXT_ROLE_BY_ROLE[Number(creator.role_id)] ?? null;
 
-      if (!transferTargetRoleId) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "No next-level role is available for this Staff account",
-        });
+      /*
+       * Preserve the requested role from the dashboard.
+       * Use the creator's next-level role only as the default.
+       */
+      if (role_id === null) {
+        role_id = transferTargetRoleId;
       }
 
-      // Staff cannot override the target role from frontend
-      role_id = transferTargetRoleId;
+      if (role_id !== null) {
+        const requestedRole = await getRoleForPermission(role_id);
 
-      // Verify target role exists
-      const requestedRole =
-        await getRoleForPermission(role_id);
-
-      if (!requestedRole) {
-        return res.status(403).json({
-          success: false,
-          message: "Target role not found",
-        });
+        if (!requestedRole) {
+          return res.status(400).json({
+            success: false,
+            message: "Requested role not found",
+          });
+        }
       }
 
       // Load Staff permissions
@@ -1089,16 +1087,13 @@ export const getUsers = async (req, res) => {
         .first();
 
       if (!transferModule) {
-        console.error("TRANSFER POINTS MODULE NOT FOUND");
-
         return res.status(403).json({
           success: false,
-          message:
-            "Transfer Points module not found. Please verify its slug in the modules table.",
+          message: "Transfer Points module not found",
         });
       }
 
-      // Verify Staff has Transfer Points permission
+      // Validate Staff permission
       const hasTransferPermission =
         hasAnyStaffModulePermission(
           permissions,
@@ -1112,12 +1107,19 @@ export const getUsers = async (req, res) => {
             "You do not have permission to access Transfer Points",
         });
       }
+
+      console.log("STAFF USER LIST SCOPE:", {
+        staffId: loggedInUserId,
+        creatorId: staffCreatorId,
+        creatorRoleId: Number(creator.role_id),
+        requestedRoleId: role_id,
+      });
     }
 
     /*
      * Fetch users.
-     * staffCreatorId is passed to getAllUsers so its database
-     * query can restrict Staff results to the creator's users.
+     * getAllUsers must apply the creator's hierarchy scope
+     * for Staff and must apply role_id before pagination.
      */
     const result = await getAllUsers(
       limit,
@@ -1134,35 +1136,13 @@ export const getUsers = async (req, res) => {
       staffCreatorId
     );
 
-    /*
-     * Extra Staff-only safety filter.
-     * Normal logins retain the existing result unchanged.
-     *
-     * This assumes the returned user records include created_by
-     * or parent_id. The database query must also apply this
-     * condition before pagination for accurate pagination.
-     */
-    const resultUsers = Array.isArray(result.users)
+    const resultUsers = Array.isArray(result?.users)
       ? result.users
       : [];
 
-    const usersForResponse = staffRoleAccess
-      ? resultUsers.filter((user) => {
-          const ownerId = Number(
-            user.created_by ?? user.parent_id
-          );
-
-          return (
-            Number(user.role_id) ===
-              Number(transferTargetRoleId) &&
-            ownerId === Number(staffCreatorId)
-          );
-        })
-      : resultUsers;
-
-    // Normalize returned user data
+    // Normalize user data; do not post-filter hierarchy results
     const users = await Promise.all(
-      usersForResponse.map(async (user) => {
+      resultUsers.map(async (user) => {
         let parsedPermission = {};
 
         if (user.role_permission) {
@@ -1241,9 +1221,21 @@ export const getUsers = async (req, res) => {
       })
     );
 
-    const totalUsers = staffRoleAccess
-      ? users.length
-      : result.total || 0;
+    // Use database count for correct pagination
+    const totalUsers = Math.max(
+      Number(result?.total) || 0,
+      0
+    );
+
+    console.log("GET USERS RESULT:", {
+      userId: loggedInUserId,
+      roleId: loggedInRoleId,
+      isStaff: staffRoleAccess,
+      staffCreatorId,
+      requestedRoleId: role_id,
+      returnedUsers: users.length,
+      totalUsers,
+    });
 
     return res.status(200).json({
       success: true,
@@ -1263,11 +1255,11 @@ export const getUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message || "Failed to get users",
+      message: error?.message || "Failed to get users",
     });
   }
 };
+
 
 
 
