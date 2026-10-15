@@ -396,9 +396,6 @@ const getStaffCreatorUserId = async (staffUserId) => {
 };
 
 
-
-
-
 export const getAllUsers = async (
   limit,
   offset,
@@ -410,7 +407,8 @@ export const getAllUsers = async (
   state = null,
   city = null,
   status = null,
-  staffRoleAccess = false
+  staffRoleAccess = false,
+  staffCreatorId = null
 ) => {
   try {
     // Pagination
@@ -476,11 +474,24 @@ export const getAllUsers = async (
     }
 
     /*
-     * Identify the Staff creator.
-     * Staff uses the creator's hierarchy as its scope.
+     * STAFF ACCESS
+     * Staff can see only the next-level role users
+     * belonging to their creator.
      */
     let staffCreatorUserId = null;
     let staffCreatorRoleId = null;
+    let staffTargetRoleId = null;
+
+    const NEXT_ROLE_BY_ROLE = {
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
+    };
 
     if (isStaff) {
       const staffCreator = await db("users as staff")
@@ -491,13 +502,14 @@ export const getAllUsers = async (
         )
         .select(
           "staff.created_by",
+          "creator.id as creator_id",
           "creator.role_id as creator_role_id"
         )
         .where("staff.id", loggedInUserId)
         .first();
 
       staffCreatorUserId = Number(
-        staffCreator?.created_by
+        staffCreatorId || staffCreator?.creator_id
       );
 
       staffCreatorRoleId =
@@ -514,9 +526,28 @@ export const getAllUsers = async (
           "Staff creator could not be identified"
         );
       }
+
+      staffTargetRoleId =
+        NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
+
+      if (!Number.isInteger(staffTargetRoleId)) {
+        throw new Error(
+          "No next-level role is configured for this Staff creator"
+        );
+      }
+
+      // Force Staff to access only its creator's next-level role.
+      if (
+        filters.role_id !== null &&
+        filters.role_id !== staffTargetRoleId
+      ) {
+        filters.role_id = staffTargetRoleId;
+      } else {
+        filters.role_id = staffTargetRoleId;
+      }
     }
 
-    // Use creator's hierarchy for Staff; otherwise use the logged-in user.
+    // Use creator's hierarchy for Staff; otherwise use logged-in user.
     const scopeUserId = isStaff
       ? staffCreatorUserId
       : loggedInUserId;
@@ -548,8 +579,7 @@ export const getAllUsers = async (
     }
 
     /*
-     * Build the base query once.
-     * Do not replace an existing query inside applyAccessScope.
+     * Build the base query.
      */
     const buildBaseQuery = () => {
       if (canSeeAllUsers) {
@@ -563,11 +593,27 @@ export const getAllUsers = async (
     };
 
     /*
-     * Apply additional access rules for non-Staff hierarchy users.
-     * Staff already uses the creator's connected hierarchy.
+     * Apply access rules.
+     * Staff is filtered separately by creator and target role.
      */
     const applyAccessScope = (query) => {
-      if (canSeeAllUsers || isStaff) {
+      if (canSeeAllUsers) {
+        return query;
+      }
+
+      if (isStaff) {
+        query
+          .where("u.role_id", staffTargetRoleId)
+          .andWhere(function () {
+            this.where(
+              "u.created_by",
+              staffCreatorUserId
+            ).orWhere(
+              "u.parent_id",
+              staffCreatorUserId
+            );
+          });
+
         return query;
       }
 
@@ -592,7 +638,7 @@ export const getAllUsers = async (
 
     /*
      * COUNT QUERY
-     * Apply the same hierarchy and filters as the list query.
+     * Use the same access scope and filters as the list query.
      */
     const countQuery = applyAccessScope(
       buildBaseQuery()
@@ -652,6 +698,7 @@ export const getAllUsers = async (
     throw error;
   }
 };
+
 
 
 
