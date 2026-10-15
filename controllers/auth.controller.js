@@ -890,6 +890,7 @@ export const loginUser = async (req, res) => {
 
 
 
+
 export const getUsers = async (req, res) => {
   try {
     // 1. Pagination
@@ -901,7 +902,10 @@ export const getUsers = async (req, res) => {
     const loggedInUserId = Number(req.user?.id);
     const loggedInRoleId = Number(req.user?.role_id);
 
-    if (!Number.isInteger(loggedInUserId) || loggedInUserId <= 0) {
+    if (
+      !Number.isInteger(loggedInUserId) ||
+      loggedInUserId <= 0
+    ) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized user",
@@ -920,11 +924,28 @@ export const getUsers = async (req, res) => {
     const ADMIN_ROLE_ID = 1;
     const STAFF_ROLE_ID = 9;
 
-    const isMasterAdmin = loggedInRoleId === MASTER_ADMIN_ROLE_ID;
-    const isAdmin = loggedInRoleId === ADMIN_ROLE_ID;
-    const isStaff = loggedInRoleId === STAFF_ROLE_ID;
+    const isMasterAdmin =
+      loggedInRoleId === MASTER_ADMIN_ROLE_ID;
 
-    // 4. Read optional filters
+    const isAdmin =
+      loggedInRoleId === ADMIN_ROLE_ID;
+
+    const isStaff =
+      loggedInRoleId === STAFF_ROLE_ID;
+
+    const NEXT_ROLE_BY_ROLE = {
+      0: 1,
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
+    };
+
+    // 4. Read optional query parameters
     const readQueryValue = (key) => {
       const value = req.query[key];
 
@@ -940,6 +961,7 @@ export const getUsers = async (req, res) => {
     };
 
     let role_id = null;
+
     const roleValue = readQueryValue("role_id");
 
     if (roleValue !== null) {
@@ -960,6 +982,7 @@ export const getUsers = async (req, res) => {
 
     // 5. Status filter
     let status = null;
+
     const statusValue = readQueryValue("status");
 
     if (statusValue !== null) {
@@ -967,7 +990,9 @@ export const getUsers = async (req, res) => {
 
       if (["active", "1"].includes(normalizedStatus)) {
         status = 1;
-      } else if (["inactive", "0"].includes(normalizedStatus)) {
+      } else if (
+        ["inactive", "0"].includes(normalizedStatus)
+      ) {
         status = 0;
       } else {
         return res.status(400).json({
@@ -980,19 +1005,8 @@ export const getUsers = async (req, res) => {
     // 6. Staff scope and permissions
     let staffRoleAccess = false;
     let staffCreatorId = null;
-    let transferTargetRoleId = null;
     let staffCreatorRoleId = null;
-
-    const NEXT_ROLE_BY_ROLE = {
-      1: 2,
-      2: 3,
-      3: 4,
-      4: 5,
-      5: 6,
-      6: 7,
-      7: 8,
-      8: 9,
-    };
+    let transferTargetRoleId = null;
 
     if (isStaff) {
       const staffUser = await db("users")
@@ -1013,7 +1027,7 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Resolve Staff creator.
+      // Resolve creator
       const creatorValue =
         staffUser.created_by ?? staffUser.parent_id;
 
@@ -1044,15 +1058,22 @@ export const getUsers = async (req, res) => {
 
       staffCreatorRoleId = Number(creator.role_id);
 
+      // Determine the next hierarchy role
       transferTargetRoleId =
         NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
 
-      // IMPORTANT:
-      // Do not automatically force Staff to the creator's next role.
-      // Only apply role_id when the frontend explicitly requests it.
+      if (transferTargetRoleId === null) {
+        return res.status(403).json({
+          success: false,
+          message:
+            "No transfer target role is configured for this Staff creator",
+        });
+      }
 
+      // Validate explicitly requested role
       if (role_id !== null) {
-        const requestedRole = await getRoleForPermission(role_id);
+        const requestedRole =
+          await getRoleForPermission(role_id);
 
         if (!requestedRole) {
           return res.status(400).json({
@@ -1062,8 +1083,9 @@ export const getUsers = async (req, res) => {
         }
       }
 
-      // Preserve the existing Transfer Points permission validation.
-      const permissions = await getStaffPermissions(staffUser);
+      // Validate Staff permissions
+      const permissions =
+        await getStaffPermissions(staffUser);
 
       const transferModule = await db("modules")
         .select("id", "name", "slug")
@@ -1107,23 +1129,24 @@ export const getUsers = async (req, res) => {
         staffId: loggedInUserId,
         creatorId: staffCreatorId,
         creatorRoleId: staffCreatorRoleId,
+        transferTargetRoleId,
       });
     }
 
-    // 7. Determine full-user access.
-    // Staff inherits this access only when its creator is
-    // Admin or Master Admin.
+    // 7. Determine full-user access
     const canSeeAllUsers =
       isMasterAdmin ||
       isAdmin ||
       (
         isStaff &&
-        [MASTER_ADMIN_ROLE_ID, ADMIN_ROLE_ID].includes(
-          staffCreatorRoleId
-        )
+        [
+          MASTER_ADMIN_ROLE_ID,
+          ADMIN_ROLE_ID,
+        ].includes(staffCreatorRoleId)
       );
 
-    // 8. Fetch records
+    // 8. Fetch users
+    // IMPORTANT: Pass transferTargetRoleId to the model.
     const result = await getAllUsers(
       limit,
       offset,
@@ -1137,14 +1160,15 @@ export const getUsers = async (req, res) => {
       status,
       staffRoleAccess,
       staffCreatorId,
-      canSeeAllUsers
+      canSeeAllUsers,
+      transferTargetRoleId
     );
 
+    // 9. Normalize result
     const resultUsers = Array.isArray(result?.users)
       ? result.users
       : [];
 
-    // 9. Normalize records
     const users = await Promise.all(
       resultUsers.map(async (user) => {
         let parsedPermission = {};
@@ -1168,7 +1192,8 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        let wallet_balance = user.wallet_balance ?? [];
+        let wallet_balance =
+          user.wallet_balance ?? [];
 
         if (typeof wallet_balance === "string") {
           try {
@@ -1183,22 +1208,30 @@ export const getUsers = async (req, res) => {
         }
 
         let parent_name = user.parent_name || null;
+
         let parent_organization_name =
           user.parent_organization_name || null;
 
-        // Preserve CNF parent information.
-        if (Number(user.role_id) === 2 && user.parent_id) {
+        // Preserve CNF parent information
+        if (
+          Number(user.role_id) === 2 &&
+          user.parent_id
+        ) {
           const parentUser = await db("users")
             .select("name", "organization_name")
             .where("id", Number(user.parent_id))
             .first()
             .catch((error) => {
-              console.error("CNF PARENT FETCH ERROR:", error);
+              console.error(
+                "CNF PARENT FETCH ERROR:",
+                error
+              );
               return null;
             });
 
           if (parentUser) {
             parent_name = parentUser.name || null;
+
             parent_organization_name =
               parentUser.organization_name || null;
           }
@@ -1220,7 +1253,10 @@ export const getUsers = async (req, res) => {
     );
 
     // 10. Pagination and debug logs
-    const totalUsers = Math.max(Number(result?.total) || 0, 0);
+    const totalUsers = Math.max(
+      Number(result?.total) || 0,
+      0
+    );
 
     console.log("GET USERS RESULT:", {
       userId: loggedInUserId,
@@ -1229,7 +1265,8 @@ export const getUsers = async (req, res) => {
       staffCreatorId,
       staffCreatorRoleId,
       canSeeAllUsers,
-      roleFilter: role_id,
+      requestedRoleId: role_id,
+      transferTargetRoleId,
       returnedUsers: users.length,
       totalUsers,
       page,
@@ -1237,7 +1274,7 @@ export const getUsers = async (req, res) => {
       offset,
     });
 
-    // 11. Response
+    // 11. API response
     return res.status(200).json({
       success: true,
       pagination: {
@@ -1254,10 +1291,12 @@ export const getUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: error?.message || "Failed to get users",
+      message:
+        error?.message || "Failed to get users",
     });
   }
 };
+
 
 
 
