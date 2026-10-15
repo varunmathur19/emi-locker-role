@@ -887,78 +887,21 @@ export const loginUser = async (req, res) => {
 
 
 
+
+
+
 export const getUsers = async (req, res) => {
   try {
-    // Pagination
+    // 1. Pagination
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.max(Number(req.query.limit) || 10, 1);
     const offset = (page - 1) * limit;
 
-    // Role filter
-    let role_id = null;
-
-    if (
-      req.query.role_id !== undefined &&
-      String(req.query.role_id).trim() !== ""
-    ) {
-      role_id = Number(req.query.role_id);
-
-      if (!Number.isInteger(role_id) || role_id < 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid role_id",
-        });
-      }
-    }
-
-    // Query filters
-    const readQueryValue = (key) => {
-      const value = req.query[key];
-
-      return value !== undefined &&
-        String(value).trim() !== ""
-        ? String(value).trim()
-        : null;
-    };
-
-    const search = readQueryValue("search");
-    const country = readQueryValue("country");
-    const state = readQueryValue("state");
-    const city = readQueryValue("city");
-
-    // Status filter
-    let status = null;
-    const statusValue = readQueryValue("status");
-
-    if (statusValue !== null) {
-      const normalizedStatus = statusValue.toLowerCase();
-
-      if (
-        normalizedStatus === "active" ||
-        normalizedStatus === "1"
-      ) {
-        status = 1;
-      } else if (
-        normalizedStatus === "inactive" ||
-        normalizedStatus === "0"
-      ) {
-        status = 0;
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid status",
-        });
-      }
-    }
-
-    // Logged-in user validation
+    // 2. Validate logged-in user
     const loggedInUserId = Number(req.user?.id);
     const loggedInRoleId = Number(req.user?.role_id);
 
-    if (
-      !Number.isInteger(loggedInUserId) ||
-      loggedInUserId <= 0
-    ) {
+    if (!Number.isInteger(loggedInUserId) || loggedInUserId <= 0) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized user",
@@ -972,7 +915,74 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // Role hierarchy
+    // 3. Role configuration
+    const MASTER_ADMIN_ROLE_ID = 0;
+    const ADMIN_ROLE_ID = 1;
+    const STAFF_ROLE_ID = 9;
+
+    const isMasterAdmin = loggedInRoleId === MASTER_ADMIN_ROLE_ID;
+    const isAdmin = loggedInRoleId === ADMIN_ROLE_ID;
+    const isStaff = loggedInRoleId === STAFF_ROLE_ID;
+
+    // 4. Read optional filters
+    const readQueryValue = (key) => {
+      const value = req.query[key];
+
+      if (
+        value === undefined ||
+        value === null ||
+        String(value).trim() === ""
+      ) {
+        return null;
+      }
+
+      return String(value).trim();
+    };
+
+    let role_id = null;
+    const roleValue = readQueryValue("role_id");
+
+    if (roleValue !== null) {
+      role_id = Number(roleValue);
+
+      if (!Number.isInteger(role_id) || role_id < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role_id",
+        });
+      }
+    }
+
+    const search = readQueryValue("search");
+    const country = readQueryValue("country");
+    const state = readQueryValue("state");
+    const city = readQueryValue("city");
+
+    // 5. Status filter
+    let status = null;
+    const statusValue = readQueryValue("status");
+
+    if (statusValue !== null) {
+      const normalizedStatus = statusValue.toLowerCase();
+
+      if (["active", "1"].includes(normalizedStatus)) {
+        status = 1;
+      } else if (["inactive", "0"].includes(normalizedStatus)) {
+        status = 0;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status",
+        });
+      }
+    }
+
+    // 6. Staff scope and permissions
+    let staffRoleAccess = false;
+    let staffCreatorId = null;
+    let transferTargetRoleId = null;
+    let staffCreatorRoleId = null;
+
     const NEXT_ROLE_BY_ROLE = {
       1: 2,
       2: 3,
@@ -984,17 +994,7 @@ export const getUsers = async (req, res) => {
       8: 9,
     };
 
-    let staffRoleAccess = false;
-    let staffCreatorId = null;
-    let transferTargetRoleId = null;
-
-    /*
-     * STAFF ACCESS
-     * Staff uses its creator's hierarchy.
-     */
-    if (loggedInRoleId === ROLES.STAFF) {
-      staffRoleAccess = true;
-
+    if (isStaff) {
       const staffUser = await db("users")
         .select(
           "id",
@@ -1013,7 +1013,7 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Resolve Staff creator
+      // Resolve Staff creator.
       const creatorValue =
         staffUser.created_by ?? staffUser.parent_id;
 
@@ -1042,16 +1042,14 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      transferTargetRoleId =
-        NEXT_ROLE_BY_ROLE[Number(creator.role_id)] ?? null;
+      staffCreatorRoleId = Number(creator.role_id);
 
-      /*
-       * Preserve the requested role from the dashboard.
-       * Use the creator's next-level role only as the default.
-       */
-      if (role_id === null) {
-        role_id = transferTargetRoleId;
-      }
+      transferTargetRoleId =
+        NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
+
+      // IMPORTANT:
+      // Do not automatically force Staff to the creator's next role.
+      // Only apply role_id when the frontend explicitly requests it.
 
       if (role_id !== null) {
         const requestedRole = await getRoleForPermission(role_id);
@@ -1064,10 +1062,9 @@ export const getUsers = async (req, res) => {
         }
       }
 
-      // Load Staff permissions
+      // Preserve the existing Transfer Points permission validation.
       const permissions = await getStaffPermissions(staffUser);
 
-      // Find Transfer Points module
       const transferModule = await db("modules")
         .select("id", "name", "slug")
         .where(function () {
@@ -1093,14 +1090,12 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Validate Staff permission
-      const hasTransferPermission =
-        hasAnyStaffModulePermission(
-          permissions,
-          transferModule.id
-        );
+      staffRoleAccess = hasAnyStaffModulePermission(
+        permissions,
+        transferModule.id
+      );
 
-      if (!hasTransferPermission) {
+      if (!staffRoleAccess) {
         return res.status(403).json({
           success: false,
           message:
@@ -1108,19 +1103,27 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      console.log("STAFF USER LIST SCOPE:", {
+      console.log("STAFF CREATOR DETAILS:", {
         staffId: loggedInUserId,
         creatorId: staffCreatorId,
-        creatorRoleId: Number(creator.role_id),
-        requestedRoleId: role_id,
+        creatorRoleId: staffCreatorRoleId,
       });
     }
 
-    /*
-     * Fetch users.
-     * getAllUsers must apply the creator's hierarchy scope
-     * for Staff and must apply role_id before pagination.
-     */
+    // 7. Determine full-user access.
+    // Staff inherits this access only when its creator is
+    // Admin or Master Admin.
+    const canSeeAllUsers =
+      isMasterAdmin ||
+      isAdmin ||
+      (
+        isStaff &&
+        [MASTER_ADMIN_ROLE_ID, ADMIN_ROLE_ID].includes(
+          staffCreatorRoleId
+        )
+      );
+
+    // 8. Fetch records
     const result = await getAllUsers(
       limit,
       offset,
@@ -1133,14 +1136,15 @@ export const getUsers = async (req, res) => {
       city,
       status,
       staffRoleAccess,
-      staffCreatorId
+      staffCreatorId,
+      canSeeAllUsers
     );
 
     const resultUsers = Array.isArray(result?.users)
       ? result.users
       : [];
 
-    // Normalize user data; do not post-filter hierarchy results
+    // 9. Normalize records
     const users = await Promise.all(
       resultUsers.map(async (user) => {
         let parsedPermission = {};
@@ -1164,7 +1168,7 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        let wallet_balance = user.wallet_balance || [];
+        let wallet_balance = user.wallet_balance ?? [];
 
         if (typeof wallet_balance === "string") {
           try {
@@ -1182,27 +1186,21 @@ export const getUsers = async (req, res) => {
         let parent_organization_name =
           user.parent_organization_name || null;
 
-        // Preserve existing CNF parent details
-        if (
-          Number(user.role_id) === 2 &&
-          user.parent_id
-        ) {
-          try {
-            const parentUser = await db("users")
-              .select("name", "organization_name")
-              .where("id", Number(user.parent_id))
-              .first();
+        // Preserve CNF parent information.
+        if (Number(user.role_id) === 2 && user.parent_id) {
+          const parentUser = await db("users")
+            .select("name", "organization_name")
+            .where("id", Number(user.parent_id))
+            .first()
+            .catch((error) => {
+              console.error("CNF PARENT FETCH ERROR:", error);
+              return null;
+            });
 
-            if (parentUser) {
-              parent_name = parentUser.name || null;
-              parent_organization_name =
-                parentUser.organization_name || null;
-            }
-          } catch (parentError) {
-            console.error(
-              "CNF PARENT FETCH ERROR:",
-              parentError
-            );
+          if (parentUser) {
+            parent_name = parentUser.name || null;
+            parent_organization_name =
+              parentUser.organization_name || null;
           }
         }
 
@@ -1221,22 +1219,25 @@ export const getUsers = async (req, res) => {
       })
     );
 
-    // Use database count for correct pagination
-    const totalUsers = Math.max(
-      Number(result?.total) || 0,
-      0
-    );
+    // 10. Pagination and debug logs
+    const totalUsers = Math.max(Number(result?.total) || 0, 0);
 
     console.log("GET USERS RESULT:", {
       userId: loggedInUserId,
       roleId: loggedInRoleId,
-      isStaff: staffRoleAccess,
+      isStaff,
       staffCreatorId,
-      requestedRoleId: role_id,
+      staffCreatorRoleId,
+      canSeeAllUsers,
+      roleFilter: role_id,
       returnedUsers: users.length,
       totalUsers,
+      page,
+      limit,
+      offset,
     });
 
+    // 11. Response
     return res.status(200).json({
       success: true,
       pagination: {
@@ -1246,9 +1247,7 @@ export const getUsers = async (req, res) => {
         totalUsers,
       },
       data: users,
-      ...(staffRoleAccess
-        ? { transferTargetRoleId }
-        : {}),
+      ...(isStaff ? { transferTargetRoleId } : {}),
     });
   } catch (error) {
     console.error("GET USERS ERROR:", error);
@@ -1259,7 +1258,6 @@ export const getUsers = async (req, res) => {
     });
   }
 };
-
 
 
 
