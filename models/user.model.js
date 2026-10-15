@@ -396,6 +396,9 @@ const getStaffCreatorUserId = async (staffUserId) => {
 };
 
 
+
+
+
 export const getAllUsers = async (
   limit,
   offset,
@@ -410,6 +413,7 @@ export const getAllUsers = async (
   staffRoleAccess = false
 ) => {
   try {
+    // Pagination
     limit = Math.max(Number(limit) || 10, 1);
     offset = Math.max(Number(offset) || 0, 0);
 
@@ -440,167 +444,198 @@ export const getAllUsers = async (
       return String(value).trim();
     };
 
-    search = normalizeFilter(search);
-    country = normalizeFilter(country);
-    state = normalizeFilter(state);
-    city = normalizeFilter(city);
-
     const filters = {
-      role_id,
-      search,
-      country,
-      state,
-      city,
+      role_id:
+        role_id === null ||
+        role_id === undefined ||
+        String(role_id).trim() === ""
+          ? null
+          : Number(role_id),
+      search: normalizeFilter(search),
+      country: normalizeFilter(country),
+      state: normalizeFilter(state),
+      city: normalizeFilter(city),
       status,
     };
 
-    /*
-     * MASTER ADMIN:
-     * Role 0 can see all users.
-     *
-     * ADMIN AND OTHER ROLES:
-     * Only users returned by the logged-in user's
-     * connected hierarchy are visible.
-     *
-     * STAFF:
-     * Existing permission validation remains in getUsers.
-     */
-    const canSeeAllUsers =
-      loggedInRoleId === 0 ||
-      loggedInRoleId === 1;
-
-    // Keep staff permission access restricted.
     if (
-      loggedInRoleId === 9 &&
-      !staffRoleAccess
+      filters.role_id !== null &&
+      !Number.isInteger(filters.role_id)
     ) {
+      throw new Error("Invalid role_id");
+    }
+
+    const isStaff = loggedInRoleId === 9;
+    const canSeeAllUsers = [0, 1].includes(loggedInRoleId);
+    const useHierarchy = !canSeeAllUsers;
+
+    if (isStaff && !staffRoleAccess) {
       throw new Error(
         "Staff is not authorized to access this user list"
       );
     }
 
     /*
-     * Build the query with existing joins and selected fields.
+     * Identify the Staff creator.
+     * Staff uses the creator's hierarchy as its scope.
      */
-    const buildUsersQuery = (useHierarchy) => {
-      let query;
+    let staffCreatorUserId = null;
+    let staffCreatorRoleId = null;
 
-      if (useHierarchy) {
-        if (loggedInRoleId === 9) {
-          query = db
-            .from({ u: "users" })
-            .where("u.created_by", Number(staffCreatorUserId));
-        } else {
-          query = buildConnectedUserChain(
-            hierarchyAnchorId,
-            false
-          )
-            .from({ u: "users" })
-            .join(
-              { uc: "user_chain" },
-              "uc.id",
-              "u.id"
-            );
-        }
-      } else {
-        query = db.from({ u: "users" });
+    if (isStaff) {
+      const staffCreator = await db("users as staff")
+        .leftJoin(
+          "users as creator",
+          "creator.id",
+          "staff.created_by"
+        )
+        .select(
+          "staff.created_by",
+          "creator.role_id as creator_role_id"
+        )
+        .where("staff.id", loggedInUserId)
+        .first();
+
+      staffCreatorUserId = Number(
+        staffCreator?.created_by
+      );
+
+      staffCreatorRoleId =
+        staffCreator?.creator_role_id == null
+          ? null
+          : Number(staffCreator.creator_role_id);
+
+      if (
+        !Number.isInteger(staffCreatorUserId) ||
+        staffCreatorUserId <= 0 ||
+        !Number.isInteger(staffCreatorRoleId)
+      ) {
+        throw new Error(
+          "Staff creator could not be identified"
+        );
+      }
+    }
+
+    // Use creator's hierarchy for Staff; otherwise use the logged-in user.
+    const scopeUserId = isStaff
+      ? staffCreatorUserId
+      : loggedInUserId;
+
+    const scopeRoleId = isStaff
+      ? staffCreatorRoleId
+      : loggedInRoleId;
+
+    const effectiveScope = useHierarchy
+      ? await getEffectiveHierarchyScope(
+          scopeUserId,
+          scopeRoleId
+        )
+      : null;
+
+    const hierarchyAnchorId = useHierarchy
+      ? await getHierarchyAnchorUserId(
+          effectiveScope?.userId ?? scopeUserId,
+          effectiveScope?.roleId ?? scopeRoleId
+        )
+      : null;
+
+    if (
+      useHierarchy &&
+      (!Number.isInteger(Number(hierarchyAnchorId)) ||
+        Number(hierarchyAnchorId) <= 0)
+    ) {
+      throw new Error("Unable to resolve hierarchy scope");
+    }
+
+    /*
+     * Build the base query once.
+     * Do not replace an existing query inside applyAccessScope.
+     */
+    const buildBaseQuery = () => {
+      if (canSeeAllUsers) {
+        return db.from({ u: "users" });
       }
 
-      return query
-        .leftJoin(
-          { parent: "users" },
-          "parent.id",
-          "u.parent_id"
-        )
-        .leftJoin(
-          { creator: "users" },
-          "creator.id",
-          "u.created_by"
-        )
-        .leftJoin(
-          { rp: "role_permission" },
-          "rp.id",
-          "u.role_permission_id"
-        )
-        .leftJoin(
-          { p: "profile" },
-          "p.id",
-          "rp.profile_id"
-        );
+      return buildConnectedUserChain(
+        Number(hierarchyAnchorId),
+        false
+      ).from({ u: "users" });
     };
 
     /*
-     * MASTER ADMIN:
-     * Global data.
-     *
-     * EVERY OTHER ROLE:
-     * Hierarchy-scoped data.
+     * Apply additional access rules for non-Staff hierarchy users.
+     * Staff already uses the creator's connected hierarchy.
      */
-    const useHierarchy = !canSeeAllUsers;
-
-    const effectiveScope = useHierarchy
-      ? await getEffectiveHierarchyScope(loggedInUserId, loggedInRoleId)
-      : null;
-
-    const staffCreatorUserId =
-      loggedInRoleId === 9
-        ? await getStaffCreatorUserId(loggedInUserId)
-        : null;
-
-    const hierarchyAnchorId = useHierarchy
-      ? loggedInRoleId === 9
-        ? staffCreatorUserId
-        : await getHierarchyAnchorUserId(
-            effectiveScope?.userId ?? loggedInUserId,
-            effectiveScope?.roleId ?? loggedInRoleId
-          )
-      : null;
-
-    // Count query: same scope and filters as the list query.
-    let countQuery;
-
-    if (useHierarchy) {
-      if (loggedInRoleId === 9) {
-        countQuery = db
-          .from({ u: "users" })
-          .where("u.created_by", Number(staffCreatorUserId))
-          .whereNot("u.id", loggedInUserId)
-          .countDistinct({ total: "u.id" });
-      } else {
-        countQuery = buildConnectedUserChain(
-          hierarchyAnchorId,
-          false
-        )
-          .from({ u: "users" })
-          .join(
-            { uc: "user_chain" },
-            "uc.id",
-            "u.id"
-          )
-          .whereNot("u.id", loggedInUserId)
-          .countDistinct({ total: "u.id" });
+    const applyAccessScope = (query) => {
+      if (canSeeAllUsers || isStaff) {
+        return query;
       }
-    } else {
-      countQuery = db
-        .from({ u: "users" })
-        .countDistinct({ total: "u.id" });
-    }
+
+      query.leftJoin(
+        { uc: "user_chain" },
+        "uc.id",
+        "u.id"
+      );
+
+      query.where(function () {
+        this.where(function () {
+          this.where("u.role_id", "!=", 9)
+            .whereNotNull("uc.id");
+        }).orWhere(function () {
+          this.where("u.role_id", 9)
+            .andWhere("u.parent_id", loggedInUserId);
+        });
+      });
+
+      return query;
+    };
+
+    /*
+     * COUNT QUERY
+     * Apply the same hierarchy and filters as the list query.
+     */
+    const countQuery = applyAccessScope(
+      buildBaseQuery()
+    )
+      .whereNot("u.id", loggedInUserId)
+      .countDistinct({ total: "u.id" });
 
     applyFilters(countQuery, filters);
 
     const countResult = await countQuery.first();
     const total = Number(countResult?.total || 0);
 
-    // User list query
-    let usersQuery = buildUsersQuery(useHierarchy)
+    /*
+     * USER LIST QUERY
+     */
+    const usersQuery = applyAccessScope(
+      buildBaseQuery()
+    )
+      .leftJoin(
+        { parent: "users" },
+        "parent.id",
+        "u.parent_id"
+      )
+      .leftJoin(
+        { creator: "users" },
+        "creator.id",
+        "u.created_by"
+      )
+      .leftJoin(
+        { rp: "role_permission" },
+        "rp.id",
+        "u.role_permission_id"
+      )
+      .leftJoin(
+        { p: "profile" },
+        "p.id",
+        "rp.profile_id"
+      )
       .select(selectUserFields)
       .distinct("u.id")
       .orderBy("u.id", "desc");
 
-    // Do not include the currently logged-in user in their downline.
-    if (useHierarchy) {
-      usersQuery.whereNot("u.id", loggedInUserId);
-    }
+    usersQuery.whereNot("u.id", loggedInUserId);
 
     applyFilters(usersQuery, filters);
 
@@ -613,14 +648,13 @@ export const getAllUsers = async (
       total,
     };
   } catch (error) {
-    console.error(
-      "GET ALL USERS MODEL ERROR:",
-      error
-    );
-
+    console.error("GET ALL USERS MODEL ERROR:", error);
     throw error;
   }
 };
+
+
+
 
 //get getAllHierarchyUsers 
 export const getAllHierarchyUsers = async () => {
