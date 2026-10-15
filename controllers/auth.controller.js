@@ -3694,448 +3694,545 @@ export const updateKeySetting = async (req, res) => {
 };
 
 //post the transactione data
+
+
+
+
 export const transferWalletPoints = async (req, res) => {
-    const trx = await db.transaction();
-
-    try {
-        const fromUserId = Number(req.user?.id);
-
-        const {
-            to_user_id,
-            key_setting_id,
-            points_sent,
-            transaction_type,
-            transaction_pin,
-        } = req.body;
-
-        if (!fromUserId) {
-            await trx.rollback();
-
-            return res.status(401).json({
-                success: false,
-                message: "Unauthorized",
-            });
-        }
-
-        if (
-            transaction_pin === undefined ||
-            transaction_pin === null ||
-            String(transaction_pin).trim() === ""
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Transaction PIN is required",
-            });
-        }
-
-        const toUserId = Number(to_user_id);
-        const keySettingId = Number(key_setting_id);
-        const points = Number(points_sent);
-        const transactionType = Number(transaction_type);
-
-        if (
-            !Number.isInteger(toUserId) ||
-            toUserId <= 0
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Valid user id is required",
-            });
-        }
-
-        if (
-            !Number.isInteger(keySettingId) ||
-            keySettingId <= 0
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Valid key setting id is required",
-            });
-        }
-
-        if (
-            !Number.isFinite(points) ||
-            points <= 0
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Points must be greater than 0",
-            });
-        }
-
-        if (
-            ![0, 1, 2].includes(transactionType)
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Valid transaction type is required",
-            });
-        }
-
-        if (fromUserId === toUserId) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "You cannot select yourself",
-            });
-        }
-
-        const keySetting = await trx("key_setting")
-            .select(
-                "id",
-                "name",
-                "status"
-            )
-            .where("id", keySettingId)
-            .first();
-
-        if (!keySetting) {
-            await trx.rollback();
-
-            return res.status(404).json({
-                success: false,
-                message: "Key setting not found",
-            });
-        }
-
-        if (Number(keySetting.status) !== 1) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Selected key setting is inactive",
-            });
-        }
-
-        const sender = await trx("users")
-            .select(
-                "id",
-                "role_id",
-                "parent_id",
-                "wallet_balance",
-                "transaction_pin"
-            )
-            .where("id", fromUserId)
-            .forUpdate()
-            .first();
-
-        if (!sender) {
-            await trx.rollback();
-
-            return res.status(404).json({
-                success: false,
-                message: "Sender user not found",
-            });
-        }
-
-        if (
-            String(sender.transaction_pin) !==
-            String(transaction_pin).trim()
-        ) {
-            await trx.rollback();
-
-            return res.status(400).json({
-                success: false,
-                message: "Invalid transaction PIN",
-            });
-        }
-
-        const receiver = await trx("users")
-            .select(
-                "id",
-                "role_id",
-                "parent_id",
-                "wallet_balance"
-            )
-            .where("id", toUserId)
-            .forUpdate()
-            .first();
-
-        if (!receiver) {
-            await trx.rollback();
-
-            return res.status(404).json({
-                success: false,
-                message: "Selected user not found",
-            });
-        }
-
-        let senderWallet = sender.wallet_balance || [];
-        let receiverWallet = receiver.wallet_balance || [];
-
-        if (typeof senderWallet === "string") {
-            try {
-                senderWallet = JSON.parse(senderWallet);
-            } catch {
-                senderWallet = [];
-            }
-        }
-
-        if (typeof receiverWallet === "string") {
-            try {
-                receiverWallet = JSON.parse(receiverWallet);
-            } catch {
-                receiverWallet = [];
-            }
-        }
-
-        if (!Array.isArray(senderWallet)) {
-            senderWallet = [];
-        }
-
-        if (!Array.isArray(receiverWallet)) {
-            receiverWallet = [];
-        }
-
-        const keyName = String(
-            keySetting.name || ""
-        )
-            .trim()
-            .toLowerCase();
-
-        const senderWalletIndex =
-            senderWallet.findIndex(
-                (item) =>
-                    String(item?.name || "")
-                        .trim()
-                        .toLowerCase() === keyName
-            );
-
-        const receiverWalletIndex =
-            receiverWallet.findIndex(
-                (item) =>
-                    String(item?.name || "")
-                        .trim()
-                        .toLowerCase() === keyName
-            );
-
-        const senderBalance =
-            senderWalletIndex >= 0
-                ? Number(
-                      senderWallet[
-                          senderWalletIndex
-                      ]?.balance || 0
-                  )
-                : 0;
-
-        const receiverBalance =
-            receiverWalletIndex >= 0
-                ? Number(
-                      receiverWallet[
-                          receiverWalletIndex
-                      ]?.balance || 0
-                  )
-                : 0;
-
-        let fromBalanceBefore = senderBalance;
-        let fromBalanceAfter = senderBalance;
-
-        let toBalanceBefore = receiverBalance;
-        let toBalanceAfter = receiverBalance;
-
-        if (transactionType === 2) {
-            if (receiverBalance < points) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Selected user has insufficient balance",
-                    available_balance: receiverBalance,
-                    requested_points: points,
-                });
-            }
-
-            if (senderWalletIndex < 0) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Selected key setting balance not found in sender wallet",
-                });
-            }
-
-            if (receiverWalletIndex < 0) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Selected key setting balance not found in selected user wallet",
-                });
-            }
-
-            fromBalanceBefore = senderBalance;
-            toBalanceBefore = receiverBalance;
-
-            fromBalanceAfter =
-                senderBalance + points;
-
-            toBalanceAfter =
-                receiverBalance - points;
-
-            senderWallet[
-                senderWalletIndex
-            ] = {
-                ...senderWallet[
-                    senderWalletIndex
-                ],
-                balance: fromBalanceAfter,
-            };
-
-            receiverWallet[
-                receiverWalletIndex
-            ] = {
-                ...receiverWallet[
-                    receiverWalletIndex
-                ],
-                balance: toBalanceAfter,
-            };
-        } else {
-            if (senderBalance < points) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message: "Insufficient wallet balance",
-                    available_balance: senderBalance,
-                    requested_points: points,
-                });
-            }
-
-            if (senderWalletIndex < 0) {
-                await trx.rollback();
-
-                return res.status(400).json({
-                    success: false,
-                    message:
-                        "Selected key setting balance not found in sender wallet",
-                });
-            }
-
-            fromBalanceBefore = senderBalance;
-            toBalanceBefore = receiverBalance;
-
-            fromBalanceAfter =
-                senderBalance - points;
-
-            toBalanceAfter =
-                receiverBalance + points;
-
-            senderWallet[
-                senderWalletIndex
-            ] = {
-                ...senderWallet[
-                    senderWalletIndex
-                ],
-                balance: fromBalanceAfter,
-            };
-
-            if (receiverWalletIndex >= 0) {
-                receiverWallet[
-                    receiverWalletIndex
-                ] = {
-                    ...receiverWallet[
-                        receiverWalletIndex
-                    ],
-                    balance: toBalanceAfter,
-                };
-            } else {
-                receiverWallet.push({
-                    name: keySetting.name,
-                    balance: toBalanceAfter,
-                });
-            }
-        }
-
-        await trx("users")
-            .where("id", fromUserId)
-            .update({
-                wallet_balance:
-                    JSON.stringify(senderWallet),
-            });
-
-        await trx("users")
-            .where("id", toUserId)
-            .update({
-                wallet_balance:
-                    JSON.stringify(receiverWallet),
-            });
-
-        const [transactionId] =
-            await trx("wallet").insert({
-                from_user_id: fromUserId,
-                to_user_id: toUserId,
-                key_setting_id: keySettingId,
-                points_sent: points,
-                from_balance_before:
-                    fromBalanceBefore,
-                from_balance_after:
-                    fromBalanceAfter,
-                to_balance_before:
-                    toBalanceBefore,
-                to_balance_after:
-                    toBalanceAfter,
-                transaction_type:
-                    transactionType,
-                created_by: fromUserId,
-            });
-
-        await trx.commit();
-
-        return res.status(200).json({
-            success: true,
-            message:
-                transactionType === 2
-                    ? "Points reverted successfully"
-                    : "Points transferred successfully",
-            data: {
-                transaction_id: transactionId,
-                from_user_id: fromUserId,
-                to_user_id: toUserId,
-                key_setting_id: keySettingId,
-                key_name: keySetting.name,
-                points_sent: points,
-                from_balance_before:
-                    fromBalanceBefore,
-                from_balance_after:
-                    fromBalanceAfter,
-                to_balance_before:
-                    toBalanceBefore,
-                to_balance_after:
-                    toBalanceAfter,
-                transaction_type:
-                    transactionType,
-            },
-        });
-    } catch (error) {
-        await trx.rollback();
-
-        console.error(
-            "TRANSFER WALLET POINTS ERROR:",
-            error
-        );
-
-        return res.status(500).json({
-            success: false,
-            message:
-                "Failed to transfer wallet points",
-            error: error.message,
-        });
+  let trx;
+
+  const rollbackAndRespond = async (status, payload) => {
+    if (trx) {
+      await trx.rollback();
+      trx = null;
     }
+
+    return res.status(status).json(payload);
+  };
+
+  try {
+    trx = await db.transaction();
+
+    const actorId = Number(req.user?.id);
+
+    const {
+      to_user_id,
+      key_setting_id,
+      points_sent,
+      transaction_type,
+      transaction_pin,
+    } = req.body;
+
+    // 1. Validate logged-in user
+    if (!Number.isInteger(actorId) || actorId <= 0) {
+      return await rollbackAndRespond(401, {
+        success: false,
+        message: "Unauthorized",
+      });
+    }
+
+    // 2. Validate request payload
+    const toUserId = Number(to_user_id);
+    const keySettingId = Number(key_setting_id);
+    const points = Number(points_sent);
+    const transactionType = Number(transaction_type);
+
+    if (!Number.isInteger(toUserId) || toUserId <= 0) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Valid user id is required",
+      });
+    }
+
+    if (!Number.isInteger(keySettingId) || keySettingId <= 0) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Valid key setting id is required",
+      });
+    }
+
+    if (!Number.isFinite(points) || points <= 0) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Points must be greater than 0",
+      });
+    }
+
+    if (![0, 1, 2].includes(transactionType)) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Valid transaction type is required",
+      });
+    }
+
+    if (
+      transaction_pin === undefined ||
+      transaction_pin === null ||
+      String(transaction_pin).trim() === ""
+    ) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Transaction PIN is required",
+      });
+    }
+
+    // 3. Fetch the logged-in account
+    const actor = await trx("users")
+      .select("id", "role_id", "parent_id", "transaction_pin")
+      .where("id", actorId)
+      .forUpdate()
+      .first();
+
+    if (!actor) {
+      return await rollbackAndRespond(404, {
+        success: false,
+        message: "Logged-in user not found",
+      });
+    }
+
+    // 4. Verify PIN against the logged-in account
+    if (
+      String(actor.transaction_pin ?? "").trim() !==
+      String(transaction_pin).trim()
+    ) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Invalid transaction PIN",
+      });
+    }
+
+    // 5. Determine the account whose wallet is used
+    const actorRoleId = Number(actor.role_id);
+
+    const walletOwnerId =
+      actorRoleId === 9
+        ? Number(actor.parent_id)
+        : actorId;
+
+    if (
+      !Number.isInteger(walletOwnerId) ||
+      walletOwnerId <= 0
+    ) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Staff parent account is not configured",
+        actor_id: actorId,
+        actor_role_id: actorRoleId,
+        parent_id: actor.parent_id,
+      });
+    }
+
+    if (toUserId === actorId) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "You cannot select yourself",
+      });
+    }
+
+    if (toUserId === walletOwnerId) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "You cannot transfer points to your wallet owner",
+      });
+    }
+
+    // 6. Validate selected key setting
+    const keySetting = await trx("key_setting")
+      .select("id", "name", "status")
+      .where("id", keySettingId)
+      .first();
+
+    if (!keySetting) {
+      return await rollbackAndRespond(404, {
+        success: false,
+        message: "Key setting not found",
+      });
+    }
+
+    if (Number(keySetting.status) !== 1) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Selected key setting is inactive",
+      });
+    }
+
+    // 7. Lock wallet owner's row
+    const walletOwner = await trx("users")
+      .select("id", "role_id", "parent_id", "wallet_balance")
+      .where("id", walletOwnerId)
+      .forUpdate()
+      .first();
+
+    if (!walletOwner) {
+      return await rollbackAndRespond(404, {
+        success: false,
+        message: "Wallet owner / parent account not found",
+        wallet_owner_id: walletOwnerId,
+      });
+    }
+
+    // 8. Lock receiver's row
+    const receiver = await trx("users")
+      .select("id", "role_id", "parent_id", "wallet_balance")
+      .where("id", toUserId)
+      .forUpdate()
+      .first();
+
+    if (!receiver) {
+      return await rollbackAndRespond(404, {
+        success: false,
+        message: "Selected user not found",
+      });
+    }
+
+    // 9. Parse wallet balance
+    const parseWallet = (value) => {
+      if (
+        value === null ||
+        value === undefined ||
+        value === ""
+      ) {
+        return [];
+      }
+
+      let parsed = value;
+
+      if (typeof parsed === "string") {
+        try {
+          parsed = JSON.parse(parsed);
+        } catch {
+          return null;
+        }
+      }
+
+      if (Array.isArray(parsed)) {
+        return parsed;
+      }
+
+      if (parsed && typeof parsed === "object") {
+        return Object.entries(parsed).map(([key, entry]) => {
+          if (
+            entry !== null &&
+            typeof entry === "object" &&
+            !Array.isArray(entry)
+          ) {
+            return {
+              ...entry,
+              _wallet_object_key: key,
+            };
+          }
+
+          return {
+            _wallet_object_key: key,
+            balance: entry,
+          };
+        });
+      }
+
+      return null;
+    };
+
+    const ownerWallet = parseWallet(walletOwner.wallet_balance);
+    const receiverWallet = parseWallet(receiver.wallet_balance);
+
+    if (!ownerWallet || !receiverWallet) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Invalid wallet balance format",
+        wallet_owner_id: walletOwnerId,
+      });
+    }
+
+    // 10. Match wallet entries with the selected key
+    const normalize = (value) =>
+      String(value ?? "").trim().toLowerCase();
+
+    const normalizedKeyName = normalize(keySetting.name);
+
+    const matchesKeySetting = (item) => {
+      if (!item || typeof item !== "object") {
+        return false;
+      }
+
+      const idCandidates = [
+        item.key_setting_id,
+        item.keySettingId,
+        item.key_id,
+        item.keyId,
+        item.key_setting?.id,
+        item.keySetting?.id,
+      ].filter(
+        (value) =>
+          value !== undefined &&
+          value !== null &&
+          value !== ""
+      );
+
+      const nameCandidates = [
+        item.key_setting_name,
+        item.keySettingName,
+        item.key_name,
+        item.keyName,
+        item.name,
+        item.key_setting?.name,
+        item.keySetting?.name,
+      ];
+
+      const hasExplicitKeyId = idCandidates.length > 0;
+
+      const matchesId = idCandidates.some(
+        (value) => Number(value) === keySettingId
+      );
+
+      const matchesName = nameCandidates.some(
+        (value) =>
+          value !== undefined &&
+          value !== null &&
+          normalize(value) === normalizedKeyName
+      );
+
+      const objectKey = normalize(item._wallet_object_key);
+
+      const matchesObjectKey =
+        objectKey === String(keySettingId) ||
+        objectKey === normalizedKeyName;
+
+      if (hasExplicitKeyId) {
+        return matchesId || matchesName || matchesObjectKey;
+      }
+
+      return matchesName || matchesObjectKey;
+    };
+
+    const ownerWalletIndex = ownerWallet.findIndex(matchesKeySetting);
+    const receiverWalletIndex = receiverWallet.findIndex(matchesKeySetting);
+
+    const readBalance = (wallet, index) => {
+      if (index < 0) {
+        return 0;
+      }
+
+      const entry = wallet[index];
+
+      const rawBalance =
+        entry?.balance ??
+        entry?.amount ??
+        entry?.points ??
+        entry?.wallet_balance;
+
+      if (
+        rawBalance === undefined ||
+        rawBalance === null ||
+        rawBalance === ""
+      ) {
+        return 0;
+      }
+
+      const balance = Number(rawBalance);
+
+      return Number.isFinite(balance) ? balance : NaN;
+    };
+
+    const ownerBalance = readBalance(ownerWallet, ownerWalletIndex);
+    const receiverBalance = readBalance(receiverWallet, receiverWalletIndex);
+
+    if (
+      !Number.isFinite(ownerBalance) ||
+      !Number.isFinite(receiverBalance) ||
+      ownerBalance < 0 ||
+      receiverBalance < 0
+    ) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Invalid wallet balance",
+        wallet_owner_id: walletOwnerId,
+        key_setting_id: keySettingId,
+      });
+    }
+
+    // 11. Require the selected key in the wallet being debited/credited
+    if (ownerWalletIndex < 0) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message:
+          "Selected key setting balance not found in wallet owner's wallet",
+        actor_id: actorId,
+        actor_role_id: actorRoleId,
+        parent_id: actor.parent_id,
+        wallet_owner_id: walletOwnerId,
+        key_setting_id: keySettingId,
+        key_setting_name: keySetting.name,
+        available_balance: 0,
+        requested_points: points,
+        wallet_entries: ownerWallet.map((item) => ({
+          key_setting_id:
+            item?.key_setting_id ??
+            item?.keySettingId ??
+            item?.key_id ??
+            null,
+          name:
+            item?.key_setting_name ??
+            item?.keySettingName ??
+            item?.key_name ??
+            item?.name ??
+            null,
+          balance:
+            item?.balance ??
+            item?.amount ??
+            item?.points ??
+            item?.wallet_balance ??
+            null,
+        })),
+      });
+    }
+
+    // 12. Validate balances by transaction type
+    if (transactionType === 2) {
+      // Revert: selected receiver sends points back to wallet owner.
+      if (receiverWalletIndex < 0) {
+        return await rollbackAndRespond(400, {
+          success: false,
+          message:
+            "Selected key setting balance not found in selected user wallet",
+          to_user_id: toUserId,
+          key_setting_id: keySettingId,
+          key_setting_name: keySetting.name,
+        });
+      }
+
+      if (receiverBalance < points) {
+        return await rollbackAndRespond(400, {
+          success: false,
+          message: "Selected user has insufficient balance",
+          available_balance: receiverBalance,
+          requested_points: points,
+        });
+      }
+    } else if (ownerBalance < points) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Insufficient wallet balance",
+        actor_id: actorId,
+        actor_role_id: actorRoleId,
+        parent_id: actor.parent_id,
+        wallet_owner_id: walletOwnerId,
+        key_setting_id: keySettingId,
+        key_setting_name: keySetting.name,
+        available_balance: ownerBalance,
+        requested_points: points,
+      });
+    }
+
+    // 13. Calculate resulting balances
+    const ownerBalanceBefore = ownerBalance;
+    const receiverBalanceBefore = receiverBalance;
+
+    const ownerBalanceAfter =
+      transactionType === 2
+        ? ownerBalance + points
+        : ownerBalance - points;
+
+    const receiverBalanceAfter =
+      transactionType === 2
+        ? receiverBalance - points
+        : receiverBalance + points;
+
+    // 14. Update wallet owner
+    ownerWallet[ownerWalletIndex] = {
+      ...ownerWallet[ownerWalletIndex],
+      balance: ownerBalanceAfter,
+    };
+
+    // 15. Update receiver wallet
+    if (receiverWalletIndex >= 0) {
+      receiverWallet[receiverWalletIndex] = {
+        ...receiverWallet[receiverWalletIndex],
+        balance: receiverBalanceAfter,
+      };
+    } else {
+      receiverWallet.push({
+        key_setting_id: keySettingId,
+        name: keySetting.name,
+        balance: receiverBalanceAfter,
+      });
+    }
+
+    // 16. Save wallet changes
+    await trx("users")
+      .where("id", walletOwnerId)
+      .update({
+        wallet_balance: JSON.stringify(ownerWallet),
+      });
+
+    await trx("users")
+      .where("id", toUserId)
+      .update({
+        wallet_balance: JSON.stringify(receiverWallet),
+      });
+
+    // 17. Store the transaction.
+    // The parent is the wallet owner; Staff is the initiator.
+    const [transactionId] = await trx("wallet").insert({
+      from_user_id: walletOwnerId,
+      to_user_id: toUserId,
+      key_setting_id: keySettingId,
+      points_sent: points,
+      from_balance_before: ownerBalanceBefore,
+      from_balance_after: ownerBalanceAfter,
+      to_balance_before: receiverBalanceBefore,
+      to_balance_after: receiverBalanceAfter,
+      transaction_type: transactionType,
+      created_by: actorId,
+    });
+
+    await trx.commit();
+    trx = null;
+
+    return res.status(200).json({
+      success: true,
+      message:
+        transactionType === 2
+          ? "Points reverted successfully"
+          : "Points transferred successfully",
+      data: {
+        transaction_id: transactionId,
+        actor_id: actorId,
+        wallet_owner_id: walletOwnerId,
+        to_user_id: toUserId,
+        key_setting_id: keySettingId,
+        key_name: keySetting.name,
+        points_sent: points,
+        from_balance_before: ownerBalanceBefore,
+        from_balance_after: ownerBalanceAfter,
+        to_balance_before: receiverBalanceBefore,
+        to_balance_after: receiverBalanceAfter,
+        transaction_type: transactionType,
+      },
+    });
+  } catch (error) {
+    if (trx) {
+      try {
+        await trx.rollback();
+      } catch (rollbackError) {
+        console.error("TRANSFER ROLLBACK ERROR:", rollbackError);
+      }
+
+      trx = null;
+    }
+
+    console.error("TRANSFER WALLET POINTS ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to transfer wallet points",
+      error: error.message,
+    });
+  }
 };
+
+
+
+
 
 //get the transactione data
 
