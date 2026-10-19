@@ -883,14 +883,6 @@ export const loginUser = async (req, res) => {
 
 // GET ALL USERS
 
-
-
-
-
-
-
-
-
 export const getUsers = async (req, res) => {
   try {
     // 1. Pagination
@@ -1297,14 +1289,11 @@ export const getUsers = async (req, res) => {
   }
 };
 
-
-
-
 // Logout api
   export const logoutUser = async(req,res)=>{
 
   try{
-
+    
       const user = req.user;
 
 
@@ -4285,6 +4274,8 @@ export const transferWalletPoints = async (req, res) => {
 
 
 
+
+
 export const getWalletTransactions = async (req, res) => {
   try {
     const userId = Number(req.user?.id);
@@ -4308,21 +4299,16 @@ export const getWalletTransactions = async (req, res) => {
       key_setting_id,
     } = req.query;
 
-    const pageNumber = Math.max(
-      parseInt(page, 10) || 1,
-      1
-    );
-
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
       100
     );
-
     const offset = (pageNumber - 1) * limitNumber;
 
     let creatorId = null;
 
-    // Staff ke creator ki details fetch karo.
+    // Fetch the creator of the logged-in Staff user.
     if (roleId === 9) {
       const staff = await db("users as staff")
         .leftJoin(
@@ -4369,23 +4355,21 @@ export const getWalletTransactions = async (req, res) => {
         "wt.to_user_id"
       )
       .leftJoin(
+        "users as actor",
+        "actor.id",
+        "wt.created_by"
+      )
+      .leftJoin(
         "key_setting as ks",
         "ks.id",
         "wt.key_setting_id"
       );
 
     /*
-     * Role 0 (Master Admin): All transactions
-     * Role 1 (Admin): All transactions
-     *
-     * Role 9 (Staff):
-     * Creator ki transaction history + Staff ki
-     * apni transactions.
-     *
-     * Other roles:
-     * Sirf apni transactions.
+     * Role 0 and 1: All transactions.
+     * Role 9: Staff's own and creator's transactions.
+     * Other roles: Only their own transactions.
      */
-
     if (roleId === 9) {
       query.where(function () {
         this.where("wt.from_user_id", userId)
@@ -4448,12 +4432,19 @@ export const getWalletTransactions = async (req, res) => {
       .clone()
       .select(
         "wt.*",
-        "from_user.name as from_user_name",
+
+        // Show Staff's name when Staff initiated the transaction.
+        db.raw(
+          "CASE WHEN actor.role_id = 9 THEN actor.name ELSE from_user.name END AS from_user_name"
+        ),
+
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
+
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
+
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4475,10 +4466,7 @@ export const getWalletTransactions = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "GET WALLET TRANSACTIONS ERROR:",
-      error
-    );
+    console.error("GET WALLET TRANSACTIONS ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -4487,6 +4475,8 @@ export const getWalletTransactions = async (req, res) => {
     });
   }
 };
+
+
 
 
 
