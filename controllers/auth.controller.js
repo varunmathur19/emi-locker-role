@@ -3532,6 +3532,7 @@ export const getCities = async (req, res) => {
 //get key-setting data
 
 
+
 export const getKeySettings = async (req, res) => {
   try {
     const loggedInUserId = req.user?.id;
@@ -3562,16 +3563,10 @@ export const getKeySettings = async (req, res) => {
       });
     }
 
-    /*
-     * Staff (role 9):
-     * Use creator Admin's wallet.
-     * Fall back to parent_id if created_by is missing.
-     *
-     * Other roles:
-     * Use their own wallet.
-     */
+    // Select wallet owner
     let walletUserId = loggedInUser.id;
 
+    // Staff uses creator's wallet, falling back to parent
     if (Number(loggedInUser.role_id) === 9) {
       walletUserId =
         loggedInUser.created_by ||
@@ -3585,7 +3580,7 @@ export const getKeySettings = async (req, res) => {
       });
     }
 
-    // Fetch the selected wallet owner's balance
+    // Fetch wallet owner's balance
     let walletUser = loggedInUser;
 
     if (Number(walletUserId) !== Number(loggedInUser.id)) {
@@ -3602,7 +3597,7 @@ export const getKeySettings = async (req, res) => {
       });
     }
 
-    // Parse wallet_balance safely
+    // Safely parse wallet_balance
     let walletBalance = walletUser.wallet_balance ?? [];
 
     if (typeof walletBalance === "string") {
@@ -3618,19 +3613,13 @@ export const getKeySettings = async (req, res) => {
       walletBalance = [];
     }
 
-    // Fetch active keys
+    // Fetch ALL records from key_setting
+    // No status filter: active and inactive records are included
     const keySettings = await db("key_setting")
-      .select(
-        "id",
-        "name",
-        "status",
-        "created_at",
-        "updated_at"
-      )
-      .where("status", 1)
+      .select("*")
       .orderBy("id", "asc");
 
-    // Match keys with the selected wallet owner's balances
+    // Match each key with the wallet balance
     const data = keySettings.map((key) => {
       const walletItem = walletBalance.find(
         (item) =>
@@ -3639,18 +3628,15 @@ export const getKeySettings = async (req, res) => {
       );
 
       return {
-        id: key.id,
-        name: key.name,
-        status: key.status,
+        ...key,
         balance: Number(walletItem?.balance ?? 0),
-        created_at: key.created_at,
-        updated_at: key.updated_at,
       };
     });
 
     return res.status(200).json({
       success: true,
-      message: "Key settings fetched successfully",
+      message: "All key settings fetched successfully",
+      count: data.length,
       data,
     });
   } catch (error) {
@@ -3666,6 +3652,7 @@ export const getKeySettings = async (req, res) => {
     });
   }
 };
+
 
 //updated key-setting api
 export const updateKeySetting = async (req, res) => {
@@ -4266,16 +4253,7 @@ export const transferWalletPoints = async (req, res) => {
   }
 };
 
-
-
-
-
 //get the transactione data
-
-
-
-
-
 export const getWalletTransactions = async (req, res) => {
   try {
     const userId = Number(req.user?.id);
@@ -4300,44 +4278,26 @@ export const getWalletTransactions = async (req, res) => {
     } = req.query;
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
       100
     );
+
     const offset = (pageNumber - 1) * limitNumber;
 
-    let creatorId = null;
-
-    // Fetch the creator of the logged-in Staff user.
+    // Staff account verify karo, creator ka role restrict mat karo.
     if (roleId === 9) {
-      const staff = await db("users as staff")
-        .leftJoin(
-          "users as creator",
-          "creator.id",
-          "staff.created_by"
-        )
-        .select(
-          "staff.id",
-          "staff.created_by",
-          "creator.id as creator_id",
-          "creator.role_id as creator_role_id"
-        )
-        .where("staff.id", userId)
+      const staff = await db("users")
+        .select("id")
+        .where("id", userId)
+        .where("role_id", 9)
         .first();
 
       if (!staff) {
         return res.status(404).json({
           success: false,
           message: "Staff user not found",
-        });
-      }
-
-      creatorId = Number(staff.creator_id) || null;
-
-      if (!creatorId) {
-        return res.status(400).json({
-          success: false,
-          message: "Staff creator account was not found",
         });
       }
     }
@@ -4366,18 +4326,12 @@ export const getWalletTransactions = async (req, res) => {
       );
 
     /*
-     * Role 0 and 1: All transactions.
-     * Role 9: Staff's own and creator's transactions.
-     * Other roles: Only their own transactions.
+     * Role 0: All transactions.
+     * Role 1: All transactions.
+     * Role 9: All transactions, regardless of who created the Staff.
+     * Other roles: Only transactions involving themselves.
      */
-    if (roleId === 9) {
-      query.where(function () {
-        this.where("wt.from_user_id", userId)
-          .orWhere("wt.to_user_id", userId)
-          .orWhere("wt.from_user_id", creatorId)
-          .orWhere("wt.to_user_id", creatorId);
-      });
-    } else if (roleId !== 0 && roleId !== 1) {
+    if (roleId !== 0 && roleId !== 1 && roleId !== 9) {
       query.where(function () {
         this.where("wt.from_user_id", userId)
           .orWhere("wt.to_user_id", userId);
@@ -4432,19 +4386,17 @@ export const getWalletTransactions = async (req, res) => {
       .clone()
       .select(
         "wt.*",
-
-        // Show Staff's name when Staff initiated the transaction.
-        db.raw(
-          "CASE WHEN actor.role_id = 9 THEN actor.name ELSE from_user.name END AS from_user_name"
-        ),
-
+        db.raw(`
+          CASE
+            WHEN actor.role_id = 9 THEN actor.name
+            ELSE from_user.name
+          END AS from_user_name
+        `),
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
-
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
-
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4476,13 +4428,7 @@ export const getWalletTransactions = async (req, res) => {
   }
 };
 
-
-
-
-
-
 //company setting  name and logo
-
 export const addCompanySetting = async (req, res) => {
   try {
     const { key, value } = req.body;
