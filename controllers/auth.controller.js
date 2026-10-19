@@ -4266,14 +4266,7 @@ export const transferWalletPoints = async (req, res) => {
   }
 };
 
-
-
-
-
 //get the transactione data
-
-
-
 
 
 export const getWalletTransactions = async (req, res) => {
@@ -4300,44 +4293,26 @@ export const getWalletTransactions = async (req, res) => {
     } = req.query;
 
     const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
       100
     );
+
     const offset = (pageNumber - 1) * limitNumber;
 
-    let creatorId = null;
-
-    // Fetch the creator of the logged-in Staff user.
+    // Staff account verify karo, creator ka role restrict mat karo.
     if (roleId === 9) {
-      const staff = await db("users as staff")
-        .leftJoin(
-          "users as creator",
-          "creator.id",
-          "staff.created_by"
-        )
-        .select(
-          "staff.id",
-          "staff.created_by",
-          "creator.id as creator_id",
-          "creator.role_id as creator_role_id"
-        )
-        .where("staff.id", userId)
+      const staff = await db("users")
+        .select("id")
+        .where("id", userId)
+        .where("role_id", 9)
         .first();
 
       if (!staff) {
         return res.status(404).json({
           success: false,
           message: "Staff user not found",
-        });
-      }
-
-      creatorId = Number(staff.creator_id) || null;
-
-      if (!creatorId) {
-        return res.status(400).json({
-          success: false,
-          message: "Staff creator account was not found",
         });
       }
     }
@@ -4366,18 +4341,12 @@ export const getWalletTransactions = async (req, res) => {
       );
 
     /*
-     * Role 0 and 1: All transactions.
-     * Role 9: Staff's own and creator's transactions.
-     * Other roles: Only their own transactions.
+     * Role 0: All transactions.
+     * Role 1: All transactions.
+     * Role 9: All transactions, regardless of who created the Staff.
+     * Other roles: Only transactions involving themselves.
      */
-    if (roleId === 9) {
-      query.where(function () {
-        this.where("wt.from_user_id", userId)
-          .orWhere("wt.to_user_id", userId)
-          .orWhere("wt.from_user_id", creatorId)
-          .orWhere("wt.to_user_id", creatorId);
-      });
-    } else if (roleId !== 0 && roleId !== 1) {
+    if (roleId !== 0 && roleId !== 1 && roleId !== 9) {
       query.where(function () {
         this.where("wt.from_user_id", userId)
           .orWhere("wt.to_user_id", userId);
@@ -4432,19 +4401,17 @@ export const getWalletTransactions = async (req, res) => {
       .clone()
       .select(
         "wt.*",
-
-        // Show Staff's name when Staff initiated the transaction.
-        db.raw(
-          "CASE WHEN actor.role_id = 9 THEN actor.name ELSE from_user.name END AS from_user_name"
-        ),
-
+        db.raw(`
+          CASE
+            WHEN actor.role_id = 9 THEN actor.name
+            ELSE from_user.name
+          END AS from_user_name
+        `),
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
-
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
-
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4475,11 +4442,6 @@ export const getWalletTransactions = async (req, res) => {
     });
   }
 };
-
-
-
-
-
 
 //company setting  name and logo
 
