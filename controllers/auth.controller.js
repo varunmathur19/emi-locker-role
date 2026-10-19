@@ -883,71 +883,14 @@ export const loginUser = async (req, res) => {
 
 // GET ALL USERS
 
-
 export const getUsers = async (req, res) => {
   try {
-    // Pagination
+    // 1. Pagination
     const page = Math.max(Number(req.query.page) || 1, 1);
     const limit = Math.max(Number(req.query.limit) || 10, 1);
     const offset = (page - 1) * limit;
 
-    // Role filter
-    let role_id = null;
-
-    if (
-      req.query.role_id !== undefined &&
-      String(req.query.role_id).trim() !== ""
-    ) {
-      role_id = Number(req.query.role_id);
-
-      if (!Number.isInteger(role_id) || role_id < 0) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid role_id",
-        });
-      }
-    }
-
-    // Query filters
-    const readQueryValue = (key) => {
-      const value = req.query[key];
-
-      return value !== undefined && String(value).trim() !== ""
-        ? String(value).trim()
-        : null;
-    };
-
-    const search = readQueryValue("search");
-    const country = readQueryValue("country");
-    const state = readQueryValue("state");
-    const city = readQueryValue("city");
-
-    // Status filter
-    let status = null;
-    const statusValue = readQueryValue("status");
-
-    if (statusValue !== null) {
-      const normalizedStatus = statusValue.toLowerCase();
-
-      if (
-        normalizedStatus === "active" ||
-        normalizedStatus === "1"
-      ) {
-        status = 1;
-      } else if (
-        normalizedStatus === "inactive" ||
-        normalizedStatus === "0"
-      ) {
-        status = 0;
-      } else {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid status",
-        });
-      }
-    }
-
-    // Logged-in user validation
+    // 2. Validate logged-in user
     const loggedInUserId = Number(req.user?.id);
     const loggedInRoleId = Number(req.user?.role_id);
 
@@ -968,33 +911,96 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // Existing role hierarchy
+    // 3. Role configuration
+    const MASTER_ADMIN_ROLE_ID = 0;
+    const ADMIN_ROLE_ID = 1;
+    const STAFF_ROLE_ID = 9;
+
+    const isMasterAdmin =
+      loggedInRoleId === MASTER_ADMIN_ROLE_ID;
+
+    const isAdmin =
+      loggedInRoleId === ADMIN_ROLE_ID;
+
+    const isStaff =
+      loggedInRoleId === STAFF_ROLE_ID;
+
     const NEXT_ROLE_BY_ROLE = {
-      1: 2, // Admin -> CNF
-      2: 3, // CNF -> Super Distributor
-      3: 4, // Super Distributor -> Distributor
-      4: 5, // Distributor -> FOS
-      5: 6, // FOS -> Retailer
-      6: 7, // Retailer -> Sub Retailer
-      7: 8, // Sub Retailer -> Employee
-      8: 9, // Employee -> Staff
+      0: 1,
+      1: 2,
+      2: 3,
+      3: 4,
+      4: 5,
+      5: 6,
+      6: 7,
+      7: 8,
+      8: 9,
     };
 
+    // 4. Read optional query parameters
+    const readQueryValue = (key) => {
+      const value = req.query[key];
+
+      if (
+        value === undefined ||
+        value === null ||
+        String(value).trim() === ""
+      ) {
+        return null;
+      }
+
+      return String(value).trim();
+    };
+
+    let role_id = null;
+
+    const roleValue = readQueryValue("role_id");
+
+    if (roleValue !== null) {
+      role_id = Number(roleValue);
+
+      if (!Number.isInteger(role_id) || role_id < 0) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid role_id",
+        });
+      }
+    }
+
+    const search = readQueryValue("search");
+    const country = readQueryValue("country");
+    const state = readQueryValue("state");
+    const city = readQueryValue("city");
+
+    // 5. Status filter
+    let status = null;
+
+    const statusValue = readQueryValue("status");
+
+    if (statusValue !== null) {
+      const normalizedStatus = statusValue.toLowerCase();
+
+      if (["active", "1"].includes(normalizedStatus)) {
+        status = 1;
+      } else if (
+        ["inactive", "0"].includes(normalizedStatus)
+      ) {
+        status = 0;
+      } else {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid status",
+        });
+      }
+    }
+
+    // 6. Staff scope and permissions
     let staffRoleAccess = false;
     let staffCreatorId = null;
+    let staffCreatorRoleId = null;
     let transferTargetRoleId = null;
 
-    /*
-     * STAFF ACCESS
-     *
-     * The target role is determined by the Staff creator.
-     * The frontend cannot override the target role.
-     * Staff must have permission for the Transfer Points module.
-     */
-
-    if (loggedInRoleId === ROLES.STAFF) {
-      staffRoleAccess = true;
-
+    if (isStaff) {
       const staffUser = await db("users")
         .select(
           "id",
@@ -1013,7 +1019,7 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Resolve Staff creator
+      // Resolve creator
       const creatorValue =
         staffUser.created_by ?? staffUser.parent_id;
 
@@ -1042,39 +1048,37 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Derive the target role from the creator's role
-      transferTargetRoleId =
-        NEXT_ROLE_BY_ROLE[Number(creator.role_id)];
+      staffCreatorRoleId = Number(creator.role_id);
 
-      if (!transferTargetRoleId) {
+      // Determine the next hierarchy role
+      transferTargetRoleId =
+        NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
+
+      if (transferTargetRoleId === null) {
         return res.status(403).json({
           success: false,
           message:
-            "No next-level role is available for this Staff account",
+            "No transfer target role is configured for this Staff creator",
         });
       }
 
-      // Never trust the frontend role for Staff
-      role_id = transferTargetRoleId;
+      // Validate explicitly requested role
+      if (role_id !== null) {
+        const requestedRole =
+          await getRoleForPermission(role_id);
 
-      // Verify the target role exists
-      const requestedRole =
-        await getRoleForPermission(role_id);
-
-      if (!requestedRole) {
-        return res.status(403).json({
-          success: false,
-          message: "Target role not found",
-        });
+        if (!requestedRole) {
+          return res.status(400).json({
+            success: false,
+            message: "Requested role not found",
+          });
+        }
       }
 
-      // Load configured Staff permissions
-      const permissions = await getStaffPermissions(staffUser);
+      // Validate Staff permissions
+      const permissions =
+        await getStaffPermissions(staffUser);
 
-      /*
-       * Find Transfer Points module.
-       * Support common slug/name variations.
-       */
       const transferModule = await db("modules")
         .select("id", "name", "slug")
         .where(function () {
@@ -1094,39 +1098,47 @@ export const getUsers = async (req, res) => {
         .first();
 
       if (!transferModule) {
-        console.error(
-          "TRANSFER POINTS MODULE NOT FOUND"
-        );
-
         return res.status(403).json({
           success: false,
-          message:
-            "Transfer Points module not found. Please verify its slug in the modules table.",
+          message: "Transfer Points module not found",
         });
       }
 
-      // Verify Staff has permission for this module
-      const hasTransferPermission =
-        hasAnyStaffModulePermission(
-          permissions,
-          transferModule.id
-        );
+      staffRoleAccess = hasAnyStaffModulePermission(
+        permissions,
+        transferModule.id
+      );
 
-      if (!hasTransferPermission) {
+      if (!staffRoleAccess) {
         return res.status(403).json({
           success: false,
           message:
             "You do not have permission to access Transfer Points",
         });
       }
+
+      console.log("STAFF CREATOR DETAILS:", {
+        staffId: loggedInUserId,
+        creatorId: staffCreatorId,
+        creatorRoleId: staffCreatorRoleId,
+        transferTargetRoleId,
+      });
     }
 
-    /*
-     * Fetch users.
-     *
-     * getAllUsers must apply staffCreatorId as a database
-     * hierarchy filter for Staff requests.
-     */
+    // 7. Determine full-user access
+    const canSeeAllUsers =
+      isMasterAdmin ||
+      isAdmin ||
+      (
+        isStaff &&
+        [
+          MASTER_ADMIN_ROLE_ID,
+          ADMIN_ROLE_ID,
+        ].includes(staffCreatorRoleId)
+      );
+
+    // 8. Fetch users
+    // IMPORTANT: Pass transferTargetRoleId to the model.
     const result = await getAllUsers(
       limit,
       offset,
@@ -1139,12 +1151,18 @@ export const getUsers = async (req, res) => {
       city,
       status,
       staffRoleAccess,
-      staffCreatorId
+      staffCreatorId,
+      canSeeAllUsers,
+      transferTargetRoleId
     );
 
-    // Normalize returned user data
+    // 9. Normalize result
+    const resultUsers = Array.isArray(result?.users)
+      ? result.users
+      : [];
+
     const users = await Promise.all(
-      (result.users || []).map(async (user) => {
+      resultUsers.map(async (user) => {
         let parsedPermission = {};
 
         if (user.role_permission) {
@@ -1166,7 +1184,8 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        let wallet_balance = user.wallet_balance || [];
+        let wallet_balance =
+          user.wallet_balance ?? [];
 
         if (typeof wallet_balance === "string") {
           try {
@@ -1176,38 +1195,37 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        if (
-          !wallet_balance ||
-          typeof wallet_balance !== "object"
-        ) {
+        if (!Array.isArray(wallet_balance)) {
           wallet_balance = [];
         }
 
         let parent_name = user.parent_name || null;
+
         let parent_organization_name =
           user.parent_organization_name || null;
 
-        // Preserve existing CNF parent details
+        // Preserve CNF parent information
         if (
           Number(user.role_id) === 2 &&
           user.parent_id
         ) {
-          try {
-            const parentUser = await db("users")
-              .select("name", "organization_name")
-              .where("id", Number(user.parent_id))
-              .first();
+          const parentUser = await db("users")
+            .select("name", "organization_name")
+            .where("id", Number(user.parent_id))
+            .first()
+            .catch((error) => {
+              console.error(
+                "CNF PARENT FETCH ERROR:",
+                error
+              );
+              return null;
+            });
 
-            if (parentUser) {
-              parent_name = parentUser.name || null;
-              parent_organization_name =
-                parentUser.organization_name || null;
-            }
-          } catch (parentError) {
-            console.error(
-              "CNF PARENT FETCH ERROR:",
-              parentError
-            );
+          if (parentUser) {
+            parent_name = parentUser.name || null;
+
+            parent_organization_name =
+              parentUser.organization_name || null;
           }
         }
 
@@ -1226,20 +1244,39 @@ export const getUsers = async (req, res) => {
       })
     );
 
+    // 10. Pagination and debug logs
+    const totalUsers = Math.max(
+      Number(result?.total) || 0,
+      0
+    );
+
+    console.log("GET USERS RESULT:", {
+      userId: loggedInUserId,
+      roleId: loggedInRoleId,
+      isStaff,
+      staffCreatorId,
+      staffCreatorRoleId,
+      canSeeAllUsers,
+      requestedRoleId: role_id,
+      transferTargetRoleId,
+      returnedUsers: users.length,
+      totalUsers,
+      page,
+      limit,
+      offset,
+    });
+
+    // 11. API response
     return res.status(200).json({
       success: true,
       pagination: {
         currentPage: page,
-        totalPages: Math.ceil(
-          (result.total || 0) / limit
-        ),
+        totalPages: Math.ceil(totalUsers / limit),
         limit,
-        totalUsers: result.total || 0,
+        totalUsers,
       },
       data: users,
-      ...(staffRoleAccess
-        ? { transferTargetRoleId }
-        : {}),
+      ...(isStaff ? { transferTargetRoleId } : {}),
     });
   } catch (error) {
     console.error("GET USERS ERROR:", error);
@@ -1252,12 +1289,11 @@ export const getUsers = async (req, res) => {
   }
 };
 
-
 // Logout api
   export const logoutUser = async(req,res)=>{
 
   try{
-
+    
       const user = req.user;
 
 
@@ -4237,6 +4273,9 @@ export const transferWalletPoints = async (req, res) => {
 //get the transactione data
 
 
+
+
+
 export const getWalletTransactions = async (req, res) => {
   try {
     const userId = Number(req.user?.id);
@@ -4260,22 +4299,16 @@ export const getWalletTransactions = async (req, res) => {
       key_setting_id,
     } = req.query;
 
-    const pageNumber = Math.max(
-      parseInt(page, 10) || 1,
-      1
-    );
-
+    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
       100
     );
-
     const offset = (pageNumber - 1) * limitNumber;
 
     let creatorId = null;
-    let creatorRoleId = null;
 
-    // Find the user who created this Staff account.
+    // Fetch the creator of the logged-in Staff user.
     if (roleId === 9) {
       const staff = await db("users as staff")
         .leftJoin(
@@ -4284,7 +4317,9 @@ export const getWalletTransactions = async (req, res) => {
           "staff.created_by"
         )
         .select(
+          "staff.id",
           "staff.created_by",
+          "creator.id as creator_id",
           "creator.role_id as creator_role_id"
         )
         .where("staff.id", userId)
@@ -4297,14 +4332,17 @@ export const getWalletTransactions = async (req, res) => {
         });
       }
 
-      creatorId = Number(staff.created_by) || null;
-      creatorRoleId =
-        staff.creator_role_id == null
-          ? null
-          : Number(staff.creator_role_id);
+      creatorId = Number(staff.creator_id) || null;
+
+      if (!creatorId) {
+        return res.status(400).json({
+          success: false,
+          message: "Staff creator account was not found",
+        });
+      }
     }
 
-    // Base transactions query.
+    // Base wallet transactions query.
     const query = db("wallet as wt")
       .leftJoin(
         "users as from_user",
@@ -4317,38 +4355,28 @@ export const getWalletTransactions = async (req, res) => {
         "wt.to_user_id"
       )
       .leftJoin(
+        "users as actor",
+        "actor.id",
+        "wt.created_by"
+      )
+      .leftJoin(
         "key_setting as ks",
         "ks.id",
         "wt.key_setting_id"
       );
 
     /*
-     * Role 0: All transactions
-     * Role 1: All transactions
-     *
-     * Staff created by Admin:
-     * Same transaction visibility as Admin.
-     *
-     * Staff created by CNF / Super Distributor /
-     * another parent role:
-     * Own transactions + creator's transactions.
-     *
-     * Other roles:
-     * Existing own-transaction visibility.
+     * Role 0 and 1: All transactions.
+     * Role 9: Staff's own and creator's transactions.
+     * Other roles: Only their own transactions.
      */
-
     if (roleId === 9) {
-      if (creatorRoleId !== 1) {
-        query.where(function () {
-          this.where("wt.from_user_id", userId)
-            .orWhere("wt.to_user_id", userId);
-
-          if (creatorId) {
-            this.orWhere("wt.from_user_id", creatorId)
-              .orWhere("wt.to_user_id", creatorId);
-          }
-        });
-      }
+      query.where(function () {
+        this.where("wt.from_user_id", userId)
+          .orWhere("wt.to_user_id", userId)
+          .orWhere("wt.from_user_id", creatorId)
+          .orWhere("wt.to_user_id", creatorId);
+      });
     } else if (roleId !== 0 && roleId !== 1) {
       query.where(function () {
         this.where("wt.from_user_id", userId)
@@ -4356,7 +4384,7 @@ export const getWalletTransactions = async (req, res) => {
       });
     }
 
-    // Apply transaction type filter.
+    // Transaction type filter.
     if (
       transaction_type !== undefined &&
       transaction_type !== ""
@@ -4373,14 +4401,17 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.transaction_type", type);
     }
 
-    // Apply key setting filter.
+    // Key setting filter.
     if (
       key_setting_id !== undefined &&
       key_setting_id !== ""
     ) {
       const keySettingId = Number(key_setting_id);
 
-      if (!Number.isInteger(keySettingId)) {
+      if (
+        !Number.isInteger(keySettingId) ||
+        keySettingId <= 0
+      ) {
         return res.status(400).json({
           success: false,
           message: "Invalid key_setting_id",
@@ -4390,23 +4421,30 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.key_setting_id", keySettingId);
     }
 
-    // Get total transaction count.
+    // Total transaction count.
     const countResult = await query
       .clone()
       .countDistinct({ total: "wt.id" })
       .first();
 
-    // Fetch paginated transactions.
+    // Paginated transaction history.
     const transactions = await query
       .clone()
       .select(
         "wt.*",
-        "from_user.name as from_user_name",
+
+        // Show Staff's name when Staff initiated the transaction.
+        db.raw(
+          "CASE WHEN actor.role_id = 9 THEN actor.name ELSE from_user.name END AS from_user_name"
+        ),
+
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
+
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
+
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4428,10 +4466,7 @@ export const getWalletTransactions = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error(
-      "GET WALLET TRANSACTIONS ERROR:",
-      error
-    );
+    console.error("GET WALLET TRANSACTIONS ERROR:", error);
 
     return res.status(500).json({
       success: false,
@@ -4440,6 +4475,7 @@ export const getWalletTransactions = async (req, res) => {
     });
   }
 };
+
 
 
 
