@@ -4213,11 +4213,13 @@ export const transferWalletPoints = async (req, res) => {
 };
 
 //get the transactione data
+
 export const getWalletTransactions = async (req, res) => {
   try {
     const userId = Number(req.user?.id);
     const roleId = Number(req.user?.role_id);
 
+    // 1. Validate logged-in user
     if (
       !Number.isInteger(userId) ||
       userId <= 0 ||
@@ -4229,6 +4231,7 @@ export const getWalletTransactions = async (req, res) => {
       });
     }
 
+    // 2. Read query parameters
     const {
       page = 1,
       limit = 10,
@@ -4236,7 +4239,10 @@ export const getWalletTransactions = async (req, res) => {
       key_setting_id,
     } = req.query;
 
-    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageNumber = Math.max(
+      parseInt(page, 10) || 1,
+      1
+    );
 
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
@@ -4245,7 +4251,7 @@ export const getWalletTransactions = async (req, res) => {
 
     const offset = (pageNumber - 1) * limitNumber;
 
-    // Staff account verify karo, creator ka role restrict mat karo.
+    // 3. Verify Staff account
     if (roleId === 9) {
       const staff = await db("users")
         .select("id")
@@ -4261,7 +4267,7 @@ export const getWalletTransactions = async (req, res) => {
       }
     }
 
-    // Base wallet transactions query.
+    // 4. Base wallet transactions query
     const query = db("wallet as wt")
       .leftJoin(
         "users as from_user",
@@ -4287,8 +4293,8 @@ export const getWalletTransactions = async (req, res) => {
     /*
      * Role 0: All transactions.
      * Role 1: All transactions.
-     * Role 9: All transactions, regardless of who created the Staff.
-     * Other roles: Only transactions involving themselves.
+     * Role 9: All transactions.
+     * Other roles: Transactions involving themselves.
      */
     if (roleId !== 0 && roleId !== 1 && roleId !== 9) {
       query.where(function () {
@@ -4297,7 +4303,7 @@ export const getWalletTransactions = async (req, res) => {
       });
     }
 
-    // Transaction type filter.
+    // 5. Transaction type filter
     if (
       transaction_type !== undefined &&
       transaction_type !== ""
@@ -4314,7 +4320,7 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.transaction_type", type);
     }
 
-    // Key setting filter.
+    // 6. Key setting filter
     if (
       key_setting_id !== undefined &&
       key_setting_id !== ""
@@ -4334,28 +4340,34 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.key_setting_id", keySettingId);
     }
 
-    // Total transaction count.
+    // 7. Count total transactions
     const countResult = await query
       .clone()
       .countDistinct({ total: "wt.id" })
       .first();
 
-    // Paginated transaction history.
+    const total = Number(countResult?.total || 0);
+
+    // 8. Fetch paginated transaction history
     const transactions = await query
       .clone()
       .select(
         "wt.*",
-        db.raw(`
-          CASE
-            WHEN actor.role_id = 9 THEN actor.name
-            ELSE from_user.name
-          END AS from_user_name
-        `),
+
+        // Use the actual transaction sender.
+        "from_user.name as from_user_name",
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
+
+        // Use the actual transaction receiver.
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
+
+        // Keep the transaction creator separately.
+        "actor.name as actor_name",
+        "actor.role_id as actor_role_id",
+
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4363,8 +4375,7 @@ export const getWalletTransactions = async (req, res) => {
       .limit(limitNumber)
       .offset(offset);
 
-    const total = Number(countResult?.total || 0);
-
+    // 9. API response
     return res.status(200).json({
       success: true,
       message: "Wallet transactions fetched successfully",
@@ -4377,7 +4388,10 @@ export const getWalletTransactions = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GET WALLET TRANSACTIONS ERROR:", error);
+    console.error(
+      "GET WALLET TRANSACTIONS ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -4386,6 +4400,7 @@ export const getWalletTransactions = async (req, res) => {
     });
   }
 };
+
 
 //company setting  name and logo
 export const addCompanySetting = async (req, res) => {
