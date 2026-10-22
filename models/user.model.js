@@ -396,6 +396,7 @@ const getStaffCreatorUserId = async (staffUserId) => {
 };
 
 
+
 export const getAllUsers = async (
   limit,
   offset,
@@ -409,7 +410,8 @@ export const getAllUsers = async (
   status = null,
   staffRoleAccess = false,
   staffCreatorId = null,
-  canSeeAllUsersParam = null
+  canSeeAllUsersParam = null,
+  transferTargetRoleId = null
 ) => {
   try {
     // 1. Validate pagination and logged-in user
@@ -445,15 +447,12 @@ export const getAllUsers = async (
       loggedInRoleId === STAFF_ROLE_ID;
 
     // 3. Determine full-user access
-    // The controller must calculate this after verifying
-    // the logged-in user's role and Staff creator.
     let canSeeAllUsers;
 
     if (
       canSeeAllUsersParam === null ||
       canSeeAllUsersParam === undefined
     ) {
-      // Default behavior for existing callers.
       canSeeAllUsers = isMasterAdmin || isAdmin;
     } else {
       if (typeof canSeeAllUsersParam !== "boolean") {
@@ -462,19 +461,19 @@ export const getAllUsers = async (
         );
       }
 
-      // Do not reject Staff here. The controller is responsible
-      // for authorizing Staff created under an Admin/Master Admin.
       canSeeAllUsers =
         canSeeAllUsersParam &&
         (isMasterAdmin || isAdmin || isStaff);
     }
 
-    // Preserve the existing Staff module permission check.
-    if (isStaff && !staffRoleAccess) {
-      throw new Error(
-        "Staff is not authorized to access this user list"
-      );
-    }
+    // IMPORTANT:
+    // Do not reject Staff based on staffRoleAccess here.
+    // This function is used for user lists and dashboard counts.
+    // Transfer-specific permissions must be checked by the
+    // actual Transfer, Revert, and Schema Transfer endpoints.
+    //
+    // staffRoleAccess is retained in the signature to avoid
+    // breaking existing callers.
 
     // 4. Normalize filters
     const normalizeFilter = (value) => {
@@ -569,8 +568,7 @@ export const getAllUsers = async (
 
       staffCreatorRoleId = Number(creator.role_id);
 
-      // Defense in depth: full access for Staff is allowed only
-      // when the verified creator is Admin or Master Admin.
+      // Verify full-user access against the actual creator.
       if (
         canSeeAllUsers &&
         ![
@@ -582,6 +580,13 @@ export const getAllUsers = async (
           "Invalid full-user access permission"
         );
       }
+
+      console.log("STAFF USER SCOPE:", {
+        staffId: loggedInUserId,
+        creatorId: resolvedStaffCreatorId,
+        creatorRoleId: staffCreatorRoleId,
+        transferTargetRoleId,
+      });
     }
 
     // 6. Resolve hierarchy for restricted roles
@@ -602,11 +607,10 @@ export const getAllUsers = async (
           scopeRoleId
         );
 
-      hierarchyAnchorId =
-        await getHierarchyAnchorUserId(
-          effectiveScope?.userId ?? scopeUserId,
-          effectiveScope?.roleId ?? scopeRoleId
-        );
+      hierarchyAnchorId = await getHierarchyAnchorUserId(
+        effectiveScope?.userId ?? scopeUserId,
+        effectiveScope?.roleId ?? scopeRoleId
+      );
 
       hierarchyAnchorId = Number(hierarchyAnchorId);
 
@@ -623,7 +627,6 @@ export const getAllUsers = async (
     // 7. Build base query
     const buildBaseQuery = () => {
       if (canSeeAllUsers) {
-        // Full access: do not restrict the query to a hierarchy.
         return db({ u: "users" });
       }
 
@@ -646,7 +649,7 @@ export const getAllUsers = async (
       );
 
       query.where(function () {
-        // Users within the resolved hierarchy.
+        // Non-Staff users inside the resolved hierarchy.
         this.where(function () {
           this.where("u.role_id", "!=", STAFF_ROLE_ID)
             .whereNotNull("uc.id");
@@ -674,7 +677,7 @@ export const getAllUsers = async (
       return query;
     };
 
-    // 9. Exclude current user only for restricted access.
+    // 9. Exclude current user for restricted access
     const applyUserExclusion = (query) => {
       if (!canSeeAllUsers) {
         query.whereNot("u.id", loggedInUserId);
@@ -761,6 +764,7 @@ export const getAllUsers = async (
     throw error;
   }
 };
+
 
 
 

@@ -937,7 +937,7 @@ export const getUsers = async (req, res) => {
       8: 9,
     };
 
-    // 4. Read optional query parameters
+    // 4. Read query parameters
     const readQueryValue = (key) => {
       const value = req.query[key];
 
@@ -994,11 +994,14 @@ export const getUsers = async (req, res) => {
       }
     }
 
-    // 6. Staff scope and permissions
-    let staffRoleAccess = false;
+    // 6. Staff hierarchy validation
     let staffCreatorId = null;
     let staffCreatorRoleId = null;
     let transferTargetRoleId = null;
+
+    // Keep this false unless getAllUsers explicitly requires
+    // a separate, validated transfer-access flag.
+    let staffRoleAccess = false;
 
     if (isStaff) {
       const staffUser = await db("users")
@@ -1019,7 +1022,7 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Resolve creator
+      // Resolve the Staff creator.
       const creatorValue =
         staffUser.created_by ?? staffUser.parent_id;
 
@@ -1050,7 +1053,7 @@ export const getUsers = async (req, res) => {
 
       staffCreatorRoleId = Number(creator.role_id);
 
-      // Determine the next hierarchy role
+      // Determine the next role in the hierarchy.
       transferTargetRoleId =
         NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
 
@@ -1062,10 +1065,9 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Validate explicitly requested role
+      // Validate an explicitly requested role.
       if (role_id !== null) {
-        const requestedRole =
-          await getRoleForPermission(role_id);
+        const requestedRole = await getRoleForPermission(role_id);
 
         if (!requestedRole) {
           return res.status(400).json({
@@ -1075,47 +1077,11 @@ export const getUsers = async (req, res) => {
         }
       }
 
-      // Validate Staff permissions
-      const permissions =
-        await getStaffPermissions(staffUser);
-
-      const transferModule = await db("modules")
-        .select("id", "name", "slug")
-        .where(function () {
-          this.whereRaw(
-            "LOWER(TRIM(slug)) IN (?, ?, ?, ?)",
-            [
-              "transfer-point",
-              "transfer-points",
-              "transfer_point",
-              "transfer_points",
-            ]
-          ).orWhereRaw(
-            "LOWER(TRIM(name)) = ?",
-            ["transfer points"]
-          );
-        })
-        .first();
-
-      if (!transferModule) {
-        return res.status(403).json({
-          success: false,
-          message: "Transfer Points module not found",
-        });
-      }
-
-      staffRoleAccess = hasAnyStaffModulePermission(
-        permissions,
-        transferModule.id
-      );
-
-      if (!staffRoleAccess) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "You do not have permission to access Transfer Points",
-        });
-      }
+      // IMPORTANT:
+      // Do not check Transfer Points permission here.
+      // This endpoint lists users and is also used for dashboard counts.
+      // Transfer-specific permissions should be validated by the
+      // actual Transfer/Revert/Schema Transfer endpoints.
 
       console.log("STAFF CREATOR DETAILS:", {
         staffId: loggedInUserId,
@@ -1125,7 +1091,7 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // 7. Determine full-user access
+    // 7. Determine access scope
     const canSeeAllUsers =
       isMasterAdmin ||
       isAdmin ||
@@ -1138,7 +1104,6 @@ export const getUsers = async (req, res) => {
       );
 
     // 8. Fetch users
-    // IMPORTANT: Pass transferTargetRoleId to the model.
     const result = await getAllUsers(
       limit,
       offset,
@@ -1184,8 +1149,7 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        let wallet_balance =
-          user.wallet_balance ?? [];
+        let wallet_balance = user.wallet_balance ?? [];
 
         if (typeof wallet_balance === "string") {
           try {
@@ -1204,7 +1168,7 @@ export const getUsers = async (req, res) => {
         let parent_organization_name =
           user.parent_organization_name || null;
 
-        // Preserve CNF parent information
+        // Preserve CNF parent information.
         if (
           Number(user.role_id) === 2 &&
           user.parent_id
@@ -1214,10 +1178,7 @@ export const getUsers = async (req, res) => {
             .where("id", Number(user.parent_id))
             .first()
             .catch((error) => {
-              console.error(
-                "CNF PARENT FETCH ERROR:",
-                error
-              );
+              console.error("CNF PARENT FETCH ERROR:", error);
               return null;
             });
 
@@ -1283,12 +1244,10 @@ export const getUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message || "Failed to get users",
+      message: error?.message || "Failed to get users",
     });
   }
 };
-
 // Logout api
   export const logoutUser = async(req,res)=>{
 
