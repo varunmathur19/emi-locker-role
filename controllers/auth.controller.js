@@ -4674,3 +4674,203 @@ export const updateCompanySetting = async (req, res) => {
     });
   }
 };
+
+
+// add-device / user list
+
+
+export const addDevice = async (req, res) => {
+  try {
+    const {
+      enrollment_type,
+      customer_name,
+      registration_no,
+      phone_number,
+      imei_1,
+      retailer,
+      distributor,
+      key_type,
+      device_status,
+      fl_version,
+    } = req.body;
+
+    // Get uploaded files from Multer
+    const brandFile = req.files?.brand?.[0];
+    const customerImageFile = req.files?.customer_image?.[0];
+
+    // Validate required fields
+    const requiredFields = {
+      enrollment_type,
+      customer_name,
+      registration_no,
+      phone_number,
+      imei_1,
+      retailer,
+      distributor,
+      key_type,
+      device_status,
+      fl_version,
+    };
+
+    const missingFields = Object.entries(requiredFields)
+      .filter(
+        ([, value]) =>
+          value === undefined ||
+          value === null ||
+          String(value).trim() === ""
+      )
+      .map(([key]) => key);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide all required fields.",
+        missingFields,
+      });
+    }
+
+    // Validate enrollment type
+    const normalizedEnrollmentType = String(enrollment_type)
+      .trim()
+      .toLowerCase();
+
+    if (!["old", "new"].includes(normalizedEnrollmentType)) {
+      return res.status(400).json({
+        success: false,
+        message: "enrollment_type must be either 'old' or 'new'.",
+      });
+    }
+
+    // Validate uploaded images
+    if (!brandFile || !customerImageFile) {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Both brand and customer_image image files are required.",
+      });
+    }
+
+    // Build image paths based on uploadDeviceImages middleware
+    const brand = `/uploads/devices/${brandFile.filename}`;
+    const customer_image = `/uploads/devices/${customerImageFile.filename}`;
+
+    // Prepare database data
+    const deviceData = {
+      brand,
+      enrollment_type: normalizedEnrollmentType,
+      customer_name: String(customer_name).trim(),
+      customer_image,
+      registration_no: String(registration_no).trim(),
+      phone_number: String(phone_number).trim(),
+      imei_1: String(imei_1).trim(),
+      retailer,
+      distributor,
+      key_type,
+      device_status,
+      fl_version,
+      created_at: db.fn.now(),
+    };
+
+    // Insert into device_detail table
+    const insertResult = await db("device_detail").insert(deviceData);
+
+    // Get inserted ID safely
+    const deviceId = Array.isArray(insertResult)
+      ? insertResult[0]
+      : insertResult;
+
+    // Return only plain JSON-safe values
+    return res.status(201).json({
+      success: true,
+      message: "Device added successfully.",
+      data: {
+        id: deviceId,
+        brand,
+        enrollment_type: normalizedEnrollmentType,
+        customer_name: deviceData.customer_name,
+        customer_image,
+        registration_no: deviceData.registration_no,
+        phone_number: deviceData.phone_number,
+        imei_1: deviceData.imei_1,
+        retailer,
+        distributor,
+        key_type,
+        device_status,
+        fl_version,
+      },
+    });
+  } catch (error) {
+    console.error("ADD DEVICE ERROR:", error?.stack || error?.message || error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add device.",
+      error: error?.message || "Internal server error",
+    });
+  }
+};
+
+
+// GET all devices
+export const getDevices = async (req, res) => {
+  try {
+    const devices = await db("device_detail")
+      .select("*")
+      .orderBy("id", "desc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Devices fetched successfully.",
+      count: devices.length,
+      data: devices,
+    });
+  } catch (error) {
+    console.error("GET DEVICES ERROR:", error?.stack || error?.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch devices.",
+      error: error?.message || "Internal server error",
+    });
+  }
+};
+
+// GET single device by ID
+export const getDeviceById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    if (!/^\d+$/.test(id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const device = await db("device_detail")
+      .where({ id })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Device fetched successfully.",
+      data: device,
+    });
+  } catch (error) {
+    console.error("GET DEVICE BY ID ERROR:", error?.stack || error?.message);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch device.",
+      error: error?.message || "Internal server error",
+    });
+  }
+};
+
