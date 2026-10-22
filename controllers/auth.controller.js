@@ -937,7 +937,7 @@ export const getUsers = async (req, res) => {
       8: 9,
     };
 
-    // 4. Read optional query parameters
+    // 4. Read query parameters
     const readQueryValue = (key) => {
       const value = req.query[key];
 
@@ -994,11 +994,14 @@ export const getUsers = async (req, res) => {
       }
     }
 
-    // 6. Staff scope and permissions
-    let staffRoleAccess = false;
+    // 6. Staff hierarchy validation
     let staffCreatorId = null;
     let staffCreatorRoleId = null;
     let transferTargetRoleId = null;
+
+    // Keep this false unless getAllUsers explicitly requires
+    // a separate, validated transfer-access flag.
+    let staffRoleAccess = false;
 
     if (isStaff) {
       const staffUser = await db("users")
@@ -1019,7 +1022,7 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Resolve creator
+      // Resolve the Staff creator.
       const creatorValue =
         staffUser.created_by ?? staffUser.parent_id;
 
@@ -1050,7 +1053,7 @@ export const getUsers = async (req, res) => {
 
       staffCreatorRoleId = Number(creator.role_id);
 
-      // Determine the next hierarchy role
+      // Determine the next role in the hierarchy.
       transferTargetRoleId =
         NEXT_ROLE_BY_ROLE[staffCreatorRoleId] ?? null;
 
@@ -1062,10 +1065,9 @@ export const getUsers = async (req, res) => {
         });
       }
 
-      // Validate explicitly requested role
+      // Validate an explicitly requested role.
       if (role_id !== null) {
-        const requestedRole =
-          await getRoleForPermission(role_id);
+        const requestedRole = await getRoleForPermission(role_id);
 
         if (!requestedRole) {
           return res.status(400).json({
@@ -1075,47 +1077,11 @@ export const getUsers = async (req, res) => {
         }
       }
 
-      // Validate Staff permissions
-      const permissions =
-        await getStaffPermissions(staffUser);
-
-      const transferModule = await db("modules")
-        .select("id", "name", "slug")
-        .where(function () {
-          this.whereRaw(
-            "LOWER(TRIM(slug)) IN (?, ?, ?, ?)",
-            [
-              "transfer-point",
-              "transfer-points",
-              "transfer_point",
-              "transfer_points",
-            ]
-          ).orWhereRaw(
-            "LOWER(TRIM(name)) = ?",
-            ["transfer points"]
-          );
-        })
-        .first();
-
-      if (!transferModule) {
-        return res.status(403).json({
-          success: false,
-          message: "Transfer Points module not found",
-        });
-      }
-
-      staffRoleAccess = hasAnyStaffModulePermission(
-        permissions,
-        transferModule.id
-      );
-
-      if (!staffRoleAccess) {
-        return res.status(403).json({
-          success: false,
-          message:
-            "You do not have permission to access Transfer Points",
-        });
-      }
+      // IMPORTANT:
+      // Do not check Transfer Points permission here.
+      // This endpoint lists users and is also used for dashboard counts.
+      // Transfer-specific permissions should be validated by the
+      // actual Transfer/Revert/Schema Transfer endpoints.
 
       console.log("STAFF CREATOR DETAILS:", {
         staffId: loggedInUserId,
@@ -1125,7 +1091,7 @@ export const getUsers = async (req, res) => {
       });
     }
 
-    // 7. Determine full-user access
+    // 7. Determine access scope
     const canSeeAllUsers =
       isMasterAdmin ||
       isAdmin ||
@@ -1138,7 +1104,6 @@ export const getUsers = async (req, res) => {
       );
 
     // 8. Fetch users
-    // IMPORTANT: Pass transferTargetRoleId to the model.
     const result = await getAllUsers(
       limit,
       offset,
@@ -1184,8 +1149,7 @@ export const getUsers = async (req, res) => {
           }
         }
 
-        let wallet_balance =
-          user.wallet_balance ?? [];
+        let wallet_balance = user.wallet_balance ?? [];
 
         if (typeof wallet_balance === "string") {
           try {
@@ -1204,7 +1168,7 @@ export const getUsers = async (req, res) => {
         let parent_organization_name =
           user.parent_organization_name || null;
 
-        // Preserve CNF parent information
+        // Preserve CNF parent information.
         if (
           Number(user.role_id) === 2 &&
           user.parent_id
@@ -1214,10 +1178,7 @@ export const getUsers = async (req, res) => {
             .where("id", Number(user.parent_id))
             .first()
             .catch((error) => {
-              console.error(
-                "CNF PARENT FETCH ERROR:",
-                error
-              );
+              console.error("CNF PARENT FETCH ERROR:", error);
               return null;
             });
 
@@ -1283,12 +1244,10 @@ export const getUsers = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message:
-        error?.message || "Failed to get users",
+      message: error?.message || "Failed to get users",
     });
   }
 };
-
 // Logout api
   export const logoutUser = async(req,res)=>{
 
@@ -4254,11 +4213,13 @@ export const transferWalletPoints = async (req, res) => {
 };
 
 //get the transactione data
+
 export const getWalletTransactions = async (req, res) => {
   try {
     const userId = Number(req.user?.id);
     const roleId = Number(req.user?.role_id);
 
+    // 1. Validate logged-in user
     if (
       !Number.isInteger(userId) ||
       userId <= 0 ||
@@ -4270,6 +4231,7 @@ export const getWalletTransactions = async (req, res) => {
       });
     }
 
+    // 2. Read query parameters
     const {
       page = 1,
       limit = 10,
@@ -4277,7 +4239,10 @@ export const getWalletTransactions = async (req, res) => {
       key_setting_id,
     } = req.query;
 
-    const pageNumber = Math.max(parseInt(page, 10) || 1, 1);
+    const pageNumber = Math.max(
+      parseInt(page, 10) || 1,
+      1
+    );
 
     const limitNumber = Math.min(
       Math.max(parseInt(limit, 10) || 10, 1),
@@ -4286,7 +4251,7 @@ export const getWalletTransactions = async (req, res) => {
 
     const offset = (pageNumber - 1) * limitNumber;
 
-    // Staff account verify karo, creator ka role restrict mat karo.
+    // 3. Verify Staff account
     if (roleId === 9) {
       const staff = await db("users")
         .select("id")
@@ -4302,7 +4267,7 @@ export const getWalletTransactions = async (req, res) => {
       }
     }
 
-    // Base wallet transactions query.
+    // 4. Base wallet transactions query
     const query = db("wallet as wt")
       .leftJoin(
         "users as from_user",
@@ -4328,8 +4293,8 @@ export const getWalletTransactions = async (req, res) => {
     /*
      * Role 0: All transactions.
      * Role 1: All transactions.
-     * Role 9: All transactions, regardless of who created the Staff.
-     * Other roles: Only transactions involving themselves.
+     * Role 9: All transactions.
+     * Other roles: Transactions involving themselves.
      */
     if (roleId !== 0 && roleId !== 1 && roleId !== 9) {
       query.where(function () {
@@ -4338,7 +4303,7 @@ export const getWalletTransactions = async (req, res) => {
       });
     }
 
-    // Transaction type filter.
+    // 5. Transaction type filter
     if (
       transaction_type !== undefined &&
       transaction_type !== ""
@@ -4355,7 +4320,7 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.transaction_type", type);
     }
 
-    // Key setting filter.
+    // 6. Key setting filter
     if (
       key_setting_id !== undefined &&
       key_setting_id !== ""
@@ -4375,28 +4340,34 @@ export const getWalletTransactions = async (req, res) => {
       query.where("wt.key_setting_id", keySettingId);
     }
 
-    // Total transaction count.
+    // 7. Count total transactions
     const countResult = await query
       .clone()
       .countDistinct({ total: "wt.id" })
       .first();
 
-    // Paginated transaction history.
+    const total = Number(countResult?.total || 0);
+
+    // 8. Fetch paginated transaction history
     const transactions = await query
       .clone()
       .select(
         "wt.*",
-        db.raw(`
-          CASE
-            WHEN actor.role_id = 9 THEN actor.name
-            ELSE from_user.name
-          END AS from_user_name
-        `),
+
+        // Use the actual transaction sender.
+        "from_user.name as from_user_name",
         "from_user.email as from_user_email",
         "from_user.role_id as from_user_role_id",
+
+        // Use the actual transaction receiver.
         "to_user.name as to_user_name",
         "to_user.email as to_user_email",
         "to_user.role_id as to_user_role_id",
+
+        // Keep the transaction creator separately.
+        "actor.name as actor_name",
+        "actor.role_id as actor_role_id",
+
         "ks.name as key_setting_name"
       )
       .orderBy("wt.created_at", "desc")
@@ -4404,8 +4375,7 @@ export const getWalletTransactions = async (req, res) => {
       .limit(limitNumber)
       .offset(offset);
 
-    const total = Number(countResult?.total || 0);
-
+    // 9. API response
     return res.status(200).json({
       success: true,
       message: "Wallet transactions fetched successfully",
@@ -4418,7 +4388,10 @@ export const getWalletTransactions = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GET WALLET TRANSACTIONS ERROR:", error);
+    console.error(
+      "GET WALLET TRANSACTIONS ERROR:",
+      error
+    );
 
     return res.status(500).json({
       success: false,
@@ -4427,6 +4400,7 @@ export const getWalletTransactions = async (req, res) => {
     });
   }
 };
+
 
 //company setting  name and logo
 export const addCompanySetting = async (req, res) => {
@@ -4674,3 +4648,346 @@ export const updateCompanySetting = async (req, res) => {
     });
   }
 };
+
+
+// add-device / user list
+
+
+export const addDevice = async (req, res) => {
+  try {
+    // 1. Get token from Authorization header
+    const authHeader = req.headers.authorization;
+
+    if (!authHeader?.startsWith("Bearer ")) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication token is missing.",
+      });
+    }
+
+    const token = authHeader.slice(7).trim();
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: "Authentication token is missing.",
+      });
+    }
+
+    // 2. Verify token
+    if (!process.env.JWT_SECRET) {
+      console.error("JWT_SECRET is missing.");
+
+      return res.status(500).json({
+        success: false,
+        message: "Authentication configuration error.",
+      });
+    }
+
+    let decoded;
+
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch {
+      return res.status(401).json({
+        success: false,
+        message: "Invalid or expired token. Please login again.",
+      });
+    }
+
+    // 3. Extract logged-in user's ID from token
+    const loggedInUserId =
+      decoded.id ??
+      decoded.user_id ??
+      decoded.userId;
+
+    if (
+      loggedInUserId === undefined ||
+      loggedInUserId === null ||
+      String(loggedInUserId).trim() === ""
+    ) {
+      return res.status(401).json({
+        success: false,
+        message: "User ID not found in token.",
+      });
+    }
+
+    // 4. Verify user in database
+    const user = await db("users")
+      .select("id")
+      .where("id", loggedInUserId)
+      .first();
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: "Logged-in user not found.",
+      });
+    }
+
+    // 5. Read request fields
+    const {
+      enrollment_type,
+      customer_name,
+      registration_no,
+      phone_number,
+      imei_1,
+      key_type,
+      device_status,
+      fl_version,
+    } = req.body;
+
+    // 6. Get uploaded image files
+    const brandFile =
+      req.files?.brand?.[0] ||
+      req.files?.brandImage?.[0];
+
+    const customerImageFile =
+      req.files?.customer_image?.[0] ||
+      req.files?.customerImage?.[0];
+
+    // 7. Validate required fields
+    const requiredFields = {
+      enrollment_type,
+      customer_name,
+      registration_no,
+      phone_number,
+      imei_1,
+      key_type,
+      device_status,
+      fl_version,
+    };
+
+    const missingFields = Object.entries(requiredFields)
+      .filter(
+        ([, value]) =>
+          value === undefined ||
+          value === null ||
+          String(value).trim() === ""
+      )
+      .map(([key]) => key);
+
+    if (missingFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide all required fields.",
+        missingFields,
+      });
+    }
+
+    // 8. Validate enrollment type
+    const normalizedEnrollmentType = String(enrollment_type)
+      .trim()
+      .toLowerCase();
+
+    if (!["old", "new"].includes(normalizedEnrollmentType)) {
+      return res.status(400).json({
+        success: false,
+        message: "enrollment_type must be either 'old' or 'new'.",
+      });
+    }
+
+    // 9. Validate images
+    if (!brandFile || !customerImageFile) {
+      return res.status(400).json({
+        success: false,
+        message: "Both brand and customer images are required.",
+      });
+    }
+
+    const brand = `/uploads/devices/${brandFile.filename}`;
+    const customer_image = `/uploads/devices/${customerImageFile.filename}`;
+
+    // 10. Prepare database values
+    const deviceData = {
+      created_by: user.id,
+      brand,
+      enrollment_type: normalizedEnrollmentType,
+      customer_name: String(customer_name).trim(),
+      customer_image,
+      registration_no: String(registration_no).trim(),
+      phone_number: String(phone_number).trim(),
+      imei_1: String(imei_1).trim(),
+      key_type,
+      device_status,
+      fl_version,
+      created_at: db.fn.now(),
+    };
+
+    // 11. Insert device into database
+    const insertResult = await db("device_detail").insert(deviceData);
+
+    const deviceId = Array.isArray(insertResult)
+      ? insertResult[0]
+      : insertResult;
+
+    // 12. Return only plain JSON values
+    return res.status(201).json({
+      success: true,
+      message: "Device added successfully.",
+      data: {
+        id: deviceId,
+        created_by: user.id,
+        brand,
+        enrollment_type: normalizedEnrollmentType,
+        customer_name: deviceData.customer_name,
+        customer_image,
+        registration_no: deviceData.registration_no,
+        phone_number: deviceData.phone_number,
+        imei_1: deviceData.imei_1,
+        key_type,
+        device_status,
+        fl_version,
+      },
+    });
+  } catch (error) {
+    console.error(
+      "ADD DEVICE ERROR:",
+      error?.stack || error?.message || String(error)
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to add device.",
+      error: error?.message || "Internal server error",
+    });
+  }
+};
+
+// GET all devices
+
+export const getDevices = async (req, res) => {
+  try {
+    const devices = await db("device_detail as d")
+      // User who added the device (Retailer)
+      .leftJoin("users as retailer", "d.created_by", "retailer.id")
+
+      // Retailer's parent (FOS)
+      .leftJoin("users as fos", "retailer.parent_id", "fos.id")
+
+      // FOS's parent (Distributor)
+      .leftJoin("users as distributor", "fos.parent_id", "distributor.id")
+
+      .select(
+        "d.*",
+
+        // Retailer details
+        "retailer.id as retailer_id",
+        "retailer.name as retailer_name",
+        "retailer.organization_name as retailer_company_name",
+
+        // FOS details
+        "fos.id as fos_id",
+        "fos.name as fos_name",
+        "fos.organization_name as fos_company_name",
+
+        // Distributor details
+        "distributor.id as distributor_id",
+        "distributor.name as distributor_name",
+        "distributor.organization_name as distributor_company_name"
+      )
+      .orderBy("d.id", "desc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Devices fetched successfully.",
+      count: devices.length,
+      data: devices,
+    });
+  } catch (error) {
+    console.error(
+      "GET DEVICES ERROR:",
+      error?.stack || error?.message || error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch devices.",
+      error: error?.message || "Internal server error",
+    });
+  }
+};
+
+
+// GET single device by ID
+export const getDeviceById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // Validate device ID
+    if (!id || !/^\d+$/.test(String(id))) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const deviceId = Number(id);
+
+    if (!Number.isSafeInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Device ID must be a positive integer.",
+      });
+    }
+
+    // Fetch complete device data and related hierarchy details
+    const device = await db("device_detail as d")
+      .leftJoin("users as retailer", "d.created_by", "retailer.id")
+      .leftJoin("users as fos", "retailer.parent_id", "fos.id")
+      .leftJoin("users as distributor", "fos.parent_id", "distributor.id")
+      .select(
+        // All device_detail columns
+        "d.*",
+
+        // Retailer details
+        "retailer.id as retailer_id",
+        "retailer.name as retailer_name",
+        "retailer.organization_name as retailer_company_name",
+        "retailer.parent_id as retailer_parent_id",
+
+        // FOS details
+        "fos.id as fos_id",
+        "fos.name as fos_name",
+        "fos.organization_name as fos_company_name",
+        "fos.parent_id as fos_parent_id",
+
+        // Distributor details
+        "distributor.id as distributor_id",
+        "distributor.name as distributor_name",
+        "distributor.organization_name as distributor_company_name",
+        "distributor.parent_id as distributor_parent_id"
+      )
+      .where("d.id", deviceId)
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+        data: null,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Device fetched successfully.",
+      data: device,
+    });
+  } catch (error) {
+    console.error(
+      "GET DEVICE BY ID ERROR:",
+      error?.stack || error?.message || error
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch device.",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error?.message
+          : "Internal server error",
+    });
+  }
+};
+

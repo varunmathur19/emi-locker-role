@@ -33,10 +33,13 @@ import {
     getCompanySetting,
     updateCompanySetting,
     getNormalCompanySetting,
+    addDevice,
+    getDeviceById,
+    getDevices,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
-import { uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
+import { uploadDeviceImages, uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
 
 import {
@@ -336,6 +339,13 @@ router.put(
   uploadModuleIcon,
   updateCompanySetting
 );
+
+
+// add-device / user list
+router.post("/add-device", uploadDeviceImages, addDevice);
+
+router.get("/devices", getDevices);
+router.get("/devices/:id", getDeviceById);
 
 
 
