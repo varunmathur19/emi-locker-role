@@ -3758,7 +3758,9 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 3. Fetch the logged-in account
+    const isRevert = transactionType === 2;
+
+    // 3. Fetch and lock logged-in account
     const actor = await trx("users")
       .select("id", "role_id", "parent_id", "transaction_pin")
       .where("id", actorId)
@@ -3772,7 +3774,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 4. Verify PIN against the logged-in account
+    // 4. Verify transaction PIN
     if (
       String(actor.transaction_pin ?? "").trim() !==
       String(transaction_pin).trim()
@@ -3783,13 +3785,11 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 5. Determine the account whose wallet is used
+    // 5. Determine wallet owner
     const actorRoleId = Number(actor.role_id);
 
     const walletOwnerId =
-      actorRoleId === 9
-        ? Number(actor.parent_id)
-        : actorId;
+      actorRoleId === 9 ? Number(actor.parent_id) : actorId;
 
     if (
       !Number.isInteger(walletOwnerId) ||
@@ -3814,7 +3814,7 @@ export const transferWalletPoints = async (req, res) => {
     if (toUserId === walletOwnerId) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "You cannot transfer points to your wallet owner",
+        message: "You cannot select your own wallet owner",
       });
     }
 
@@ -3838,7 +3838,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 7. Lock wallet owner's row
+    // 7. Lock wallet owner
     const walletOwner = await trx("users")
       .select("id", "role_id", "parent_id", "wallet_balance")
       .where("id", walletOwnerId)
@@ -3853,7 +3853,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 8. Lock receiver's row
+    // 8. Lock selected user
     const receiver = await trx("users")
       .select("id", "role_id", "parent_id", "wallet_balance")
       .where("id", toUserId)
@@ -3867,7 +3867,66 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 9. Parse wallet balance
+    /*
+     * 9. REVERT-ONLY HIERARCHY VALIDATION
+     *
+     * Revert is allowed only from the direct child of the
+     * wallet owner. This prevents skipping hierarchy levels.
+     *
+     * Example:
+     * Admin -> CNF -> Super Distributor -> Distributor
+     * -> FOS -> Retailer -> Sub-Retailer
+     *
+     * Normal Transfer and Schema Transfer are unaffected.
+     */
+    if (isRevert) {
+      const receiverParentId = Number(receiver.parent_id);
+
+      if (receiverParentId !== walletOwnerId) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Revert is allowed only from your direct child in the hierarchy",
+          wallet_owner_id: walletOwnerId,
+          selected_user_id: toUserId,
+          selected_user_parent_id: receiver.parent_id,
+        });
+      }
+
+      // Enforce the expected next role in the hierarchy.
+      // Role 0 = Master Admin, 1 = Admin, 2 = CNF,
+      // 3 = Super Distributor, 4 = Distributor,
+      // 5 = FOS, 6 = Retailer, 7 = Sub-Retailer.
+      const nextRoleByParentRole = {
+        0: 1,
+        1: 2,
+        2: 3,
+        3: 4,
+        4: 5,
+        5: 6,
+        6: 7,
+      };
+
+      const walletOwnerRoleId = Number(walletOwner.role_id);
+      const expectedChildRole =
+        nextRoleByParentRole[walletOwnerRoleId];
+
+      if (
+        expectedChildRole === undefined ||
+        Number(receiver.role_id) !== expectedChildRole
+      ) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Selected user is not the next allowed role in the revert hierarchy",
+          wallet_owner_role_id: walletOwnerRoleId,
+          selected_user_role_id: Number(receiver.role_id),
+          expected_child_role_id: expectedChildRole ?? null,
+        });
+      }
+    }
+
+    // 10. Parse wallet balances
     const parseWallet = (value) => {
       if (
         value === null ||
@@ -3925,7 +3984,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 10. Match wallet entries with the selected key
+    // 11. Match wallet entries with the selected key
     const normalize = (value) =>
       String(value ?? "").trim().toLowerCase();
 
@@ -4016,7 +4075,10 @@ export const transferWalletPoints = async (req, res) => {
     };
 
     const ownerBalance = readBalance(ownerWallet, ownerWalletIndex);
-    const receiverBalance = readBalance(receiverWallet, receiverWalletIndex);
+    const receiverBalance = readBalance(
+      receiverWallet,
+      receiverWalletIndex
+    );
 
     if (
       !Number.isFinite(ownerBalance) ||
@@ -4032,8 +4094,18 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 11. Require the selected key in the wallet being debited/credited
-    if (ownerWalletIndex < 0) {
+    /*
+     * 12. Validate wallet entries and balances
+     *
+     * For revert:
+     * - The child must have the selected key.
+     * - The parent can receive the key even if its wallet
+     *   does not currently contain that key entry.
+     *
+     * For transfer/schema transfer:
+     * - Preserve the existing owner's key requirement.
+     */
+    if (!isRevert && ownerWalletIndex < 0) {
       return await rollbackAndRespond(400, {
         success: false,
         message:
@@ -4068,9 +4140,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 12. Validate balances by transaction type
-    if (transactionType === 2) {
-      // Revert: selected receiver sends points back to wallet owner.
+    if (isRevert) {
       if (receiverWalletIndex < 0) {
         return await rollbackAndRespond(400, {
           success: false,
@@ -4109,23 +4179,29 @@ export const transferWalletPoints = async (req, res) => {
     const ownerBalanceBefore = ownerBalance;
     const receiverBalanceBefore = receiverBalance;
 
-    const ownerBalanceAfter =
-      transactionType === 2
-        ? ownerBalance + points
-        : ownerBalance - points;
+    const ownerBalanceAfter = isRevert
+      ? ownerBalance + points
+      : ownerBalance - points;
 
-    const receiverBalanceAfter =
-      transactionType === 2
-        ? receiverBalance - points
-        : receiverBalance + points;
+    const receiverBalanceAfter = isRevert
+      ? receiverBalance - points
+      : receiverBalance + points;
 
-    // 14. Update wallet owner
-    ownerWallet[ownerWalletIndex] = {
-      ...ownerWallet[ownerWalletIndex],
-      balance: ownerBalanceAfter,
-    };
+    // 14. Update wallet owner's key entry
+    if (ownerWalletIndex >= 0) {
+      ownerWallet[ownerWalletIndex] = {
+        ...ownerWallet[ownerWalletIndex],
+        balance: ownerBalanceAfter,
+      };
+    } else {
+      ownerWallet.push({
+        key_setting_id: keySettingId,
+        name: keySetting.name,
+        balance: ownerBalanceAfter,
+      });
+    }
 
-    // 15. Update receiver wallet
+    // 15. Update selected user's key entry
     if (receiverWalletIndex >= 0) {
       receiverWallet[receiverWalletIndex] = {
         ...receiverWallet[receiverWalletIndex],
@@ -4152,8 +4228,9 @@ export const transferWalletPoints = async (req, res) => {
         wallet_balance: JSON.stringify(receiverWallet),
       });
 
-    // 17. Store the transaction.
-    // The parent is the wallet owner; Staff is the initiator.
+    // 17. Store transaction
+    // Keep the existing transaction structure.
+    // The frontend can reverse displayed parties for type 2.
     const [transactionId] = await trx("wallet").insert({
       from_user_id: walletOwnerId,
       to_user_id: toUserId,
@@ -4172,10 +4249,9 @@ export const transferWalletPoints = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        transactionType === 2
-          ? "Points reverted successfully"
-          : "Points transferred successfully",
+      message: isRevert
+        ? "Points reverted successfully"
+        : "Points transferred successfully",
       data: {
         transaction_id: transactionId,
         actor_id: actorId,
