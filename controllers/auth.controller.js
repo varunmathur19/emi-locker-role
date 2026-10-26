@@ -3764,6 +3764,7 @@ export const updateKeySetting = async (req, res) => {
 
 
 
+
 export const transferWalletPoints = async (req, res) => {
   let trx;
 
@@ -3794,8 +3795,8 @@ export const transferWalletPoints = async (req, res) => {
   const normalize = (value) =>
     String(value ?? "").trim().toLowerCase();
 
-  // Handles JSON stored as a string, double-encoded JSON,
-  // arrays, and objects keyed by key name.
+  // Handles JSON strings, double-encoded JSON, arrays,
+  // and objects keyed by key name.
   const parseWallet = (value) => {
     if (Buffer.isBuffer(value)) {
       value = value.toString("utf8");
@@ -4007,7 +4008,7 @@ export const transferWalletPoints = async (req, res) => {
 
     const isRevert = transactionType === 2;
 
-    // Lock the actor.
+    // Lock the logged-in actor.
     const actor = await trx("users")
       .select(
         "id",
@@ -4027,6 +4028,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
+    // Validate transaction PIN.
     if (
       String(actor.transaction_pin ?? "").trim() !==
       String(transaction_pin).trim()
@@ -4107,29 +4109,50 @@ export const transferWalletPoints = async (req, res) => {
     const ownerRoleId = Number(walletOwner.role_id);
     const receiverRoleId = Number(receiver.role_id);
 
-    // Require the receiver to be a direct child in the hierarchy.
-    const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
 
-    if (Number(receiver.parent_id) !== walletOwnerId) {
-      return await rollbackAndRespond(403, {
-        success: false,
-        message: "Receiver is not a direct child of the wallet owner",
-        wallet_owner_id: walletOwnerId,
-        receiver_id: toUserId,
-      });
-    }
+   
+const isPrivilegedRevert =
+  isRevert && [0, 1].includes(actorRoleId);
 
-    if (!allowedRoles.includes(receiverRoleId)) {
-      return await rollbackAndRespond(403, {
-        success: false,
-        message: "Receiver role is not allowed for this transfer",
-        wallet_owner_role_id: ownerRoleId,
-        receiver_role_id: receiverRoleId,
-        allowed_roles: allowedRoles,
-      });
-    }
+const isPrivilegedSchemaTransfer =
+  transactionType === 1 && [0, 1].includes(actorRoleId);
 
-    // Parse wallets and report which record is malformed.
+if (!isPrivilegedRevert && !isPrivilegedSchemaTransfer) {
+  // Normal Transfer Point: existing direct-parent hierarchy
+  // validation remains unchanged.
+  const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
+
+  if (Number(receiver.parent_id) !== walletOwnerId) {
+    return await rollbackAndRespond(403, {
+      success: false,
+      message: "Receiver is not a direct child of the wallet owner",
+      wallet_owner_id: walletOwnerId,
+      receiver_id: toUserId,
+    });
+  }
+
+  if (!allowedRoles.includes(receiverRoleId)) {
+    return await rollbackAndRespond(403, {
+      success: false,
+      message: "Receiver role is not allowed for this transfer",
+      wallet_owner_role_id: ownerRoleId,
+      receiver_role_id: receiverRoleId,
+      allowed_roles: allowedRoles,
+    });
+  }
+} else {
+
+  if (receiverRoleId < 2 || receiverRoleId > 9) {
+    return await rollbackAndRespond(403, {
+      success: false,
+      message: isPrivilegedSchemaTransfer
+        ? "Receiver role is not allowed for this schema transfer"
+        : "Receiver role is not allowed for this revert",
+      receiver_role_id: receiverRoleId,
+    });
+  }
+}
+
     const ownerEntries = parseWallet(walletOwner.wallet_balance);
     const receiverEntries = parseWallet(receiver.wallet_balance);
 
@@ -4244,6 +4267,9 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
+    // Update wallet entries.
+    // Revert returns points to the wallet owner and reduces
+    // the receiver's balance.
     const ownerUpdated = {
       ...ownerEntry,
       consumed: isRevert
@@ -4342,6 +4368,7 @@ export const transferWalletPoints = async (req, res) => {
     });
   }
 };
+
 
 
 //get the transactione data
