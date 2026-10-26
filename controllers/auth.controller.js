@@ -1211,21 +1211,21 @@ export const getUsers = async (req, res) => {
       0
     );
 
-    console.log("GET USERS RESULT:", {
-      userId: loggedInUserId,
-      roleId: loggedInRoleId,
-      isStaff,
-      staffCreatorId,
-      staffCreatorRoleId,
-      canSeeAllUsers,
-      requestedRoleId: role_id,
-      transferTargetRoleId,
-      returnedUsers: users.length,
-      totalUsers,
-      page,
-      limit,
-      offset,
-    });
+    // console.log("GET USERS RESULT:", {
+    //   userId: loggedInUserId,
+    //   roleId: loggedInRoleId,
+    //   isStaff,
+    //   staffCreatorId,
+    //   staffCreatorRoleId,
+    //   canSeeAllUsers,
+    //   requestedRoleId: role_id,
+    //   transferTargetRoleId,
+    //   returnedUsers: users.length,
+    //   totalUsers,
+    //   page,
+    //   limit,
+    //   offset,
+    // });
 
     // 11. API response
     return res.status(200).json({
@@ -3492,26 +3492,22 @@ export const getCities = async (req, res) => {
 
 
 
+
 export const getKeySettings = async (req, res) => {
   try {
-    const loggedInUserId = req.user?.id;
+    const loggedInUserId = Number(req.user?.id);
 
-    if (!loggedInUserId) {
+    // 1. Validate logged-in user
+    if (!Number.isInteger(loggedInUserId) || loggedInUserId <= 0) {
       return res.status(401).json({
         success: false,
         message: "Unauthorized user",
       });
     }
 
-    // Fetch logged-in user's details
+    // 2. Fetch logged-in user
     const loggedInUser = await db("users")
-      .select(
-        "id",
-        "role_id",
-        "parent_id",
-        "created_by",
-        "wallet_balance"
-      )
+      .select("id", "role_id", "parent_id", "created_by")
       .where("id", loggedInUserId)
       .first();
 
@@ -3522,32 +3518,27 @@ export const getKeySettings = async (req, res) => {
       });
     }
 
-    // Select wallet owner
-    let walletUserId = loggedInUser.id;
+    // 3. Determine wallet owner
+    let walletUserId = Number(loggedInUser.id);
 
-    // Staff uses creator's wallet, falling back to parent
     if (Number(loggedInUser.role_id) === 9) {
-      walletUserId =
-        loggedInUser.created_by ||
-        loggedInUser.parent_id;
+      walletUserId = Number(
+        loggedInUser.created_by || loggedInUser.parent_id
+      );
     }
 
-    if (!walletUserId) {
+    if (!Number.isInteger(walletUserId) || walletUserId <= 0) {
       return res.status(400).json({
         success: false,
         message: "Staff parent or creator user not found",
       });
     }
 
-    // Fetch wallet owner's balance
-    let walletUser = loggedInUser;
-
-    if (Number(walletUserId) !== Number(loggedInUser.id)) {
-      walletUser = await db("users")
-        .select("id", "wallet_balance")
-        .where("id", walletUserId)
-        .first();
-    }
+    // 4. Fetch wallet balance
+    const walletUser = await db("users")
+      .select("id", "wallet_balance")
+      .where("id", walletUserId)
+      .first();
 
     if (!walletUser) {
       return res.status(404).json({
@@ -3556,15 +3547,67 @@ export const getKeySettings = async (req, res) => {
       });
     }
 
-    // Safely parse wallet_balance
+    // 5. Parse wallet_balance safely
     let walletBalance = walletUser.wallet_balance ?? [];
 
-    if (typeof walletBalance === "string") {
+    if (Buffer.isBuffer(walletBalance)) {
+      walletBalance = walletBalance.toString("utf8");
+    }
+
+    for (let i = 0; i < 3 && typeof walletBalance === "string"; i++) {
+      if (!walletBalance.trim()) {
+        walletBalance = [];
+        break;
+      }
+
       try {
         walletBalance = JSON.parse(walletBalance);
       } catch (error) {
         console.error("WALLET BALANCE JSON ERROR:", error);
-        walletBalance = [];
+
+        return res.status(500).json({
+          success: false,
+          message: "Invalid wallet balance JSON format",
+        });
+      }
+    }
+
+    // 6. Handle object formats
+    if (
+      walletBalance &&
+      typeof walletBalance === "object" &&
+      !Array.isArray(walletBalance)
+    ) {
+      if (
+        walletBalance.name !== undefined ||
+        walletBalance.available !== undefined ||
+        walletBalance.balance !== undefined
+      ) {
+        walletBalance = [walletBalance];
+      } else {
+        walletBalance = Object.entries(walletBalance).map(
+          ([name, value]) => {
+            if (
+              value &&
+              typeof value === "object" &&
+              !Array.isArray(value)
+            ) {
+              return {
+                ...value,
+                name: value.name ?? name,
+              };
+            }
+
+            const available = Number(value) || 0;
+
+            return {
+              name,
+              balance: available,
+              consumed: 0,
+              available,
+            };
+          }
+        );
       }
     }
 
@@ -3572,29 +3615,69 @@ export const getKeySettings = async (req, res) => {
       walletBalance = [];
     }
 
-    // Fetch ALL records from key_setting
-    // No status filter: active and inactive records are included
+    // Remove the known legacy placeholder
+    walletBalance = walletBalance.filter(
+      (item) =>
+        !(
+          item?._legacy_single_balance === true &&
+          (item?.name === null || item?.name === undefined)
+        )
+    );
+
+    // 7. Fetch key settings
     const keySettings = await db("key_setting")
       .select("*")
       .orderBy("id", "asc");
 
-    // Match each key with the wallet balance
+    // 8. Match wallet entries with key settings
+    const normalize = (value) =>
+      String(value ?? "").trim().toLowerCase();
+
     const data = keySettings.map((key) => {
-      const walletItem = walletBalance.find(
-        (item) =>
-          String(item?.name ?? "").trim().toLowerCase() ===
-          String(key.name ?? "").trim().toLowerCase()
-      );
+      const walletItem = walletBalance.find((item) => {
+        const itemKeyId = Number(
+          item?.key_setting_id ??
+            item?.keySettingId ??
+            item?.key_id ??
+            item?.keyId
+        );
+
+        // Prefer matching by key ID when available.
+        if (Number.isInteger(itemKeyId) && itemKeyId > 0) {
+          return itemKeyId === Number(key.id);
+        }
+
+        // Support older wallet entries that only have a name.
+        return normalize(item?.name) === normalize(key.name);
+      });
+
+      const consumed = Number(walletItem?.consumed ?? 0);
+
+      const balance =
+        walletItem?.balance !== undefined &&
+        walletItem?.balance !== null
+          ? Number(walletItem.balance)
+          : Number(walletItem?.available ?? 0) + consumed;
+
+      const available =
+        walletItem?.available !== undefined &&
+        walletItem?.available !== null
+          ? Number(walletItem.available)
+          : balance - consumed;
 
       return {
         ...key,
-        balance: Number(walletItem?.balance ?? 0),
+        balance: Number.isFinite(balance) ? balance : 0,
+        consumed: Number.isFinite(consumed) ? consumed : 0,
+        available: Number.isFinite(available) ? available : 0,
       };
     });
 
+    // 9. Send response
     return res.status(200).json({
       success: true,
       message: "All key settings fetched successfully",
+      wallet_user_id: walletUserId,
       count: data.length,
       data,
     });
@@ -3680,16 +3763,235 @@ export const updateKeySetting = async (req, res) => {
 
 
 
+
+
+
+
 export const transferWalletPoints = async (req, res) => {
   let trx;
 
   const rollbackAndRespond = async (status, payload) => {
     if (trx) {
-      await trx.rollback();
+      try {
+        await trx.rollback();
+      } catch (error) {
+        console.error("ROLLBACK ERROR:", error);
+      }
       trx = null;
     }
 
     return res.status(status).json(payload);
+  };
+
+  const CHILD_ROLES = {
+    0: [1],
+    1: [2],
+    2: [3],
+    3: [4],
+    4: [5],
+    5: [6],
+    6: [7, 8],
+    7: [8],
+  };
+
+  const normalize = (value) =>
+    String(value ?? "").trim().toLowerCase();
+
+  const parseWallet = (value) => {
+    if (Buffer.isBuffer(value)) {
+      value = value.toString("utf8");
+    }
+
+    if (value === null || value === undefined || value === "") {
+      return [];
+    }
+
+    let parsed = value;
+
+    for (let i = 0; i < 5 && typeof parsed === "string"; i++) {
+      if (!parsed.trim()) return [];
+
+      try {
+        parsed = JSON.parse(parsed);
+      } catch {
+        return null;
+      }
+    }
+
+    if (typeof parsed === "string") {
+      return null;
+    }
+
+    if (Array.isArray(parsed)) {
+      if (
+        !parsed.every(
+          (item) =>
+            item !== null &&
+            typeof item === "object" &&
+            !Array.isArray(item)
+        )
+      ) {
+        return null;
+      }
+
+      return parsed.filter(
+        (item) =>
+          !(
+            item._legacy_single_balance === true &&
+            item.name == null
+          )
+      );
+    }
+
+    if (parsed && typeof parsed === "object") {
+      if (
+        "key_setting_id" in parsed ||
+        "keySettingId" in parsed ||
+        "key_id" in parsed ||
+        "keyId" in parsed ||
+        "balance" in parsed ||
+        "available" in parsed
+      ) {
+        return [parsed];
+      }
+
+      return Object.entries(parsed).map(([name, entry]) => {
+        if (
+          entry &&
+          typeof entry === "object" &&
+          !Array.isArray(entry)
+        ) {
+          return {
+            ...entry,
+            name: entry.name ?? name,
+          };
+        }
+
+        const amount = Number(entry);
+
+        if (!Number.isFinite(amount) || amount < 0) {
+          return {
+            name,
+            balance: NaN,
+            consumed: 0,
+            available: NaN,
+          };
+        }
+
+        return {
+          name,
+          balance: amount,
+          consumed: 0,
+          available: amount,
+        };
+      });
+    }
+
+    return null;
+  };
+
+  const normalizeEntry = (item, keySetting) => {
+    const consumed = Number(item?.consumed ?? 0);
+
+    const balance =
+      item?.balance !== undefined && item?.balance !== null
+        ? Number(item.balance)
+        : item?.available !== undefined &&
+            item?.available !== null
+          ? Number(item.available) + consumed
+          : Number(item?.amount ?? item?.points ?? 0);
+
+    const available =
+      item?.available !== undefined &&
+      item?.available !== null
+        ? Number(item.available)
+        : balance - consumed;
+
+    if (
+      !Number.isFinite(balance) ||
+      !Number.isFinite(consumed) ||
+      !Number.isFinite(available) ||
+      balance < 0 ||
+      consumed < 0 ||
+      available < 0
+    ) {
+      return null;
+    }
+
+    return {
+      ...item,
+      key_setting_id: Number(keySetting.id),
+      name: keySetting.name,
+      balance,
+      consumed,
+      available,
+    };
+  };
+
+  const findKeyIndex = (entries, keySetting) =>
+    entries.findIndex((item) => {
+      const rawId =
+        item?.key_setting_id ??
+        item?.keySettingId ??
+        item?.key_id ??
+        item?.keyId;
+
+      if (rawId !== null && rawId !== undefined && rawId !== "") {
+        return Number(rawId) === Number(keySetting.id);
+      }
+
+      return normalize(item?.name) === normalize(keySetting.name);
+    });
+
+  /*
+   * Check whether receiver is actually below ancestorId in the
+   * parent hierarchy. This supports indirect descendants too.
+   *
+   * Staff may use created_by if parent_id is not populated.
+   */
+  const isInHierarchy = async (receiverId, ancestorId) => {
+    const visited = new Set();
+    let currentId = Number(receiverId);
+
+    for (let depth = 0; depth < 20; depth++) {
+      if (
+        !Number.isInteger(currentId) ||
+        currentId <= 0 ||
+        visited.has(currentId)
+      ) {
+        return false;
+      }
+
+      visited.add(currentId);
+
+      const currentUser = await trx("users")
+        .select("id", "role_id", "parent_id", "created_by")
+        .where({ id: currentId })
+        .first();
+
+      if (!currentUser) {
+        return false;
+      }
+
+      const parentId = Number(
+        currentUser.parent_id ||
+        (Number(currentUser.role_id) === 9
+          ? currentUser.created_by
+          : 0)
+      );
+
+      if (!Number.isInteger(parentId) || parentId <= 0) {
+        return false;
+      }
+
+      if (parentId === Number(ancestorId)) {
+        return true;
+      }
+
+      currentId = parentId;
+    }
+
+    return false;
   };
 
   try {
@@ -3705,15 +4007,13 @@ export const transferWalletPoints = async (req, res) => {
       transaction_pin,
     } = req.body;
 
-    // 1. Validate logged-in user
     if (!Number.isInteger(actorId) || actorId <= 0) {
       return await rollbackAndRespond(401, {
         success: false,
-        message: "Unauthorized",
+        message: "Unauthorized user",
       });
     }
 
-    // 2. Validate request payload
     const toUserId = Number(to_user_id);
     const keySettingId = Number(key_setting_id);
     const points = Number(points_sent);
@@ -3722,34 +4022,33 @@ export const transferWalletPoints = async (req, res) => {
     if (!Number.isInteger(toUserId) || toUserId <= 0) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Valid user id is required",
+        message: "Valid receiver user ID is required",
       });
     }
 
     if (!Number.isInteger(keySettingId) || keySettingId <= 0) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Valid key setting id is required",
+        message: "Valid key setting ID is required",
       });
     }
 
     if (!Number.isFinite(points) || points <= 0) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Points must be greater than 0",
+        message: "Points must be greater than zero",
       });
     }
 
     if (![0, 1, 2].includes(transactionType)) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Valid transaction type is required",
+        message: "Invalid transaction type",
       });
     }
 
     if (
-      transaction_pin === undefined ||
-      transaction_pin === null ||
+      transaction_pin == null ||
       String(transaction_pin).trim() === ""
     ) {
       return await rollbackAndRespond(400, {
@@ -3758,10 +4057,19 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 3. Fetch the logged-in account
+    const isRevert = transactionType === 2;
+    const isSchemaTransfer = transactionType === 1;
+
+    // Lock logged-in user.
     const actor = await trx("users")
-      .select("id", "role_id", "parent_id", "transaction_pin")
-      .where("id", actorId)
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "created_by",
+        "transaction_pin"
+      )
+      .where({ id: actorId })
       .forUpdate()
       .first();
 
@@ -3772,7 +4080,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 4. Verify PIN against the logged-in account
+    // Validate transaction PIN.
     if (
       String(actor.transaction_pin ?? "").trim() !==
       String(transaction_pin).trim()
@@ -3783,45 +4091,31 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 5. Determine the account whose wallet is used
     const actorRoleId = Number(actor.role_id);
 
+    // Staff uses its parent/creator account as wallet owner.
     const walletOwnerId =
       actorRoleId === 9
-        ? Number(actor.parent_id)
+        ? Number(actor.created_by || actor.parent_id)
         : actorId;
 
-    if (
-      !Number.isInteger(walletOwnerId) ||
-      walletOwnerId <= 0
-    ) {
+    if (!Number.isInteger(walletOwnerId) || walletOwnerId <= 0) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Staff parent account is not configured",
-        actor_id: actorId,
-        actor_role_id: actorRoleId,
-        parent_id: actor.parent_id,
+        message: "Wallet owner account not found",
       });
     }
 
-    if (toUserId === actorId) {
+    if (toUserId === actorId || toUserId === walletOwnerId) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "You cannot select yourself",
+        message: "Invalid receiver selection",
       });
     }
 
-    if (toUserId === walletOwnerId) {
-      return await rollbackAndRespond(400, {
-        success: false,
-        message: "You cannot transfer points to your wallet owner",
-      });
-    }
-
-    // 6. Validate selected key setting
     const keySetting = await trx("key_setting")
       .select("id", "name", "status")
-      .where("id", keySettingId)
+      .where({ id: keySettingId })
       .first();
 
     if (!keySetting) {
@@ -3838,331 +4132,318 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
-    // 7. Lock wallet owner's row
+    // Lock wallet owner.
     const walletOwner = await trx("users")
       .select("id", "role_id", "parent_id", "wallet_balance")
-      .where("id", walletOwnerId)
+      .where({ id: walletOwnerId })
       .forUpdate()
       .first();
 
     if (!walletOwner) {
       return await rollbackAndRespond(404, {
         success: false,
-        message: "Wallet owner / parent account not found",
-        wallet_owner_id: walletOwnerId,
+        message: "Wallet owner not found",
       });
     }
 
-    // 8. Lock receiver's row
+    // Lock receiver.
     const receiver = await trx("users")
-      .select("id", "role_id", "parent_id", "wallet_balance")
-      .where("id", toUserId)
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "created_by",
+        "wallet_balance"
+      )
+      .where({ id: toUserId })
       .forUpdate()
       .first();
 
     if (!receiver) {
       return await rollbackAndRespond(404, {
         success: false,
-        message: "Selected user not found",
+        message: "Receiver not found",
       });
     }
 
-    // 9. Parse wallet balance
-    const parseWallet = (value) => {
-      if (
-        value === null ||
-        value === undefined ||
-        value === ""
-      ) {
-        return [];
-      }
+    const ownerRoleId = Number(walletOwner.role_id);
+    const receiverRoleId = Number(receiver.role_id);
 
-      let parsed = value;
+    const isPrivilegedRevert =
+      isRevert && [0, 1].includes(actorRoleId);
 
-      if (typeof parsed === "string") {
-        try {
-          parsed = JSON.parse(parsed);
-        } catch {
-          return null;
+    const isPrivilegedSchemaTransfer =
+      isSchemaTransfer && [0, 1].includes(actorRoleId);
+
+    /*
+     * ROLE HIERARCHY VALIDATION
+     *
+     * Type 0: Normal Transfer Point
+     *         Direct child only.
+     *
+     * Type 1: Schema Point
+     *         Allows lower-level descendant roles.
+     *         Master Admin and Admin retain their privileged
+     *         schema-transfer behaviour.
+     *
+     * Type 2: Revert Point
+     *         Existing revert rules are preserved.
+     */
+
+    if (isSchemaTransfer) {
+      if (isPrivilegedSchemaTransfer) {
+        // Master Admin can select roles 1-9.
+        // Admin can select roles 2-9.
+        const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
+
+        if (
+          receiverRoleId < minimumReceiverRole ||
+          receiverRoleId > 9
+        ) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver role is not allowed for this schema transfer",
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
+        }
+      } else {
+        /*
+         * For non-privileged roles, require the receiver to be
+         * an actual descendant, not just a role with a larger ID.
+         *
+         * Staff (role 9) has no lower role, so it cannot send
+         * Schema Points to another role using this rule.
+         */
+        if (receiverRoleId <= actorRoleId || receiverRoleId > 9) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver role must be below your role for schema transfer",
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
+        }
+
+        const receiverIsDescendant = await isInHierarchy(
+          toUserId,
+          actorId
+        );
+
+        if (!receiverIsDescendant) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver is not in your hierarchy for schema transfer",
+            actor_id: actorId,
+            receiver_id: toUserId,
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
         }
       }
+    } else if (isPrivilegedRevert) {
+      // Master Admin can revert from Admin; Admin from role 2 onward.
+      const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
 
-      if (Array.isArray(parsed)) {
-        return parsed;
+      if (
+        receiverRoleId < minimumReceiverRole ||
+        receiverRoleId > 9
+      ) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message: "Receiver role is not allowed for this revert",
+          receiver_role_id: receiverRoleId,
+        });
       }
+    } else {
+      // Normal Transfer Point: preserve direct-parent rules.
+      const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
 
-      if (parsed && typeof parsed === "object") {
-        return Object.entries(parsed).map(([key, entry]) => {
-          if (
-            entry !== null &&
-            typeof entry === "object" &&
-            !Array.isArray(entry)
-          ) {
-            return {
-              ...entry,
-              _wallet_object_key: key,
-            };
-          }
-
-          return {
-            _wallet_object_key: key,
-            balance: entry,
-          };
+      if (Number(receiver.parent_id) !== walletOwnerId) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Receiver is not a direct child of the wallet owner",
+          wallet_owner_id: walletOwnerId,
+          receiver_id: toUserId,
         });
       }
 
-      return null;
-    };
+      if (!allowedRoles.includes(receiverRoleId)) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Receiver role is not allowed for this transfer",
+          wallet_owner_role_id: ownerRoleId,
+          receiver_role_id: receiverRoleId,
+          allowed_roles: allowedRoles,
+        });
+      }
+    }
 
-    const ownerWallet = parseWallet(walletOwner.wallet_balance);
-    const receiverWallet = parseWallet(receiver.wallet_balance);
+    // Parse wallet JSON.
+    const ownerEntries = parseWallet(walletOwner.wallet_balance);
+    const receiverEntries = parseWallet(receiver.wallet_balance);
 
-    if (!ownerWallet || !receiverWallet) {
+    if (!ownerEntries || !receiverEntries) {
+      console.error("INVALID WALLET FORMAT:", {
+        walletOwnerId,
+        ownerWalletType: typeof walletOwner.wallet_balance,
+        ownerWalletValue: walletOwner.wallet_balance,
+        receiverId: toUserId,
+        receiverWalletType: typeof receiver.wallet_balance,
+        receiverWalletValue: receiver.wallet_balance,
+      });
+
       return await rollbackAndRespond(400, {
         success: false,
         message: "Invalid wallet balance format",
         wallet_owner_id: walletOwnerId,
+        selected_user_id: toUserId,
       });
     }
 
-    // 10. Match wallet entries with the selected key
-    const normalize = (value) =>
-      String(value ?? "").trim().toLowerCase();
+    let ownerIndex = findKeyIndex(ownerEntries, keySetting);
+    let receiverIndex = findKeyIndex(receiverEntries, keySetting);
 
-    const normalizedKeyName = normalize(keySetting.name);
-
-    const matchesKeySetting = (item) => {
-      if (!item || typeof item !== "object") {
-        return false;
-      }
-
-      const idCandidates = [
-        item.key_setting_id,
-        item.keySettingId,
-        item.key_id,
-        item.keyId,
-        item.key_setting?.id,
-        item.keySetting?.id,
-      ].filter(
-        (value) =>
-          value !== undefined &&
-          value !== null &&
-          value !== ""
-      );
-
-      const nameCandidates = [
-        item.key_setting_name,
-        item.keySettingName,
-        item.key_name,
-        item.keyName,
-        item.name,
-        item.key_setting?.name,
-        item.keySetting?.name,
-      ];
-
-      const hasExplicitKeyId = idCandidates.length > 0;
-
-      const matchesId = idCandidates.some(
-        (value) => Number(value) === keySettingId
-      );
-
-      const matchesName = nameCandidates.some(
-        (value) =>
-          value !== undefined &&
-          value !== null &&
-          normalize(value) === normalizedKeyName
-      );
-
-      const objectKey = normalize(item._wallet_object_key);
-
-      const matchesObjectKey =
-        objectKey === String(keySettingId) ||
-        objectKey === normalizedKeyName;
-
-      if (hasExplicitKeyId) {
-        return matchesId || matchesName || matchesObjectKey;
-      }
-
-      return matchesName || matchesObjectKey;
-    };
-
-    const ownerWalletIndex = ownerWallet.findIndex(matchesKeySetting);
-    const receiverWalletIndex = receiverWallet.findIndex(matchesKeySetting);
-
-    const readBalance = (wallet, index) => {
-      if (index < 0) {
-        return 0;
-      }
-
-      const entry = wallet[index];
-
-      const rawBalance =
-        entry?.balance ??
-        entry?.amount ??
-        entry?.points ??
-        entry?.wallet_balance;
-
-      if (
-        rawBalance === undefined ||
-        rawBalance === null ||
-        rawBalance === ""
-      ) {
-        return 0;
-      }
-
-      const balance = Number(rawBalance);
-
-      return Number.isFinite(balance) ? balance : NaN;
-    };
-
-    const ownerBalance = readBalance(ownerWallet, ownerWalletIndex);
-    const receiverBalance = readBalance(receiverWallet, receiverWalletIndex);
-
-    if (
-      !Number.isFinite(ownerBalance) ||
-      !Number.isFinite(receiverBalance) ||
-      ownerBalance < 0 ||
-      receiverBalance < 0
-    ) {
-      return await rollbackAndRespond(400, {
-        success: false,
-        message: "Invalid wallet balance",
-        wallet_owner_id: walletOwnerId,
-        key_setting_id: keySettingId,
-      });
-    }
-
-    // 11. Require the selected key in the wallet being debited/credited
-    if (ownerWalletIndex < 0) {
+    if (!isRevert && ownerIndex === -1) {
       return await rollbackAndRespond(400, {
         success: false,
         message:
-          "Selected key setting balance not found in wallet owner's wallet",
-        actor_id: actorId,
-        actor_role_id: actorRoleId,
-        parent_id: actor.parent_id,
+          "Selected key is missing from wallet owner's wallet",
         wallet_owner_id: walletOwnerId,
         key_setting_id: keySettingId,
-        key_setting_name: keySetting.name,
-        available_balance: 0,
-        requested_points: points,
-        wallet_entries: ownerWallet.map((item) => ({
-          key_setting_id:
-            item?.key_setting_id ??
-            item?.keySettingId ??
-            item?.key_id ??
-            null,
-          name:
-            item?.key_setting_name ??
-            item?.keySettingName ??
-            item?.key_name ??
-            item?.name ??
-            null,
-          balance:
-            item?.balance ??
-            item?.amount ??
-            item?.points ??
-            item?.wallet_balance ??
-            null,
-        })),
       });
     }
 
-    // 12. Validate balances by transaction type
-    if (transactionType === 2) {
-      // Revert: selected receiver sends points back to wallet owner.
-      if (receiverWalletIndex < 0) {
-        return await rollbackAndRespond(400, {
-          success: false,
-          message:
-            "Selected key setting balance not found in selected user wallet",
-          to_user_id: toUserId,
-          key_setting_id: keySettingId,
-          key_setting_name: keySetting.name,
-        });
-      }
+    if (isRevert && receiverIndex === -1) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Selected key is missing from receiver's wallet",
+        receiver_id: toUserId,
+        key_setting_id: keySettingId,
+      });
+    }
 
-      if (receiverBalance < points) {
-        return await rollbackAndRespond(400, {
-          success: false,
-          message: "Selected user has insufficient balance",
-          available_balance: receiverBalance,
-          requested_points: points,
-        });
-      }
-    } else if (ownerBalance < points) {
+    if (receiverIndex === -1 && !isRevert) {
+      receiverEntries.push({
+        key_setting_id: keySettingId,
+        name: keySetting.name,
+        balance: 0,
+        consumed: 0,
+        available: 0,
+      });
+
+      receiverIndex = receiverEntries.length - 1;
+    }
+
+    if (ownerIndex === -1 && isRevert) {
+      ownerEntries.push({
+        key_setting_id: keySettingId,
+        name: keySetting.name,
+        balance: 0,
+        consumed: 0,
+        available: 0,
+      });
+
+      ownerIndex = ownerEntries.length - 1;
+    }
+
+    const ownerEntry = normalizeEntry(
+      ownerEntries[ownerIndex],
+      keySetting
+    );
+
+    const receiverEntry = normalizeEntry(
+      receiverEntries[receiverIndex],
+      keySetting
+    );
+
+    if (!ownerEntry || !receiverEntry) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Invalid wallet balance values",
+        wallet_owner_id: walletOwnerId,
+        selected_user_id: toUserId,
+        key_setting_id: keySettingId,
+      });
+    }
+
+    if (!isRevert && ownerEntry.available < points) {
       return await rollbackAndRespond(400, {
         success: false,
         message: "Insufficient wallet balance",
-        actor_id: actorId,
-        actor_role_id: actorRoleId,
-        parent_id: actor.parent_id,
         wallet_owner_id: walletOwnerId,
-        key_setting_id: keySettingId,
-        key_setting_name: keySetting.name,
-        available_balance: ownerBalance,
+        available_balance: ownerEntry.available,
         requested_points: points,
       });
     }
 
-    // 13. Calculate resulting balances
-    const ownerBalanceBefore = ownerBalance;
-    const receiverBalanceBefore = receiverBalance;
-
-    const ownerBalanceAfter =
-      transactionType === 2
-        ? ownerBalance + points
-        : ownerBalance - points;
-
-    const receiverBalanceAfter =
-      transactionType === 2
-        ? receiverBalance - points
-        : receiverBalance + points;
-
-    // 14. Update wallet owner
-    ownerWallet[ownerWalletIndex] = {
-      ...ownerWallet[ownerWalletIndex],
-      balance: ownerBalanceAfter,
-    };
-
-    // 15. Update receiver wallet
-    if (receiverWalletIndex >= 0) {
-      receiverWallet[receiverWalletIndex] = {
-        ...receiverWallet[receiverWalletIndex],
-        balance: receiverBalanceAfter,
-      };
-    } else {
-      receiverWallet.push({
-        key_setting_id: keySettingId,
-        name: keySetting.name,
-        balance: receiverBalanceAfter,
+    if (
+      isRevert &&
+      (
+        receiverEntry.available < points ||
+        receiverEntry.balance < points ||
+        ownerEntry.consumed < points
+      )
+    ) {
+      return await rollbackAndRespond(400, {
+        success: false,
+        message: "Revert amount exceeds the transferable balance",
+        receiver_available: receiverEntry.available,
+        receiver_balance: receiverEntry.balance,
+        owner_consumed: ownerEntry.consumed,
+        requested_points: points,
       });
     }
 
-    // 16. Save wallet changes
+    // Update wallet entries.
+    const ownerUpdated = {
+      ...ownerEntry,
+      consumed: isRevert
+        ? ownerEntry.consumed - points
+        : ownerEntry.consumed + points,
+      available: isRevert
+        ? ownerEntry.available + points
+        : ownerEntry.available - points,
+    };
+
+    const receiverUpdated = {
+      ...receiverEntry,
+      balance: isRevert
+        ? receiverEntry.balance - points
+        : receiverEntry.balance + points,
+      available: isRevert
+        ? receiverEntry.available - points
+        : receiverEntry.available + points,
+    };
+
+    ownerEntries[ownerIndex] = ownerUpdated;
+    receiverEntries[receiverIndex] = receiverUpdated;
+
     await trx("users")
-      .where("id", walletOwnerId)
+      .where({ id: walletOwnerId })
       .update({
-        wallet_balance: JSON.stringify(ownerWallet),
+        wallet_balance: JSON.stringify(ownerEntries),
       });
 
     await trx("users")
-      .where("id", toUserId)
+      .where({ id: toUserId })
       .update({
-        wallet_balance: JSON.stringify(receiverWallet),
+        wallet_balance: JSON.stringify(receiverEntries),
       });
 
-    // 17. Store the transaction.
-    // The parent is the wallet owner; Staff is the initiator.
     const [transactionId] = await trx("wallet").insert({
       from_user_id: walletOwnerId,
       to_user_id: toUserId,
       key_setting_id: keySettingId,
       points_sent: points,
-      from_balance_before: ownerBalanceBefore,
-      from_balance_after: ownerBalanceAfter,
-      to_balance_before: receiverBalanceBefore,
-      to_balance_after: receiverBalanceAfter,
+      from_balance_before: ownerEntry.available,
+      from_balance_after: ownerUpdated.available,
+      to_balance_before: receiverEntry.available,
+      to_balance_after: receiverUpdated.available,
       transaction_type: transactionType,
       created_by: actorId,
     });
@@ -4172,10 +4453,9 @@ export const transferWalletPoints = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message:
-        transactionType === 2
-          ? "Points reverted successfully"
-          : "Points transferred successfully",
+      message: isRevert
+        ? "Points reverted successfully"
+        : "Points transferred successfully",
       data: {
         transaction_id: transactionId,
         actor_id: actorId,
@@ -4184,11 +4464,15 @@ export const transferWalletPoints = async (req, res) => {
         key_setting_id: keySettingId,
         key_name: keySetting.name,
         points_sent: points,
-        from_balance_before: ownerBalanceBefore,
-        from_balance_after: ownerBalanceAfter,
-        to_balance_before: receiverBalanceBefore,
-        to_balance_after: receiverBalanceAfter,
         transaction_type: transactionType,
+        from_balance_before: ownerEntry.available,
+        from_balance_after: ownerUpdated.available,
+        from_consumed_before: ownerEntry.consumed,
+        from_consumed_after: ownerUpdated.consumed,
+        to_balance_before: receiverEntry.available,
+        to_balance_after: receiverUpdated.available,
+        wallet_owner_wallet: ownerUpdated,
+        receiver_wallet: receiverUpdated,
       },
     });
   } catch (error) {
@@ -4196,7 +4480,7 @@ export const transferWalletPoints = async (req, res) => {
       try {
         await trx.rollback();
       } catch (rollbackError) {
-        console.error("TRANSFER ROLLBACK ERROR:", rollbackError);
+        console.error("ROLLBACK ERROR:", rollbackError);
       }
 
       trx = null;
@@ -4206,11 +4490,18 @@ export const transferWalletPoints = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to transfer wallet points",
-      error: error.message,
+      message: "Failed to process wallet points",
+      error:
+        process.env.NODE_ENV === "development"
+          ? error.message
+          : undefined,
     });
   }
 };
+
+
+
+
 
 //get the transactione data
 
