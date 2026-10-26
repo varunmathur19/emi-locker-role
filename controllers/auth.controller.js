@@ -3765,6 +3765,8 @@ export const updateKeySetting = async (req, res) => {
 
 
 
+
+
 export const transferWalletPoints = async (req, res) => {
   let trx;
 
@@ -3795,8 +3797,6 @@ export const transferWalletPoints = async (req, res) => {
   const normalize = (value) =>
     String(value ?? "").trim().toLowerCase();
 
-  // Handles JSON strings, double-encoded JSON, arrays,
-  // and objects keyed by key name.
   const parseWallet = (value) => {
     if (Buffer.isBuffer(value)) {
       value = value.toString("utf8");
@@ -3855,9 +3855,7 @@ export const transferWalletPoints = async (req, res) => {
         return [parsed];
       }
 
-      const entries = Object.entries(parsed);
-
-      return entries.map(([name, entry]) => {
+      return Object.entries(parsed).map(([name, entry]) => {
         if (
           entry &&
           typeof entry === "object" &&
@@ -3898,12 +3896,14 @@ export const transferWalletPoints = async (req, res) => {
     const balance =
       item?.balance !== undefined && item?.balance !== null
         ? Number(item.balance)
-        : item?.available !== undefined && item?.available !== null
+        : item?.available !== undefined &&
+            item?.available !== null
           ? Number(item.available) + consumed
           : Number(item?.amount ?? item?.points ?? 0);
 
     const available =
-      item?.available !== undefined && item?.available !== null
+      item?.available !== undefined &&
+      item?.available !== null
         ? Number(item.available)
         : balance - consumed;
 
@@ -3942,6 +3942,57 @@ export const transferWalletPoints = async (req, res) => {
 
       return normalize(item?.name) === normalize(keySetting.name);
     });
+
+  /*
+   * Check whether receiver is actually below ancestorId in the
+   * parent hierarchy. This supports indirect descendants too.
+   *
+   * Staff may use created_by if parent_id is not populated.
+   */
+  const isInHierarchy = async (receiverId, ancestorId) => {
+    const visited = new Set();
+    let currentId = Number(receiverId);
+
+    for (let depth = 0; depth < 20; depth++) {
+      if (
+        !Number.isInteger(currentId) ||
+        currentId <= 0 ||
+        visited.has(currentId)
+      ) {
+        return false;
+      }
+
+      visited.add(currentId);
+
+      const currentUser = await trx("users")
+        .select("id", "role_id", "parent_id", "created_by")
+        .where({ id: currentId })
+        .first();
+
+      if (!currentUser) {
+        return false;
+      }
+
+      const parentId = Number(
+        currentUser.parent_id ||
+        (Number(currentUser.role_id) === 9
+          ? currentUser.created_by
+          : 0)
+      );
+
+      if (!Number.isInteger(parentId) || parentId <= 0) {
+        return false;
+      }
+
+      if (parentId === Number(ancestorId)) {
+        return true;
+      }
+
+      currentId = parentId;
+    }
+
+    return false;
+  };
 
   try {
     trx = await db.transaction();
@@ -4007,8 +4058,9 @@ export const transferWalletPoints = async (req, res) => {
     }
 
     const isRevert = transactionType === 2;
+    const isSchemaTransfer = transactionType === 1;
 
-    // Lock the logged-in actor.
+    // Lock logged-in user.
     const actor = await trx("users")
       .select(
         "id",
@@ -4080,6 +4132,7 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
+    // Lock wallet owner.
     const walletOwner = await trx("users")
       .select("id", "role_id", "parent_id", "wallet_balance")
       .where({ id: walletOwnerId })
@@ -4093,8 +4146,15 @@ export const transferWalletPoints = async (req, res) => {
       });
     }
 
+    // Lock receiver.
     const receiver = await trx("users")
-      .select("id", "role_id", "parent_id", "wallet_balance")
+      .select(
+        "id",
+        "role_id",
+        "parent_id",
+        "created_by",
+        "wallet_balance"
+      )
       .where({ id: toUserId })
       .forUpdate()
       .first();
@@ -4109,50 +4169,121 @@ export const transferWalletPoints = async (req, res) => {
     const ownerRoleId = Number(walletOwner.role_id);
     const receiverRoleId = Number(receiver.role_id);
 
+    const isPrivilegedRevert =
+      isRevert && [0, 1].includes(actorRoleId);
 
-   
-const isPrivilegedRevert =
-  isRevert && [0, 1].includes(actorRoleId);
+    const isPrivilegedSchemaTransfer =
+      isSchemaTransfer && [0, 1].includes(actorRoleId);
 
-const isPrivilegedSchemaTransfer =
-  transactionType === 1 && [0, 1].includes(actorRoleId);
+    /*
+     * ROLE HIERARCHY VALIDATION
+     *
+     * Type 0: Normal Transfer Point
+     *         Direct child only.
+     *
+     * Type 1: Schema Point
+     *         Allows lower-level descendant roles.
+     *         Master Admin and Admin retain their privileged
+     *         schema-transfer behaviour.
+     *
+     * Type 2: Revert Point
+     *         Existing revert rules are preserved.
+     */
 
-if (!isPrivilegedRevert && !isPrivilegedSchemaTransfer) {
-  // Normal Transfer Point: existing direct-parent hierarchy
-  // validation remains unchanged.
-  const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
+    if (isSchemaTransfer) {
+      if (isPrivilegedSchemaTransfer) {
+        // Master Admin can select roles 1-9.
+        // Admin can select roles 2-9.
+        const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
 
-  if (Number(receiver.parent_id) !== walletOwnerId) {
-    return await rollbackAndRespond(403, {
-      success: false,
-      message: "Receiver is not a direct child of the wallet owner",
-      wallet_owner_id: walletOwnerId,
-      receiver_id: toUserId,
-    });
-  }
+        if (
+          receiverRoleId < minimumReceiverRole ||
+          receiverRoleId > 9
+        ) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver role is not allowed for this schema transfer",
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
+        }
+      } else {
+        /*
+         * For non-privileged roles, require the receiver to be
+         * an actual descendant, not just a role with a larger ID.
+         *
+         * Staff (role 9) has no lower role, so it cannot send
+         * Schema Points to another role using this rule.
+         */
+        if (receiverRoleId <= actorRoleId || receiverRoleId > 9) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver role must be below your role for schema transfer",
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
+        }
 
-  if (!allowedRoles.includes(receiverRoleId)) {
-    return await rollbackAndRespond(403, {
-      success: false,
-      message: "Receiver role is not allowed for this transfer",
-      wallet_owner_role_id: ownerRoleId,
-      receiver_role_id: receiverRoleId,
-      allowed_roles: allowedRoles,
-    });
-  }
-} else {
+        const receiverIsDescendant = await isInHierarchy(
+          toUserId,
+          actorId
+        );
 
-  if (receiverRoleId < 2 || receiverRoleId > 9) {
-    return await rollbackAndRespond(403, {
-      success: false,
-      message: isPrivilegedSchemaTransfer
-        ? "Receiver role is not allowed for this schema transfer"
-        : "Receiver role is not allowed for this revert",
-      receiver_role_id: receiverRoleId,
-    });
-  }
-}
+        if (!receiverIsDescendant) {
+          return await rollbackAndRespond(403, {
+            success: false,
+            message:
+              "Receiver is not in your hierarchy for schema transfer",
+            actor_id: actorId,
+            receiver_id: toUserId,
+            actor_role_id: actorRoleId,
+            receiver_role_id: receiverRoleId,
+          });
+        }
+      }
+    } else if (isPrivilegedRevert) {
+      // Master Admin can revert from Admin; Admin from role 2 onward.
+      const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
 
+      if (
+        receiverRoleId < minimumReceiverRole ||
+        receiverRoleId > 9
+      ) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message: "Receiver role is not allowed for this revert",
+          receiver_role_id: receiverRoleId,
+        });
+      }
+    } else {
+      // Normal Transfer Point: preserve direct-parent rules.
+      const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
+
+      if (Number(receiver.parent_id) !== walletOwnerId) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Receiver is not a direct child of the wallet owner",
+          wallet_owner_id: walletOwnerId,
+          receiver_id: toUserId,
+        });
+      }
+
+      if (!allowedRoles.includes(receiverRoleId)) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message:
+            "Receiver role is not allowed for this transfer",
+          wallet_owner_role_id: ownerRoleId,
+          receiver_role_id: receiverRoleId,
+          allowed_roles: allowedRoles,
+        });
+      }
+    }
+
+    // Parse wallet JSON.
     const ownerEntries = parseWallet(walletOwner.wallet_balance);
     const receiverEntries = parseWallet(receiver.wallet_balance);
 
@@ -4180,7 +4311,8 @@ if (!isPrivilegedRevert && !isPrivilegedSchemaTransfer) {
     if (!isRevert && ownerIndex === -1) {
       return await rollbackAndRespond(400, {
         success: false,
-        message: "Selected key is missing from wallet owner's wallet",
+        message:
+          "Selected key is missing from wallet owner's wallet",
         wallet_owner_id: walletOwnerId,
         key_setting_id: keySettingId,
       });
@@ -4268,8 +4400,6 @@ if (!isPrivilegedRevert && !isPrivilegedSchemaTransfer) {
     }
 
     // Update wallet entries.
-    // Revert returns points to the wallet owner and reduces
-    // the receiver's balance.
     const ownerUpdated = {
       ...ownerEntry,
       consumed: isRevert
@@ -4368,6 +4498,8 @@ if (!isPrivilegedRevert && !isPrivilegedSchemaTransfer) {
     });
   }
 };
+
+
 
 
 
