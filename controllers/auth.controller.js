@@ -5157,9 +5157,9 @@ export const getDevices = async (req, res) => {
     const total = Number(countResult?.total || 0);
     const totalPages = Math.ceil(total / limit);
 
-    // Get devices and their user hierarchy
+    // Get devices with correct user hierarchy
     const devices = await db("device_detail as d")
-      // Device creator / retailer
+      // Retailer / device owner
       .leftJoin("users as retailer", function () {
         this.on(
           "retailer.id",
@@ -5171,20 +5171,28 @@ export const getDevices = async (req, res) => {
         );
       })
 
-      // Retailer's parent = FOS
+      // Retailer's direct parent
       .leftJoin(
-        "users as fos",
-        "fos.id",
+        "users as parent",
+        "parent.id",
         "retailer.parent_id"
       )
 
-      // FOS's parent = Distributor
-      .leftJoin(
-        "users as distributor",
-        "distributor.id",
-        "fos.parent_id"
-      )
+      // If parent is FOS (role_id = 5), fetch its Distributor
+      .leftJoin("users as fos", function () {
+        this.on("fos.id", "=", "parent.id").andOn(
+          "fos.role_id",
+          "=",
+          db.raw("?", [5])
+        );
+      })
 
+      .leftJoin("users as fos_parent", function () {
+        this.on("fos_parent.id", "=", "fos.parent_id");
+      })
+
+      // If parent is Distributor (role_id = 4), use parent directly.
+      // Otherwise, use the FOS's parent as Distributor.
       .select(
         "d.*",
 
@@ -5193,15 +5201,33 @@ export const getDevices = async (req, res) => {
         "retailer.name as retailer_name",
         "retailer.organization_name as retailer_company_name",
 
-        // FOS details
+        // FOS details: blank when Retailer's parent is directly a Distributor
         "fos.id as fos_user_id",
         "fos.name as fos_name",
         "fos.organization_name as fos_company_name",
 
-        // Distributor details
-        "distributor.id as distributor_user_id",
-        "distributor.name as distributor_name",
-        "distributor.organization_name as distributor_company_name"
+        // Distributor details: direct parent or FOS's parent
+        db.raw(
+          `CASE
+            WHEN parent.role_id = 4 THEN parent.id
+            WHEN parent.role_id = 5 THEN fos_parent.id
+            ELSE NULL
+          END AS distributor_user_id`
+        ),
+        db.raw(
+          `CASE
+            WHEN parent.role_id = 4 THEN parent.name
+            WHEN parent.role_id = 5 THEN fos_parent.name
+            ELSE NULL
+          END AS distributor_name`
+        ),
+        db.raw(
+          `CASE
+            WHEN parent.role_id = 4 THEN parent.organization_name
+            WHEN parent.role_id = 5 THEN fos_parent.organization_name
+            ELSE NULL
+          END AS distributor_company_name`
+        )
       )
       .orderBy("d.id", "desc")
       .limit(limit)
