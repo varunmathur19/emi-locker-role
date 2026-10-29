@@ -36,11 +36,6 @@ app.use(
     extended: true,
   })
 );
-
-
-// Example:
-// http://localhost:5000/uploads/modules/image.png
-
 app.use(
   "/uploads",
   express.static(

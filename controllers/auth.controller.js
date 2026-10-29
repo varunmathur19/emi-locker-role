@@ -4944,9 +4944,10 @@ export const updateCompanySetting = async (req, res) => {
 // add-device / user list
 
 
+
 export const addDevice = async (req, res) => {
   try {
-    // 1. Get token from Authorization header
+    // 1. Authenticate logged-in user
     const authHeader = req.headers.authorization;
 
     if (!authHeader?.startsWith("Bearer ")) {
@@ -4958,20 +4959,10 @@ export const addDevice = async (req, res) => {
 
     const token = authHeader.slice(7).trim();
 
-    if (!token) {
+    if (!token || !process.env.JWT_SECRET) {
       return res.status(401).json({
         success: false,
-        message: "Authentication token is missing.",
-      });
-    }
-
-    // 2. Verify token
-    if (!process.env.JWT_SECRET) {
-      console.error("JWT_SECRET is missing.");
-
-      return res.status(500).json({
-        success: false,
-        message: "Authentication configuration error.",
+        message: "Invalid authentication configuration or token.",
       });
     }
 
@@ -4986,11 +4977,8 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 3. Extract logged-in user's ID from token
     const loggedInUserId =
-      decoded.id ??
-      decoded.user_id ??
-      decoded.userId;
+      decoded.id ?? decoded.user_id ?? decoded.userId;
 
     if (
       loggedInUserId === undefined ||
@@ -5003,7 +4991,6 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 4. Verify user in database
     const user = await db("users")
       .select("id")
       .where("id", loggedInUserId)
@@ -5016,19 +5003,19 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 5. Read request fields
+    // 2. Read request body
     const {
       enrollment_type,
       customer_name,
-      registration_no,
       phone_number,
+      country_code,
       imei_1,
       key_type,
       device_status,
       fl_version,
+      retailer_id, // ID of the selected retailer from frontend
     } = req.body;
 
-    // 6. Get uploaded image files
     const brandFile =
       req.files?.brand?.[0] ||
       req.files?.brandImage?.[0];
@@ -5037,16 +5024,17 @@ export const addDevice = async (req, res) => {
       req.files?.customer_image?.[0] ||
       req.files?.customerImage?.[0];
 
-    // 7. Validate required fields
+    // 3. Validate required fields
     const requiredFields = {
       enrollment_type,
       customer_name,
-      registration_no,
       phone_number,
+      country_code,
       imei_1,
       key_type,
       device_status,
       fl_version,
+      retailer_id,
     };
 
     const missingFields = Object.entries(requiredFields)
@@ -5056,7 +5044,7 @@ export const addDevice = async (req, res) => {
           value === null ||
           String(value).trim() === ""
       )
-      .map(([key]) => key);
+      .map(([field]) => field);
 
     if (missingFields.length > 0) {
       return res.status(400).json({
@@ -5066,7 +5054,33 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 8. Validate enrollment type
+    // 4. Validate selected retailer ID
+    const normalizedRetailerId = String(retailer_id).trim();
+
+    if (
+      !/^\d+$/.test(normalizedRetailerId) ||
+      BigInt(normalizedRetailerId) <= 0n
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid retailer.",
+      });
+    }
+
+    // Confirm that the selected retailer exists
+    const selectedRetailer = await db("users")
+      .select("id")
+      .where("id", normalizedRetailerId)
+      .first();
+
+    if (!selectedRetailer) {
+      return res.status(400).json({
+        success: false,
+        message: "Selected retailer was not found.",
+      });
+    }
+
+    // 5. Validate enrollment type
     const normalizedEnrollmentType = String(enrollment_type)
       .trim()
       .toLowerCase();
@@ -5074,61 +5088,116 @@ export const addDevice = async (req, res) => {
     if (!["old", "new"].includes(normalizedEnrollmentType)) {
       return res.status(400).json({
         success: false,
-        message: "enrollment_type must be either 'old' or 'new'.",
+        message: "Enrollment type must be 'old' or 'new'.",
       });
     }
 
-    // 9. Validate images
-    if (!brandFile || !customerImageFile) {
+    // 6. Validate phone number
+    const normalizedPhoneNumber = String(phone_number).trim();
+
+    if (!/^\d+$/.test(normalizedPhoneNumber)) {
       return res.status(400).json({
         success: false,
-        message: "Both brand and customer images are required.",
+        message: "Phone number must contain numeric digits only.",
       });
     }
 
-    const brand = `/uploads/devices/${brandFile.filename}`;
-    const customer_image = `/uploads/devices/${customerImageFile.filename}`;
+    // 7. Validate IMEI
+    const normalizedImei = String(imei_1).trim();
 
-    // 10. Prepare database values
+    if (!/^\d{15}$/.test(normalizedImei)) {
+      return res.status(400).json({
+        success: false,
+        message: "IMEI number must contain exactly 15 numeric digits.",
+      });
+    }
+
+    // 8. Validate brand image
+    if (!brandFile) {
+      return res.status(400).json({
+        success: false,
+        message: "Brand image is required.",
+      });
+    }
+
+    // 9. Find key by name in key_setting
+    const keyNameInput = String(key_type).trim();
+
+    const keySetting = await db("key_setting")
+      .whereRaw("LOWER(TRIM(name)) = ?", [
+        keyNameInput.toLowerCase(),
+      ])
+      .first();
+
+    if (!keySetting) {
+      return res.status(400).json({
+        success: false,
+        message: `Key type '${keyNameInput}' was not found.`,
+      });
+    }
+
+    const keyName = String(keySetting.name).trim();
+
+    // 10. Generate registration number
+    const lastDevice = await db("device_detail")
+      .select("registration_no")
+      .whereRaw("registration_no REGEXP '^[0-9]+$'")
+      .orderByRaw(
+        "CAST(registration_no AS DECIMAL(65, 0)) DESC"
+      )
+      .first();
+
+    const lastRegistrationNumber = lastDevice
+      ? BigInt(String(lastDevice.registration_no))
+      : 1000n;
+
+    const registrationNo = (
+      lastRegistrationNumber < 1000n
+        ? 1001n
+        : lastRegistrationNumber + 1n
+    ).toString();
+
+    // 11. Prepare device data
     const deviceData = {
+      // Logged-in user who created the device
       created_by: user.id,
-      brand,
+
+      // Selected retailer's ID, NOT the logged-in user's ID
+      retailer_id: selectedRetailer.id,
+
+      brand: `/uploads/devices/${brandFile.filename}`,
       enrollment_type: normalizedEnrollmentType,
       customer_name: String(customer_name).trim(),
-      customer_image,
-      registration_no: String(registration_no).trim(),
-      phone_number: String(phone_number).trim(),
-      imei_1: String(imei_1).trim(),
-      key_type,
-      device_status,
-      fl_version,
+      customer_image: customerImageFile
+        ? `/uploads/devices/${customerImageFile.filename}`
+        : null,
+      registration_no: registrationNo,
+      phone_number: normalizedPhoneNumber,
+      country_code: String(country_code).trim(),
+      imei_1: normalizedImei,
+      key_type: keyName,
+      device_status: String(device_status).trim(),
+      fl_version: String(fl_version).trim(),
       created_at: db.fn.now(),
     };
 
-    // 11. Insert device into database
-    const insertResult = await db("device_detail").insert(deviceData);
+    // 12. Insert device into database
+    const insertResult = await db("device_detail").insert(
+      deviceData
+    );
 
     const deviceId = Array.isArray(insertResult)
       ? insertResult[0]
       : insertResult;
 
-    // 12. Return only plain JSON values
+    // 13. Return response
     return res.status(201).json({
       success: true,
       message: "Device added successfully.",
       data: {
         id: deviceId,
-        created_by: user.id,
-        brand,
-        enrollment_type: normalizedEnrollmentType,
-        customer_name: deviceData.customer_name,
-        customer_image,
-        registration_no: deviceData.registration_no,
-        phone_number: deviceData.phone_number,
-        imei_1: deviceData.imei_1,
-        key_type,
-        device_status,
-        fl_version,
+        ...deviceData,
+        created_at: undefined,
       },
     });
   } catch (error) {
@@ -5145,60 +5214,142 @@ export const addDevice = async (req, res) => {
   }
 };
 
+
+
+
+
+
+
 // GET all devices
 
 export const getDevices = async (req, res) => {
   try {
+    const page = Math.max(
+      1,
+      Number.parseInt(req.query.page, 10) || 1
+    );
+
+    const limit = Math.min(
+      100,
+      Math.max(1, Number.parseInt(req.query.limit, 10) || 10)
+    );
+
+    const offset = (page - 1) * limit;
+
+    // Count total devices
+    const countResult = await db("device_detail as d")
+      .count({ total: "d.id" })
+      .first();
+
+    const total = Number(countResult?.total || 0);
+    const totalPages = Math.ceil(total / limit);
+
+    // Fetch devices with key name and user hierarchy
     const devices = await db("device_detail as d")
-      // User who added the device (Retailer)
-      .leftJoin("users as retailer", "d.created_by", "retailer.id")
 
-      // Retailer's parent (FOS)
-      .leftJoin("users as fos", "retailer.parent_id", "fos.id")
+      // Match key_type ID with key settings ID
+      // Assumption: actual table is key_setting and name column is name
+      .leftJoin("key_setting as ks", "ks.id", "d.key_type")
 
-      // FOS's parent (Distributor)
-      .leftJoin("users as distributor", "fos.parent_id", "distributor.id")
+      // Retailer / device owner
+      .leftJoin("users as retailer", function () {
+        this.on(
+          "retailer.id",
+          "=",
+          db.raw("COALESCE(??, ??)", [
+            "d.retailer_id",
+            "d.created_by",
+          ])
+        );
+      })
+
+      // Retailer's direct parent
+      .leftJoin("users as parent", "parent.id", "retailer.parent_id")
+
+      // If parent is FOS (role_id = 5)
+      .leftJoin("users as fos", function () {
+        this.on("fos.id", "=", "parent.id").andOn(
+          "fos.role_id",
+          "=",
+          db.raw("?", [5])
+        );
+      })
+
+      // FOS's parent
+      .leftJoin("users as fos_parent", "fos_parent.id", "fos.parent_id")
 
       .select(
         "d.*",
 
+        // Key name from key settings table
+        "ks.name as key_name",
+
         // Retailer details
-        "retailer.id as retailer_id",
+        "retailer.id as retailer_user_id",
         "retailer.name as retailer_name",
         "retailer.organization_name as retailer_company_name",
 
         // FOS details
-        "fos.id as fos_id",
+        "fos.id as fos_user_id",
         "fos.name as fos_name",
         "fos.organization_name as fos_company_name",
 
-        // Distributor details
-        "distributor.id as distributor_id",
-        "distributor.name as distributor_name",
-        "distributor.organization_name as distributor_company_name"
+        // Distributor ID
+        db.raw(`
+          CASE
+            WHEN parent.role_id = 4 THEN parent.id
+            WHEN parent.role_id = 5 THEN fos_parent.id
+            ELSE NULL
+          END AS distributor_user_id
+        `),
+
+        // Distributor name
+        db.raw(`
+          CASE
+            WHEN parent.role_id = 4 THEN parent.name
+            WHEN parent.role_id = 5 THEN fos_parent.name
+            ELSE NULL
+          END AS distributor_name
+        `),
+
+        // Distributor company
+        db.raw(`
+          CASE
+            WHEN parent.role_id = 4 THEN parent.organization_name
+            WHEN parent.role_id = 5 THEN fos_parent.organization_name
+            ELSE NULL
+          END AS distributor_company_name
+        `)
       )
-      .orderBy("d.id", "desc");
+
+      .orderBy("d.id", "desc")
+      .limit(limit)
+      .offset(offset);
 
     return res.status(200).json({
       success: true,
       message: "Devices fetched successfully.",
-      count: devices.length,
       data: devices,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
     });
   } catch (error) {
-    console.error(
-      "GET DEVICES ERROR:",
-      error?.stack || error?.message || error
-    );
+    console.error("GET DEVICES ERROR:", error);
 
     return res.status(500).json({
       success: false,
       message: "Failed to fetch devices.",
-      error: error?.message || "Internal server error",
+      error:
+        process.env.NODE_ENV === "production"
+          ? "Internal server error"
+          : error.message,
     });
   }
 };
-
 
 // GET single device by ID
 export const getDeviceById = async (req, res) => {
