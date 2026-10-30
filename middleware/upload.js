@@ -95,16 +95,21 @@ export const uploadModuleNewIcon = multer({
 }).single("newIcon");
 
 // Device middleware: supports both existing and frontend field names
+
 export const uploadDeviceImages = multer({
   storage: deviceStorage,
   fileFilter,
   limits: {
     fileSize: 2 * 1024 * 1024, // Maximum 2 MB per image
-    files: 2,                  // Maximum 2 uploaded files
+    files: 6, // Maximum 6 files across allowed field names
   },
 }).fields([
   { name: "brand", maxCount: 1 },
   { name: "brandImage", maxCount: 1 },
+
   { name: "customer_image", maxCount: 1 },
   { name: "customerImage", maxCount: 1 },
+
+  { name: "signature", maxCount: 1 },
+  { name: "signatureImage", maxCount: 1 },
 ]);

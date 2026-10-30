@@ -3700,7 +3700,7 @@ export const getKeySettings = async (req, res) => {
 export const updateKeySetting = async (req, res) => {
   try {
     const { id } = req.params;
-    const { status } = req.body;
+    const { name, status } = req.body;
 
     if (!id) {
       return res.status(400).json({
@@ -3709,10 +3709,11 @@ export const updateKeySetting = async (req, res) => {
       });
     }
 
-    if (status === undefined) {
+    // Check whether at least one field is provided
+    if (name === undefined && status === undefined) {
       return res.status(400).json({
         success: false,
-        message: "Status is required",
+        message: "At least one field (name or status) is required",
       });
     }
 
@@ -3727,9 +3728,31 @@ export const updateKeySetting = async (req, res) => {
       });
     }
 
-    const updateData = {
-      status: Number(status) === 1 ? 1 : 0,
-    };
+    const updateData = {};
+
+    // Update name only when provided
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Name must be a non-empty string",
+        });
+      }
+
+      updateData.name = name.trim();
+    }
+
+    // Update status only when provided
+    if (status !== undefined) {
+      if (![0, 1, "0", "1"].includes(status)) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be 0 or 1",
+        });
+      }
+
+      updateData.status = Number(status);
+    }
 
     await db("key_setting")
       .where("id", id)
@@ -3741,18 +3764,15 @@ export const updateKeySetting = async (req, res) => {
 
     return res.status(200).json({
       success: true,
-      message: "Key setting status updated successfully",
+      message: "Key setting updated successfully",
       data: updatedKeySetting,
     });
   } catch (error) {
-    console.error(
-      "UPDATE KEY SETTING STATUS ERROR:",
-      error
-    );
+    console.error("UPDATE KEY SETTING ERROR:", error);
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update key setting status",
+      message: "Failed to update key setting",
       error: error.message,
     });
   }
@@ -4943,8 +4963,6 @@ export const updateCompanySetting = async (req, res) => {
 
 // add-device / user list
 
-
-
 export const addDevice = async (req, res) => {
   try {
     // 1. Authenticate logged-in user
@@ -5005,15 +5023,18 @@ export const addDevice = async (req, res) => {
 
     // 2. Read request body
     const {
+      serial_number,
+      guarantor_name,
+      guarantor_number,
       enrollment_type,
       customer_name,
       phone_number,
       country_code,
       imei_1,
+      imei_2,
       key_type,
-      device_status,
       fl_version,
-      retailer_id, // ID of the selected retailer from frontend
+      retailer_id,
     } = req.body;
 
     const brandFile =
@@ -5024,15 +5045,20 @@ export const addDevice = async (req, res) => {
       req.files?.customer_image?.[0] ||
       req.files?.customerImage?.[0];
 
+    const signatureFile =
+      req.files?.signature?.[0] ||
+      req.files?.signatureImage?.[0];
+
     // 3. Validate required fields
+    // IMEI 2 is conditionally required based on enrollment type
     const requiredFields = {
+      serial_number,
       enrollment_type,
       customer_name,
       phone_number,
       country_code,
       imei_1,
       key_type,
-      device_status,
       fl_version,
       retailer_id,
     };
@@ -5054,20 +5080,33 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 4. Validate selected retailer ID
+    // 4. Validate serial number
+    const normalizedSerialNumber = String(serial_number).trim();
+
+    if (!normalizedSerialNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Serial number is required.",
+      });
+    }
+
+    // 5. Validate retailer ID
     const normalizedRetailerId = String(retailer_id).trim();
 
-    if (
-      !/^\d+$/.test(normalizedRetailerId) ||
-      BigInt(normalizedRetailerId) <= 0n
-    ) {
+    if (!/^\d+$/.test(normalizedRetailerId)) {
       return res.status(400).json({
         success: false,
         message: "Please select a valid retailer.",
       });
     }
 
-    // Confirm that the selected retailer exists
+    if (BigInt(normalizedRetailerId) <= 0n) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select a valid retailer.",
+      });
+    }
+
     const selectedRetailer = await db("users")
       .select("id")
       .where("id", normalizedRetailerId)
@@ -5080,19 +5119,35 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 5. Validate enrollment type
-    const normalizedEnrollmentType = String(enrollment_type)
-      .trim()
-      .toLowerCase();
+    // 6. Find enrollment record by name
+    const enrollmentInput = String(enrollment_type).trim();
 
-    if (!["old", "new"].includes(normalizedEnrollmentType)) {
+    const enrollment = await db("enrollment")
+      .whereRaw("LOWER(TRIM(name)) = ?", [
+        enrollmentInput.toLowerCase(),
+      ])
+      .first();
+
+    if (!enrollment) {
       return res.status(400).json({
         success: false,
-        message: "Enrollment type must be 'old' or 'new'.",
+        message: `Enrollment '${enrollmentInput}' was not found.`,
       });
     }
 
-    // 6. Validate phone number
+    const enrollmentId = enrollment.id;
+
+    // 7. Detect iPhone enrollment
+    // Supports: I Phone, iPhone, I-Phone, I_Phone
+    const normalizedEnrollmentName = String(enrollment.name ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]/g, "");
+
+    const isIPhoneEnrollment =
+      normalizedEnrollmentName.includes("iphone");
+
+    // 8. Validate phone number
     const normalizedPhoneNumber = String(phone_number).trim();
 
     if (!/^\d+$/.test(normalizedPhoneNumber)) {
@@ -5102,17 +5157,39 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 7. Validate IMEI
-    const normalizedImei = String(imei_1).trim();
+    // 9. Validate IMEI 1 (mandatory)
+    const normalizedImei1 = String(imei_1).trim();
 
-    if (!/^\d{15}$/.test(normalizedImei)) {
+    if (!/^\d{15}$/.test(normalizedImei1)) {
       return res.status(400).json({
         success: false,
-        message: "IMEI number must contain exactly 15 numeric digits.",
+        message: "IMEI 1 must contain exactly 15 numeric digits.",
       });
     }
 
-    // 8. Validate brand image
+    // 10. Validate IMEI 2
+    const normalizedImei2 = String(imei_2 ?? "").trim();
+
+    // IMEI 2 is optional for iPhone only
+    if (!isIPhoneEnrollment && !normalizedImei2) {
+      return res.status(400).json({
+        success: false,
+        message: "IMEI 2 is required.",
+      });
+    }
+
+    // If IMEI 2 is provided, validate 15 digits
+    if (
+      normalizedImei2 &&
+      !/^\d{15}$/.test(normalizedImei2)
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "IMEI 2 must contain exactly 15 numeric digits.",
+      });
+    }
+
+    // 11. Validate required image uploads
     if (!brandFile) {
       return res.status(400).json({
         success: false,
@@ -5120,25 +5197,41 @@ export const addDevice = async (req, res) => {
       });
     }
 
-    // 9. Find key by name in key_setting
-    const keyNameInput = String(key_type).trim();
+    if (!signatureFile) {
+      return res.status(400).json({
+        success: false,
+        message: "Signature image is required.",
+      });
+    }
 
-    const keySetting = await db("key_setting")
-      .whereRaw("LOWER(TRIM(name)) = ?", [
-        keyNameInput.toLowerCase(),
-      ])
-      .first();
+    // 12. Find key setting by ID or name
+    const keyInput = String(key_type).trim();
+
+    let keySetting;
+
+    if (/^\d+$/.test(keyInput) && BigInt(keyInput) > 0n) {
+      keySetting = await db("key_setting")
+        .where("id", keyInput)
+        .first();
+    } else {
+      keySetting = await db("key_setting")
+        .whereRaw("LOWER(TRIM(name)) = ?", [
+          keyInput.toLowerCase(),
+        ])
+        .first();
+    }
 
     if (!keySetting) {
       return res.status(400).json({
         success: false,
-        message: `Key type '${keyNameInput}' was not found.`,
+        message: `Key type '${keyInput}' was not found in key_setting.`,
       });
     }
 
+    const keySettingId = keySetting.id;
     const keyName = String(keySetting.name).trim();
 
-    // 10. Generate registration number
+    // 13. Generate registration number
     const lastDevice = await db("device_detail")
       .select("registration_no")
       .whereRaw("registration_no REGEXP '^[0-9]+$'")
@@ -5157,46 +5250,71 @@ export const addDevice = async (req, res) => {
         : lastRegistrationNumber + 1n
     ).toString();
 
-    // 11. Prepare device data
+    // 14. Prepare device data
     const deviceData = {
-      // Logged-in user who created the device
       created_by: user.id,
-
-      // Selected retailer's ID, NOT the logged-in user's ID
       retailer_id: selectedRetailer.id,
 
+      serial_number: normalizedSerialNumber,
+
       brand: `/uploads/devices/${brandFile.filename}`,
-      enrollment_type: normalizedEnrollmentType,
+
+      enrollment_type: enrollmentId,
+
       customer_name: String(customer_name).trim(),
+
       customer_image: customerImageFile
         ? `/uploads/devices/${customerImageFile.filename}`
         : null,
+
       registration_no: registrationNo,
+
       phone_number: normalizedPhoneNumber,
       country_code: String(country_code).trim(),
-      imei_1: normalizedImei,
-      key_type: keyName,
-      device_status: String(device_status).trim(),
+
+      imei_1: normalizedImei1,
+
+      // iPhone: IMEI 2 is optional and saved as NULL if empty
+      // Other enrollments: IMEI 2 is mandatory
+      imei_2: normalizedImei2 || null,
+
+      guarantor_name:
+        guarantor_name == null
+          ? null
+          : String(guarantor_name).trim() || null,
+
+      guarantor_number:
+        guarantor_number == null
+          ? null
+          : String(guarantor_number).trim() || null,
+
+      key_type: keySettingId,
+
+      device_status: "pending",
+
       fl_version: String(fl_version).trim(),
+
+      signature: `/uploads/devices/${signatureFile.filename}`,
+
       created_at: db.fn.now(),
     };
 
-    // 12. Insert device into database
-    const insertResult = await db("device_detail").insert(
-      deviceData
-    );
+    // 15. Insert device into database
+    const insertResult = await db("device_detail").insert(deviceData);
 
     const deviceId = Array.isArray(insertResult)
       ? insertResult[0]
       : insertResult;
 
-    // 13. Return response
+    // 16. Return success response
     return res.status(201).json({
       success: true,
       message: "Device added successfully.",
       data: {
         id: deviceId,
         ...deviceData,
+        enrollment_name: enrollment.name,
+        key_name: keyName,
         created_at: undefined,
       },
     });
@@ -5214,16 +5332,12 @@ export const addDevice = async (req, res) => {
   }
 };
 
-
-
-
-
-
-
 // GET all devices
+
 
 export const getDevices = async (req, res) => {
   try {
+    // 1. Pagination
     const page = Math.max(
       1,
       Number.parseInt(req.query.page, 10) || 1
@@ -5236,7 +5350,7 @@ export const getDevices = async (req, res) => {
 
     const offset = (page - 1) * limit;
 
-    // Count total devices
+    // 2. Count total devices
     const countResult = await db("device_detail as d")
       .count({ total: "d.id" })
       .first();
@@ -5244,12 +5358,22 @@ export const getDevices = async (req, res) => {
     const total = Number(countResult?.total || 0);
     const totalPages = Math.ceil(total / limit);
 
-    // Fetch devices with key name and user hierarchy
+    // 3. Fetch devices with enrollment, key and hierarchy details
     const devices = await db("device_detail as d")
 
-      // Match key_type ID with key settings ID
-      // Assumption: actual table is key_setting and name column is name
-      .leftJoin("key_setting as ks", "ks.id", "d.key_type")
+      // Enrollment ID -> Enrollment name
+      .leftJoin(
+        "enrollment as e",
+        "e.id",
+        "d.enrollment_type"
+      )
+
+      // Key setting ID -> Key name
+      .leftJoin(
+        "key_setting as ks",
+        "ks.id",
+        "d.key_type"
+      )
 
       // Retailer / device owner
       .leftJoin("users as retailer", function () {
@@ -5264,9 +5388,13 @@ export const getDevices = async (req, res) => {
       })
 
       // Retailer's direct parent
-      .leftJoin("users as parent", "parent.id", "retailer.parent_id")
+      .leftJoin(
+        "users as parent",
+        "parent.id",
+        "retailer.parent_id"
+      )
 
-      // If parent is FOS (role_id = 5)
+      // FOS details when parent role is FOS (role_id = 5)
       .leftJoin("users as fos", function () {
         this.on("fos.id", "=", "parent.id").andOn(
           "fos.role_id",
@@ -5276,12 +5404,20 @@ export const getDevices = async (req, res) => {
       })
 
       // FOS's parent
-      .leftJoin("users as fos_parent", "fos_parent.id", "fos.parent_id")
+      .leftJoin(
+        "users as fos_parent",
+        "fos_parent.id",
+        "fos.parent_id"
+      )
 
       .select(
+        
         "d.*",
 
-        // Key name from key settings table
+        // Enrollment details
+        "e.name as enrollment_name",
+
+        // Key details
         "ks.name as key_name",
 
         // Retailer details
@@ -5326,6 +5462,7 @@ export const getDevices = async (req, res) => {
       .limit(limit)
       .offset(offset);
 
+    // 4. Success response
     return res.status(200).json({
       success: true,
       message: "Devices fetched successfully.",
@@ -5338,7 +5475,10 @@ export const getDevices = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error("GET DEVICES ERROR:", error);
+    console.error(
+      "GET DEVICES ERROR:",
+      error?.stack || error?.message || String(error)
+    );
 
     return res.status(500).json({
       success: false,
@@ -5433,3 +5573,137 @@ export const getDeviceById = async (req, res) => {
   }
 };
 
+
+//getEnrollment  api  
+
+export const getEnrollment = async (req, res) => {
+  try {
+    const enrollments = await db("Enrollment")
+      .select("id", "name", "status", "created_at", "updated_at")
+      .orderBy("id", "asc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Enrollment data fetched successfully",
+      data: enrollments,
+    });
+  } catch (error) {
+    console.error("GET ENROLLMENT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch enrollment data",
+      error: error.message,
+    });
+  }
+};
+
+export const updateEnrollment = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name, status } = req.body;
+
+    if (!id || !Number.isInteger(Number(id)) || Number(id) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Valid enrollment ID is required",
+      });
+    }
+
+    if (name === undefined && status === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Name or status is required to update",
+      });
+    }
+
+    const updateData = {};
+
+    if (name !== undefined) {
+      if (typeof name !== "string" || !name.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: "Name cannot be empty",
+        });
+      }
+
+      updateData.name = name.trim();
+    }
+
+    if (status !== undefined) {
+      if (![0, 1].includes(Number(status))) {
+        return res.status(400).json({
+          success: false,
+          message: "Status must be 0 or 1",
+        });
+      }
+
+      updateData.status = Number(status);
+    }
+
+    const enrollment = await db("Enrollment")
+      .where({ id: Number(id) })
+      .first();
+
+    if (!enrollment) {
+      return res.status(404).json({
+        success: false,
+        message: "Enrollment not found",
+      });
+    }
+
+    await db("Enrollment")
+      .where({ id: Number(id) })
+      .update(updateData);
+
+    const updatedEnrollment = await db("Enrollment")
+      .select("id", "name", "status", "created_at", "updated_at")
+      .where({ id: Number(id) })
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "Enrollment updated successfully",
+      data: updatedEnrollment,
+    });
+  } catch (error) {
+    console.error("UPDATE ENROLLMENT ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update enrollment",
+      error: error.message,
+    });
+  }
+};
+
+//get brand name
+export const getBrands = async (req, res) => {
+  try {
+    const brands = await db("brand")
+      .select(
+        "brand_id",
+        "brand_name",
+        "brand_image",
+        "status",
+        "created_at",
+        "updated_at"
+      )
+      .orderBy("brand_id", "asc");
+
+    return res.status(200).json({
+      success: true,
+      message: "Brands fetched successfully",
+      total: brands.length,
+      data: brands,
+    });
+  } catch (error) {
+    console.error("Get Brands Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
