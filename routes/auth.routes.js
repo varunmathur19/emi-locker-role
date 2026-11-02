@@ -36,6 +36,9 @@ import {
     addDevice,
     getDeviceById,
     getDevices,
+    getEnrollment,
+    updateEnrollment,
+    getBrands,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -344,8 +347,16 @@ router.put(
 // add-device / user list
 router.post("/add-device", uploadDeviceImages, addDevice);
 
-router.get("/devices", getDevices);
-router.get("/devices/:id", getDeviceById);
+router.get("/devices", authMiddleware,getDevices);
+router.get("/devices/:id", authMiddleware,getDeviceById);
+
+//getEnrollment  api  
+
+router.get("/get-enrollment", authMiddleware, getEnrollment);
+router.put("/update-enrollment/:id", authMiddleware, updateEnrollment);
+
+
+router.get("/get-Brands",authMiddleware, getBrands);
 
 
 
