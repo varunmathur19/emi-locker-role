@@ -3781,12 +3781,6 @@ export const updateKeySetting = async (req, res) => {
 //post the transactione data
 
 
-
-
-
-
-
-
 export const transferWalletPoints = async (req, res) => {
   let trx;
 
@@ -4518,10 +4512,6 @@ export const transferWalletPoints = async (req, res) => {
     });
   }
 };
-
-
-
-
 
 //get the transactione data
 
