@@ -3797,15 +3797,18 @@ export const transferWalletPoints = async (req, res) => {
     return res.status(status).json(payload);
   };
 
-  const CHILD_ROLES = {
-    0: [1],
-    1: [2],
-    2: [3],
-    3: [4],
-    4: [5],
-    5: [6],
+  // Roles that can receive points from each wallet owner.
+  const DESCENDANT_ROLES = {
+    0: [1, 2, 3, 4, 5, 6, 7, 8, 9],
+    1: [2, 3, 4, 5, 6, 7, 8, 9],
+    2: [3, 4, 5, 6, 7, 9],
+    3: [4, 5, 6, 7, 9],
+    4: [5, 6, 7, 9],
+    5: [6, 7, 9],
     6: [7, 8],
     7: [8],
+    8: [9],
+    9: [],
   };
 
   const normalize = (value) =>
@@ -3958,10 +3961,9 @@ export const transferWalletPoints = async (req, res) => {
     });
 
   /*
-   * Check whether receiver is actually below ancestorId in the
-   * parent hierarchy. This supports indirect descendants too.
-   *
-   * Staff may use created_by if parent_id is not populated.
+   * Check complete parent hierarchy.
+   * Supports indirect descendants.
+   * Staff can use created_by when parent_id is missing.
    */
   const isInHierarchy = async (receiverId, ancestorId) => {
     const visited = new Set();
@@ -3987,12 +3989,13 @@ export const transferWalletPoints = async (req, res) => {
         return false;
       }
 
-      const parentId = Number(
+      const parentValue =
         currentUser.parent_id ||
         (Number(currentUser.role_id) === 9
           ? currentUser.created_by
-          : 0)
-      );
+          : null);
+
+      const parentId = Number(parentValue);
 
       if (!Number.isInteger(parentId) || parentId <= 0) {
         return false;
@@ -4193,21 +4196,17 @@ export const transferWalletPoints = async (req, res) => {
      * ROLE HIERARCHY VALIDATION
      *
      * Type 0: Normal Transfer Point
-     *         Direct child only.
+     *         Allows eligible descendants in actual hierarchy.
      *
      * Type 1: Schema Point
-     *         Allows lower-level descendant roles.
-     *         Master Admin and Admin retain their privileged
-     *         schema-transfer behaviour.
+     *         Existing schema-transfer rules preserved.
      *
      * Type 2: Revert Point
-     *         Existing revert rules are preserved.
+     *         Existing revert rules preserved.
      */
 
     if (isSchemaTransfer) {
       if (isPrivilegedSchemaTransfer) {
-        // Master Admin can select roles 1-9.
-        // Admin can select roles 2-9.
         const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
 
         if (
@@ -4223,13 +4222,6 @@ export const transferWalletPoints = async (req, res) => {
           });
         }
       } else {
-        /*
-         * For non-privileged roles, require the receiver to be
-         * an actual descendant, not just a role with a larger ID.
-         *
-         * Staff (role 9) has no lower role, so it cannot send
-         * Schema Points to another role using this rule.
-         */
         if (receiverRoleId <= actorRoleId || receiverRoleId > 9) {
           return await rollbackAndRespond(403, {
             success: false,
@@ -4258,7 +4250,6 @@ export const transferWalletPoints = async (req, res) => {
         }
       }
     } else if (isPrivilegedRevert) {
-      // Master Admin can revert from Admin; Admin from role 2 onward.
       const minimumReceiverRole = actorRoleId === 0 ? 1 : 2;
 
       if (
@@ -4272,27 +4263,37 @@ export const transferWalletPoints = async (req, res) => {
         });
       }
     } else {
-      // Normal Transfer Point: preserve direct-parent rules.
-      const allowedRoles = CHILD_ROLES[ownerRoleId] ?? [];
+      // NORMAL TRANSFER POINT
+      // Allow direct and indirect descendants.
 
-      if (Number(receiver.parent_id) !== walletOwnerId) {
-        return await rollbackAndRespond(403, {
-          success: false,
-          message:
-            "Receiver is not a direct child of the wallet owner",
-          wallet_owner_id: walletOwnerId,
-          receiver_id: toUserId,
-        });
-      }
+      const allowedRoles =
+        DESCENDANT_ROLES[ownerRoleId] ?? [];
 
+      // Check whether receiver role is allowed.
       if (!allowedRoles.includes(receiverRoleId)) {
         return await rollbackAndRespond(403, {
           success: false,
-          message:
-            "Receiver role is not allowed for this transfer",
+          message: "Receiver role is not allowed for this transfer",
           wallet_owner_role_id: ownerRoleId,
           receiver_role_id: receiverRoleId,
           allowed_roles: allowedRoles,
+        });
+      }
+
+      // Check complete hierarchy instead of direct parent only.
+      const receiverIsDescendant = await isInHierarchy(
+        toUserId,
+        walletOwnerId
+      );
+
+      if (!receiverIsDescendant) {
+        return await rollbackAndRespond(403, {
+          success: false,
+          message: "Receiver is not in the wallet owner's hierarchy",
+          wallet_owner_id: walletOwnerId,
+          receiver_id: toUserId,
+          wallet_owner_role_id: ownerRoleId,
+          receiver_role_id: receiverRoleId,
         });
       }
     }
@@ -4512,6 +4513,7 @@ export const transferWalletPoints = async (req, res) => {
     });
   }
 };
+
 
 //get the transactione data
 
