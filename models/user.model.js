@@ -736,20 +736,20 @@ export const getAllUsers = async (
       .offset(offset);
 
     // 12. Debug output
-    console.log("GET ALL USERS MODEL RESULT:", {
-      loggedInUserId,
-      loggedInRoleId,
-      canSeeAllUsers,
-      isStaff,
-      staffCreatorId: resolvedStaffCreatorId,
-      staffCreatorRoleId,
-      hierarchyAnchorId,
-      roleFilter: filters.role_id,
-      returnedUsers: users.length,
-      totalUsers: total,
-      limit,
-      offset,
-    });
+    // console.log("GET ALL USERS MODEL RESULT:", {
+    //   loggedInUserId,
+    //   loggedInRoleId,
+    //   canSeeAllUsers,
+    //   isStaff,
+    //   staffCreatorId: resolvedStaffCreatorId,
+    //   staffCreatorRoleId,
+    //   hierarchyAnchorId,
+    //   roleFilter: filters.role_id,
+    //   returnedUsers: users.length,
+    //   totalUsers: total,
+    //   limit,
+    //   offset,
+    // });
 
     return {
       users,
