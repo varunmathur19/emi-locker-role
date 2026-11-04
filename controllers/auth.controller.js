@@ -88,58 +88,59 @@ const getStaffPermissions = async (user) => {
     }
 };
 
-const hasStaffPermission = (
-    permissions,
-    moduleId,
-    subModuleId
-) => {
-    if (!permissions) {
-        return false;
-    }
 
-    if (
-        moduleId === undefined ||
-        moduleId === null ||
-        subModuleId === undefined ||
-        subModuleId === null
-    ) {
-        return false;
-    }
+// const hasStaffPermission = (
+//     permissions,
+//     moduleId,
+//     subModuleId
+// ) => {
+//     if (!permissions) {
+//         return false;
+//     }
 
-    const key = `${moduleId}.${subModuleId}`;
+//     if (
+//         moduleId === undefined ||
+//         moduleId === null ||
+//         subModuleId === undefined ||
+//         subModuleId === null
+//     ) {
+//         return false;
+//     }
 
-    return isPermissionEnabled(
-        permissions[key]
-    );
-};
+//     const key = `${moduleId}.${subModuleId}`;
 
-const hasAnyStaffModulePermission = (
-    permissions,
-    moduleId
-) => {
-    if (!permissions) {
-        return false;
-    }
+//     return isPermissionEnabled(
+//         permissions[key]
+//     );
+// };
 
-    if (
-        moduleId === undefined ||
-        moduleId === null
-    ) {
-        return false;
-    }
+// const hasAnyStaffModulePermission = (
+//     permissions,
+//     moduleId
+// ) => {
+//     if (!permissions) {
+//         return false;
+//     }
 
-    const prefix = `${moduleId}.`;
+//     if (
+//         moduleId === undefined ||
+//         moduleId === null
+//     ) {
+//         return false;
+//     }
 
-    return Object.entries(permissions).some(
-        ([key, value]) => {
-            if (!key.startsWith(prefix)) {
-                return false;
-            }
+//     const prefix = `${moduleId}.`;
 
-            return isPermissionEnabled(value);
-        }
-    );
-};
+//     return Object.entries(permissions).some(
+//         ([key, value]) => {
+//             if (!key.startsWith(prefix)) {
+//                 return false;
+//             }
+
+//             return isPermissionEnabled(value);
+//         }
+//     );
+// };
 
 
 
@@ -5042,7 +5043,6 @@ export const addDevice = async (req, res) => {
       req.files?.signatureImage?.[0];
 
     // 3. Validate required fields
-    // IMEI 2 is conditionally required based on enrollment type
     const requiredFields = {
       serial_number,
       enrollment_type,
@@ -5130,7 +5130,6 @@ export const addDevice = async (req, res) => {
     const enrollmentId = enrollment.id;
 
     // 7. Detect iPhone enrollment
-    // Supports: I Phone, iPhone, I-Phone, I_Phone
     const normalizedEnrollmentName = String(enrollment.name ?? "")
       .trim()
       .toLowerCase()
@@ -5139,13 +5138,167 @@ export const addDevice = async (req, res) => {
     const isIPhoneEnrollment =
       normalizedEnrollmentName.includes("iphone");
 
-    // 8. Validate phone number
-    const normalizedPhoneNumber = String(phone_number).trim();
+    // 8. Validate phone number using country-specific rules
+    const rawPhoneNumber = String(phone_number).trim();
+    const normalizedCountryCode = String(country_code)
+      .trim()
+      .toUpperCase();
 
-    if (!/^\d+$/.test(normalizedPhoneNumber)) {
+    if (!rawPhoneNumber) {
       return res.status(400).json({
         success: false,
-        message: "Phone number must contain numeric digits only.",
+        message: "Phone number is required.",
+      });
+    }
+
+    if (!normalizedCountryCode) {
+      return res.status(400).json({
+        success: false,
+        message: "Country code is required.",
+      });
+    }
+
+    // Allow common phone formatting characters.
+    // Reject alphabets and other invalid characters.
+    const cleanedPhoneNumber = rawPhoneNumber.replace(
+      /[\s().-]/g,
+      ""
+    );
+
+    const isInternationalNumber =
+      cleanedPhoneNumber.startsWith("+");
+
+    const phoneDigits = cleanedPhoneNumber.replace(/\D/g, "");
+
+    if (
+      !phoneDigits ||
+      (!isInternationalNumber && !/^\d+$/.test(cleanedPhoneNumber)) ||
+      (isInternationalNumber &&
+        !/^\+\d+$/.test(cleanedPhoneNumber))
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid phone number.",
+      });
+    }
+
+    let parsedPhone;
+
+    try {
+      // Case 1: Country code is an ISO code, e.g. IN, US, GB
+      const isIsoCountryCode = /^[A-Z]{2}$/.test(
+        normalizedCountryCode
+      );
+
+      // Case 2: Country code is a dialing code, e.g. +91, 91
+      const isDialingCode = /^\+?\d{1,4}$/.test(
+        normalizedCountryCode
+      );
+
+      if (!isIsoCountryCode && !isDialingCode) {
+        return res.status(400).json({
+          success: false,
+          message: "Invalid country code.",
+        });
+      }
+
+      if (isInternationalNumber) {
+        // Number already contains an international prefix
+        parsedPhone = parsePhoneNumberFromString(
+          cleanedPhoneNumber
+        );
+
+        if (!parsedPhone || !parsedPhone.isValid()) {
+          return res.status(400).json({
+            success: false,
+            message: "Invalid international phone number.",
+          });
+        }
+
+        // Verify selected country against the entered number
+        if (isIsoCountryCode) {
+          if (parsedPhone.country !== normalizedCountryCode) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Phone number does not match the selected country.",
+            });
+          }
+        } else {
+          const selectedDialCode =
+            normalizedCountryCode.replace(/\D/g, "");
+
+          if (
+            parsedPhone.countryCallingCode !== selectedDialCode
+          ) {
+            return res.status(400).json({
+              success: false,
+              message:
+                "Phone number does not match the selected country code.",
+            });
+          }
+        }
+      } else if (isIsoCountryCode) {
+        // Parse national number using ISO country code
+        parsedPhone = parsePhoneNumberFromString(
+          phoneDigits,
+          normalizedCountryCode
+        );
+
+        if (
+          !parsedPhone ||
+          !parsedPhone.isValid() ||
+          parsedPhone.country !== normalizedCountryCode
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid phone number for the selected country.",
+          });
+        }
+      } else {
+        // Parse national number using international dialing code
+        const selectedDialCode =
+          normalizedCountryCode.replace(/\D/g, "");
+
+        const internationalNumber =
+          `+${selectedDialCode}${phoneDigits}`;
+
+        parsedPhone = parsePhoneNumberFromString(
+          internationalNumber
+        );
+
+        if (
+          !parsedPhone ||
+          !parsedPhone.isValid() ||
+          parsedPhone.countryCallingCode !== selectedDialCode
+        ) {
+          return res.status(400).json({
+            success: false,
+            message:
+              "Invalid phone number for the selected country.",
+          });
+        }
+      }
+    } catch (phoneError) {
+      console.error(
+        "PHONE VALIDATION ERROR:",
+        phoneError.message
+      );
+
+      return res.status(400).json({
+        success: false,
+        message: "Please enter a valid phone number.",
+      });
+    }
+
+    // Save normalized national number separately from country code
+    const normalizedPhoneNumber = parsedPhone.nationalNumber;
+
+    if (!normalizedPhoneNumber) {
+      return res.status(400).json({
+        success: false,
+        message: "Unable to validate phone number.",
       });
     }
 
@@ -5262,7 +5415,7 @@ export const addDevice = async (req, res) => {
       registration_no: registrationNo,
 
       phone_number: normalizedPhoneNumber,
-      country_code: String(country_code).trim(),
+      country_code: normalizedCountryCode,
 
       imei_1: normalizedImei1,
 
@@ -5292,7 +5445,9 @@ export const addDevice = async (req, res) => {
     };
 
     // 15. Insert device into database
-    const insertResult = await db("device_detail").insert(deviceData);
+    const insertResult = await db("device_detail").insert(
+      deviceData
+    );
 
     const deviceId = Array.isArray(insertResult)
       ? insertResult[0]
@@ -5484,86 +5639,6 @@ export const getDevices = async (req, res) => {
 };
 
 // GET single device by ID
-export const getDeviceById = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Validate device ID
-    if (!id || !/^\d+$/.test(String(id))) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid device ID.",
-      });
-    }
-
-    const deviceId = Number(id);
-
-    if (!Number.isSafeInteger(deviceId) || deviceId <= 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Device ID must be a positive integer.",
-      });
-    }
-
-    // Fetch complete device data and related hierarchy details
-    const device = await db("device_detail as d")
-      .leftJoin("users as retailer", "d.created_by", "retailer.id")
-      .leftJoin("users as fos", "retailer.parent_id", "fos.id")
-      .leftJoin("users as distributor", "fos.parent_id", "distributor.id")
-      .select(
-        // All device_detail columns
-        "d.*",
-
-        // Retailer details
-        "retailer.id as retailer_id",
-        "retailer.name as retailer_name",
-        "retailer.organization_name as retailer_company_name",
-        "retailer.parent_id as retailer_parent_id",
-
-        // FOS details
-        "fos.id as fos_id",
-        "fos.name as fos_name",
-        "fos.organization_name as fos_company_name",
-        "fos.parent_id as fos_parent_id",
-
-        // Distributor details
-        "distributor.id as distributor_id",
-        "distributor.name as distributor_name",
-        "distributor.organization_name as distributor_company_name",
-        "distributor.parent_id as distributor_parent_id"
-      )
-      .where("d.id", deviceId)
-      .first();
-
-    if (!device) {
-      return res.status(404).json({
-        success: false,
-        message: "Device not found.",
-        data: null,
-      });
-    }
-
-    return res.status(200).json({
-      success: true,
-      message: "Device fetched successfully.",
-      data: device,
-    });
-  } catch (error) {
-    console.error(
-      "GET DEVICE BY ID ERROR:",
-      error?.stack || error?.message || error
-    );
-
-    return res.status(500).json({
-      success: false,
-      message: "Failed to fetch device.",
-      error:
-        process.env.NODE_ENV === "development"
-          ? error?.message
-          : "Internal server error",
-    });
-  }
-};
 
 
 //getEnrollment  api  
