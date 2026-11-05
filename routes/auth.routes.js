@@ -34,7 +34,6 @@ import {
     updateCompanySetting,
     getNormalCompanySetting,
     addDevice,
-    getDeviceById,
     getDevices,
     getEnrollment,
     updateEnrollment,
@@ -348,7 +347,6 @@ router.put(
 router.post("/add-device", uploadDeviceImages, addDevice);
 
 router.get("/devices", authMiddleware,getDevices);
-router.get("/devices/:id", authMiddleware,getDeviceById);
 
 //getEnrollment  api  
 
