@@ -5174,7 +5174,79 @@ export const getDevices = async (req, res) => {
 
 
 // GET single device by ID
+export const getDeviceById = async (req, res) => {
+  try {
+    const { id } = req.params;
 
+    // 1. Validate ID
+    if (!id || !Number.isInteger(Number(id)) || Number(id) <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    // 2. Fetch device details
+    const device = await db("device_detail as d")
+      .leftJoin(
+        "enrollment as e",
+        "e.id",
+        "d.enrollment_type"
+      )
+      .select(
+        // Device details
+        "d.id",
+        "d.registration_no",
+        "d.retailer_id",
+        "d.enrollment_type",
+        "d.serial_number",
+        "d.imei_1",
+        "d.imei_2",
+        "d.phone_number",
+        "d.customer_name",
+        "d.guarantor_name",
+        "d.guarantor_number",
+        "d.signature",
+        "d.created_by",
+        "d.created_at",
+
+        // Enrollment details
+        "e.name as enrollment_name"
+      )
+      .where("d.id", Number(id))
+      .first();
+
+    // 3. Check device exists
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    // 4. Success response
+    return res.status(200).json({
+      success: true,
+      message: "Device details fetched successfully.",
+      data: device,
+    });
+
+  } catch (error) {
+    console.error(
+      "GET DEVICE BY ID ERROR:",
+      error?.stack || error?.message || String(error)
+    );
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch device details.",
+      error:
+        process.env.NODE_ENV === "production"
+          ? "Internal server error"
+          : error.message,
+    });
+  }
+};
 
 //getEnrollment  api  
 
