@@ -4954,522 +4954,129 @@ export const updateCompanySetting = async (req, res) => {
 };
 
 
-// add-device / user list
 
+// add-device / user list
 export const addDevice = async (req, res) => {
   try {
-    // 1. Authenticate logged-in user
-    const authHeader = req.headers.authorization;
+    // User ID from authentication middleware
+    const userId = req.user.id;
 
-    if (!authHeader?.startsWith("Bearer ")) {
-      return res.status(401).json({
-        success: false,
-        message: "Authentication token is missing.",
-      });
-    }
-
-    const token = authHeader.slice(7).trim();
-
-    if (!token || !process.env.JWT_SECRET) {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid authentication configuration or token.",
-      });
-    }
-
-    let decoded;
-
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch {
-      return res.status(401).json({
-        success: false,
-        message: "Invalid or expired token. Please login again.",
-      });
-    }
-
-    const loggedInUserId =
-      decoded.id ?? decoded.user_id ?? decoded.userId;
-
-    if (
-      loggedInUserId === undefined ||
-      loggedInUserId === null ||
-      String(loggedInUserId).trim() === ""
-    ) {
-      return res.status(401).json({
-        success: false,
-        message: "User ID not found in token.",
-      });
-    }
-
-    const user = await db("users")
-      .select("id")
-      .where("id", loggedInUserId)
-      .first();
-
-    if (!user) {
-      return res.status(401).json({
-        success: false,
-        message: "Logged-in user not found.",
-      });
-    }
-
-    // 2. Read request body
     const {
-      serial_number,
-      guarantor_name,
-      guarantor_number,
-      enrollment_type,
-      customer_name,
+      retailer_id,
       phone_number,
-      country_code,
+      serial_number,
       imei_1,
       imei_2,
-      key_type,
-      fl_version,
-      retailer_id,
-    } = req.body;
-
-    const brandFile =
-      req.files?.brand?.[0] ||
-      req.files?.brandImage?.[0];
-
-    const customerImageFile =
-      req.files?.customer_image?.[0] ||
-      req.files?.customerImage?.[0];
-
-    const signatureFile =
-      req.files?.signature?.[0] ||
-      req.files?.signatureImage?.[0];
-
-    // 3. Validate required fields
-    const requiredFields = {
-      serial_number,
-      enrollment_type,
       customer_name,
-      phone_number,
-      country_code,
-      imei_1,
-      key_type,
-      fl_version,
-      retailer_id,
-    };
+      guarantor_name,
+      guarantor_number,
+    } = req.body || {};
 
-    const missingFields = Object.entries(requiredFields)
-      .filter(
-        ([, value]) =>
-          value === undefined ||
-          value === null ||
-          String(value).trim() === ""
-      )
-      .map(([field]) => field);
+    const rawEnrollmentType =
+      req.body?.enrollment_type ??
+      req.body?.enrollment_id ??
+      req.body?.type_id;
 
-    if (missingFields.length > 0) {
-      return res.status(400).json({
-        success: false,
-        message: "Please provide all required fields.",
-        missingFields,
-      });
-    }
+    const cleanPhoneNumber = String(phone_number || "").trim();
 
-    // 4. Validate serial number
-    const normalizedSerialNumber = String(serial_number).trim();
-
-    if (!normalizedSerialNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Serial number is required.",
-      });
-    }
-
-    // 5. Validate retailer ID
-    const normalizedRetailerId = String(retailer_id).trim();
-
-    if (!/^\d+$/.test(normalizedRetailerId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Please select a valid retailer.",
-      });
-    }
-
-    if (BigInt(normalizedRetailerId) <= 0n) {
-      return res.status(400).json({
-        success: false,
-        message: "Please select a valid retailer.",
-      });
-    }
-
-    const selectedRetailer = await db("users")
-      .select("id")
-      .where("id", normalizedRetailerId)
-      .first();
-
-    if (!selectedRetailer) {
-      return res.status(400).json({
-        success: false,
-        message: "Selected retailer was not found.",
-      });
-    }
-
-    // 6. Find enrollment record by name
-    const enrollmentInput = String(enrollment_type).trim();
-
-    const enrollment = await db("enrollment")
-      .whereRaw("LOWER(TRIM(name)) = ?", [
-        enrollmentInput.toLowerCase(),
-      ])
-      .first();
-
-    if (!enrollment) {
-      return res.status(400).json({
-        success: false,
-        message: `Enrollment '${enrollmentInput}' was not found.`,
-      });
-    }
-
-    const enrollmentId = enrollment.id;
-
-    // 7. Detect iPhone enrollment
-    const normalizedEnrollmentName = String(enrollment.name ?? "")
-      .trim()
-      .toLowerCase()
-      .replace(/[^a-z0-9]/g, "");
-
-    const isIPhoneEnrollment =
-      normalizedEnrollmentName.includes("iphone");
-
-    // 8. Validate phone number using country-specific rules
-    const rawPhoneNumber = String(phone_number).trim();
-    const normalizedCountryCode = String(country_code)
-      .trim()
-      .toUpperCase();
-
-    if (!rawPhoneNumber) {
+    if (!cleanPhoneNumber) {
       return res.status(400).json({
         success: false,
         message: "Phone number is required.",
       });
     }
 
-    if (!normalizedCountryCode) {
-      return res.status(400).json({
-        success: false,
-        message: "Country code is required.",
-      });
-    }
-
-    // Allow common phone formatting characters.
-    // Reject alphabets and other invalid characters.
-    const cleanedPhoneNumber = rawPhoneNumber.replace(
-      /[\s().-]/g,
-      ""
-    );
-
-    const isInternationalNumber =
-      cleanedPhoneNumber.startsWith("+");
-
-    const phoneDigits = cleanedPhoneNumber.replace(/\D/g, "");
+    const enrollmentTypeId = Number(rawEnrollmentType);
 
     if (
-      !phoneDigits ||
-      (!isInternationalNumber && !/^\d+$/.test(cleanedPhoneNumber)) ||
-      (isInternationalNumber &&
-        !/^\+\d+$/.test(cleanedPhoneNumber))
+      rawEnrollmentType === undefined ||
+      rawEnrollmentType === null ||
+      String(rawEnrollmentType).trim() === "" ||
+      !Number.isInteger(enrollmentTypeId) ||
+      enrollmentTypeId <= 0
     ) {
       return res.status(400).json({
         success: false,
-        message: "Please enter a valid phone number.",
+        message: "Valid enrollment type is required.",
+        received_enrollment_type: rawEnrollmentType ?? null,
       });
     }
 
-    let parsedPhone;
+    const cleanSerialNumber = String(serial_number || "").trim();
+    const cleanImei1 = String(imei_1 || "").trim();
+    const cleanImei2 = String(imei_2 || "").trim();
 
-    try {
-      // Case 1: Country code is an ISO code, e.g. IN, US, GB
-      const isIsoCountryCode = /^[A-Z]{2}$/.test(
-        normalizedCountryCode
-      );
-
-      // Case 2: Country code is a dialing code, e.g. +91, 91
-      const isDialingCode = /^\+?\d{1,4}$/.test(
-        normalizedCountryCode
-      );
-
-      if (!isIsoCountryCode && !isDialingCode) {
-        return res.status(400).json({
-          success: false,
-          message: "Invalid country code.",
-        });
-      }
-
-      if (isInternationalNumber) {
-        // Number already contains an international prefix
-        parsedPhone = parsePhoneNumberFromString(
-          cleanedPhoneNumber
-        );
-
-        if (!parsedPhone || !parsedPhone.isValid()) {
-          return res.status(400).json({
-            success: false,
-            message: "Invalid international phone number.",
-          });
-        }
-
-        // Verify selected country against the entered number
-        if (isIsoCountryCode) {
-          if (parsedPhone.country !== normalizedCountryCode) {
-            return res.status(400).json({
-              success: false,
-              message:
-                "Phone number does not match the selected country.",
-            });
-          }
-        } else {
-          const selectedDialCode =
-            normalizedCountryCode.replace(/\D/g, "");
-
-          if (
-            parsedPhone.countryCallingCode !== selectedDialCode
-          ) {
-            return res.status(400).json({
-              success: false,
-              message:
-                "Phone number does not match the selected country code.",
-            });
-          }
-        }
-      } else if (isIsoCountryCode) {
-        // Parse national number using ISO country code
-        parsedPhone = parsePhoneNumberFromString(
-          phoneDigits,
-          normalizedCountryCode
-        );
-
-        if (
-          !parsedPhone ||
-          !parsedPhone.isValid() ||
-          parsedPhone.country !== normalizedCountryCode
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid phone number for the selected country.",
-          });
-        }
-      } else {
-        // Parse national number using international dialing code
-        const selectedDialCode =
-          normalizedCountryCode.replace(/\D/g, "");
-
-        const internationalNumber =
-          `+${selectedDialCode}${phoneDigits}`;
-
-        parsedPhone = parsePhoneNumberFromString(
-          internationalNumber
-        );
-
-        if (
-          !parsedPhone ||
-          !parsedPhone.isValid() ||
-          parsedPhone.countryCallingCode !== selectedDialCode
-        ) {
-          return res.status(400).json({
-            success: false,
-            message:
-              "Invalid phone number for the selected country.",
-          });
-        }
-      }
-    } catch (phoneError) {
-      console.error(
-        "PHONE VALIDATION ERROR:",
-        phoneError.message
-      );
-
+    if (!cleanSerialNumber && !cleanImei1) {
       return res.status(400).json({
         success: false,
-        message: "Please enter a valid phone number.",
+        message: "IMEI 1 or Serial Number is required.",
       });
     }
 
-    // Save normalized national number separately from country code
-    const normalizedPhoneNumber = parsedPhone.nationalNumber;
+    const signatureFile =
+      req.files?.signature?.[0] ||
+      req.files?.signatureImage?.[0];
 
-    if (!normalizedPhoneNumber) {
-      return res.status(400).json({
-        success: false,
-        message: "Unable to validate phone number.",
-      });
-    }
+    const signaturePath = signatureFile
+      ? `uploads/devices/${signatureFile.filename}`
+      : null;
 
-    // 9. Validate IMEI 1 (mandatory)
-    const normalizedImei1 = String(imei_1).trim();
-
-    if (!/^\d{15}$/.test(normalizedImei1)) {
-      return res.status(400).json({
-        success: false,
-        message: "IMEI 1 must contain exactly 15 numeric digits.",
-      });
-    }
-
-    // 10. Validate IMEI 2
-    const normalizedImei2 = String(imei_2 ?? "").trim();
-
-    // IMEI 2 is optional for iPhone only
-    if (!isIPhoneEnrollment && !normalizedImei2) {
-      return res.status(400).json({
-        success: false,
-        message: "IMEI 2 is required.",
-      });
-    }
-
-    // If IMEI 2 is provided, validate 15 digits
-    if (
-      normalizedImei2 &&
-      !/^\d{15}$/.test(normalizedImei2)
-    ) {
-      return res.status(400).json({
-        success: false,
-        message: "IMEI 2 must contain exactly 15 numeric digits.",
-      });
-    }
-
-    // 11. Validate required image uploads
-    if (!brandFile) {
-      return res.status(400).json({
-        success: false,
-        message: "Brand image is required.",
-      });
-    }
-
-    if (!signatureFile) {
-      return res.status(400).json({
-        success: false,
-        message: "Signature image is required.",
-      });
-    }
-
-    // 12. Find key setting by ID or name
-    const keyInput = String(key_type).trim();
-
-    let keySetting;
-
-    if (/^\d+$/.test(keyInput) && BigInt(keyInput) > 0n) {
-      keySetting = await db("key_setting")
-        .where("id", keyInput)
+    const result = await db.transaction(async (trx) => {
+      // Get last numeric registration number
+      const lastRegistration = await trx("device_detail")
+        .select(
+          trx.raw(
+            "MAX(CAST(registration_no AS UNSIGNED)) AS last_number"
+          )
+        )
+        .whereRaw("registration_no REGEXP '^[0-9]+$'")
         .first();
-    } else {
-      keySetting = await db("key_setting")
-        .whereRaw("LOWER(TRIM(name)) = ?", [
-          keyInput.toLowerCase(),
-        ])
-        .first();
-    }
 
-    if (!keySetting) {
-      return res.status(400).json({
-        success: false,
-        message: `Key type '${keyInput}' was not found in key_setting.`,
-      });
-    }
+      const lastNumber = Number(lastRegistration?.last_number || 1000);
+      const registrationNo = String(lastNumber + 1);
 
-    const keySettingId = keySetting.id;
-    const keyName = String(keySetting.name).trim();
+      const deviceData = {
+        registration_no: registrationNo,
+        retailer_id: retailer_id || null,
+        phone_number: cleanPhoneNumber,
+        enrollment_type: enrollmentTypeId,
+        serial_number: cleanSerialNumber || null,
+        imei_1: cleanImei1 || null,
+        imei_2: cleanImei2 || null,
+        customer_name: String(customer_name || "").trim() || null,
+        guarantor_name: String(guarantor_name || "").trim() || null,
+        guarantor_number: String(guarantor_number || "").trim() || null,
+        signature: signaturePath,
+        created_by: userId,
+        created_at: trx.fn.now(),
+      };
 
-    // 13. Generate registration number
-    const lastDevice = await db("device_detail")
-      .select("registration_no")
-      .whereRaw("registration_no REGEXP '^[0-9]+$'")
-      .orderByRaw(
-        "CAST(registration_no AS DECIMAL(65, 0)) DESC"
-      )
-      .first();
+      const insertResult = await trx("device_detail").insert(deviceData);
 
-    const lastRegistrationNumber = lastDevice
-      ? BigInt(String(lastDevice.registration_no))
-      : 1000n;
+      const deviceId = Array.isArray(insertResult)
+        ? insertResult[0]
+        : insertResult;
 
-    const registrationNo = (
-      lastRegistrationNumber < 1000n
-        ? 1001n
-        : lastRegistrationNumber + 1n
-    ).toString();
+      return {
+        id: deviceId,
+        registration_no: registrationNo,
+      };
+    });
 
-    // 14. Prepare device data
-    const deviceData = {
-      created_by: user.id,
-      retailer_id: selectedRetailer.id,
-
-      serial_number: normalizedSerialNumber,
-
-      brand: `/uploads/devices/${brandFile.filename}`,
-
-      enrollment_type: enrollmentId,
-
-      customer_name: String(customer_name).trim(),
-
-      customer_image: customerImageFile
-        ? `/uploads/devices/${customerImageFile.filename}`
-        : null,
-
-      registration_no: registrationNo,
-
-      phone_number: normalizedPhoneNumber,
-      country_code: normalizedCountryCode,
-
-      imei_1: normalizedImei1,
-
-      // iPhone: IMEI 2 is optional and saved as NULL if empty
-      // Other enrollments: IMEI 2 is mandatory
-      imei_2: normalizedImei2 || null,
-
-      guarantor_name:
-        guarantor_name == null
-          ? null
-          : String(guarantor_name).trim() || null,
-
-      guarantor_number:
-        guarantor_number == null
-          ? null
-          : String(guarantor_number).trim() || null,
-
-      key_type: keySettingId,
-
-      device_status: "pending",
-
-      fl_version: String(fl_version).trim(),
-
-      signature: `/uploads/devices/${signatureFile.filename}`,
-
-      created_at: db.fn.now(),
-    };
-
-    // 15. Insert device into database
-    const insertResult = await db("device_detail").insert(
-      deviceData
-    );
-
-    const deviceId = Array.isArray(insertResult)
-      ? insertResult[0]
-      : insertResult;
-
-    // 16. Return success response
     return res.status(201).json({
       success: true,
       message: "Device added successfully.",
       data: {
-        id: deviceId,
-        ...deviceData,
-        enrollment_name: enrollment.name,
-        key_name: keyName,
-        created_at: undefined,
+        id: result.id,
+        registration_no: result.registration_no,
+        enrollment_type: enrollmentTypeId,
+        phone_number: cleanPhoneNumber,
+        signature: signaturePath,
+        created_by: userId,
       },
     });
   } catch (error) {
-    console.error(
-      "ADD DEVICE ERROR:",
-      error?.stack || error?.message || String(error)
-    );
+    console.error("ADD DEVICE ERROR:", error?.stack || error);
 
     return res.status(500).json({
       success: false,
@@ -5498,113 +5105,39 @@ export const getDevices = async (req, res) => {
     const offset = (page - 1) * limit;
 
     // 2. Count total devices
-    const countResult = await db("device_detail as d")
-      .count({ total: "d.id" })
+    const countResult = await db("device_detail")
+      .count({ total: "id" })
       .first();
 
     const total = Number(countResult?.total || 0);
-    const totalPages = Math.ceil(total / limit);
 
-    // 3. Fetch devices with enrollment, key and hierarchy details
+    // 3. Fetch device records
     const devices = await db("device_detail as d")
-
-      // Enrollment ID -> Enrollment name
       .leftJoin(
         "enrollment as e",
         "e.id",
         "d.enrollment_type"
       )
-
-      // Key setting ID -> Key name
-      .leftJoin(
-        "key_setting as ks",
-        "ks.id",
-        "d.key_type"
-      )
-
-      // Retailer / device owner
-      .leftJoin("users as retailer", function () {
-        this.on(
-          "retailer.id",
-          "=",
-          db.raw("COALESCE(??, ??)", [
-            "d.retailer_id",
-            "d.created_by",
-          ])
-        );
-      })
-
-      // Retailer's direct parent
-      .leftJoin(
-        "users as parent",
-        "parent.id",
-        "retailer.parent_id"
-      )
-
-      // FOS details when parent role is FOS (role_id = 5)
-      .leftJoin("users as fos", function () {
-        this.on("fos.id", "=", "parent.id").andOn(
-          "fos.role_id",
-          "=",
-          db.raw("?", [5])
-        );
-      })
-
-      // FOS's parent
-      .leftJoin(
-        "users as fos_parent",
-        "fos_parent.id",
-        "fos.parent_id"
-      )
-
       .select(
-        
-        "d.*",
+        // Device details
+        "d.id",
+        "d.registration_no",
+        "d.retailer_id",
+        "d.enrollment_type",
+        "d.serial_number",
+        "d.imei_1",
+        "d.imei_2",
+        "d.phone_number",
+        "d.customer_name",
+        "d.guarantor_name",
+        "d.guarantor_number",
+        "d.signature",
+        "d.created_by",
+        "d.created_at",
 
         // Enrollment details
-        "e.name as enrollment_name",
-
-        // Key details
-        "ks.name as key_name",
-
-        // Retailer details
-        "retailer.id as retailer_user_id",
-        "retailer.name as retailer_name",
-        "retailer.organization_name as retailer_company_name",
-
-        // FOS details
-        "fos.id as fos_user_id",
-        "fos.name as fos_name",
-        "fos.organization_name as fos_company_name",
-
-        // Distributor ID
-        db.raw(`
-          CASE
-            WHEN parent.role_id = 4 THEN parent.id
-            WHEN parent.role_id = 5 THEN fos_parent.id
-            ELSE NULL
-          END AS distributor_user_id
-        `),
-
-        // Distributor name
-        db.raw(`
-          CASE
-            WHEN parent.role_id = 4 THEN parent.name
-            WHEN parent.role_id = 5 THEN fos_parent.name
-            ELSE NULL
-          END AS distributor_name
-        `),
-
-        // Distributor company
-        db.raw(`
-          CASE
-            WHEN parent.role_id = 4 THEN parent.organization_name
-            WHEN parent.role_id = 5 THEN fos_parent.organization_name
-            ELSE NULL
-          END AS distributor_company_name
-        `)
+        "e.name as enrollment_name"
       )
-
       .orderBy("d.id", "desc")
       .limit(limit)
       .offset(offset);
@@ -5618,9 +5151,10 @@ export const getDevices = async (req, res) => {
         page,
         limit,
         total,
-        totalPages,
+        totalPages: Math.ceil(total / limit),
       },
     });
+
   } catch (error) {
     console.error(
       "GET DEVICES ERROR:",
@@ -5637,6 +5171,7 @@ export const getDevices = async (req, res) => {
     });
   }
 };
+
 
 // GET single device by ID
 
