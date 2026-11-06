@@ -164,10 +164,7 @@ export const maintenanceMiddleware = async (req, res, next) => {
 
 export const checkSuspend = async (req, res, next) => {
   try {
-    // -----------------------------------
-    // Login API ko allow karo
-    // Login ke time JWT nahi hota
-    // -----------------------------------
+  
     if (
       req.method === "POST" &&
       (
