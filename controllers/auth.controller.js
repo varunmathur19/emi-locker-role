@@ -4958,7 +4958,6 @@ export const updateCompanySetting = async (req, res) => {
 // add-device / user list
 export const addDevice = async (req, res) => {
   try {
-    // User ID from authentication middleware
     const userId = req.user.id;
 
     const {
@@ -5378,6 +5377,142 @@ export const getBrands = async (req, res) => {
       success: false,
       message: "Internal server error",
       error: error.message,
+    });
+  }
+};
+
+
+//upload kyc user -details
+export const uploadDeviceKyc = async (req, res) => {
+  try {
+    const deviceId = Number(req.params.id);
+
+    if (!Number.isInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const device = await db("device_detail")
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    const allowedFields = [
+      "user_photo",
+      "aadhaar_front",
+      "aadhaar_back",
+      "pan_front",
+      "pan_back",
+      "passbook",
+      "signature",
+    ];
+
+    const updateData = {};
+
+    allowedFields.forEach((field) => {
+      const file = req.files?.[field]?.[0];
+
+      if (file) {
+        updateData[field] = `uploads/kyc/${file.filename}`;
+      }
+    });
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one KYC document.",
+      });
+    }
+
+    await db("device_detail")
+      .where({ id: deviceId })
+      .update(updateData);
+
+    const updatedDevice = await db("device_detail")
+      .select(
+        "id",
+        "user_photo",
+        "aadhaar_front",
+        "aadhaar_back",
+        "pan_front",
+        "pan_back",
+        "passbook",
+        "signature"
+      )
+      .where({ id: deviceId })
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "KYC documents uploaded successfully.",
+      data: updatedDevice,
+      uploadedFields: Object.keys(updateData),
+    });
+  } catch (error) {
+    console.error("UPLOAD DEVICE KYC ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while uploading KYC documents.",
+    });
+  }
+};
+
+
+//get user-detail by id//kyc
+
+export const getDeviceKyc = async (req, res) => {
+  try {
+    const deviceId = Number(req.params.id);
+
+    if (!Number.isInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const device = await db("device_detail")
+      .select(
+        "id",
+        "user_photo",
+        "aadhaar_front",
+        "aadhaar_back",
+        "pan_front",
+        "pan_back",
+        "passbook",
+        "signature"
+      )
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Device KYC documents fetched successfully.",
+      data: device,
+    });
+
+  } catch (error) {
+    console.error("GET DEVICE KYC ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching KYC documents.",
     });
   }
 };

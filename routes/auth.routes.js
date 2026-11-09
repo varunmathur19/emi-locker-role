@@ -39,10 +39,12 @@ import {
     updateEnrollment,
     getBrands,
     getDeviceById,
+    uploadDeviceKyc,
+    getDeviceKyc,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
-import { uploadDeviceImages, uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
+import { uploadDeviceImages, uploadKycDocuments, uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
 
 import {
@@ -359,6 +361,21 @@ router.put("/update-enrollment/:id", authMiddleware, updateEnrollment);
 
 router.get("/get-Brands",authMiddleware, getBrands);
 
+//kyc user -details
+router.post(
+  "/devices/:id/kyc",
+  authMiddleware,
+  uploadKycDocuments,
+  uploadDeviceKyc
+);
+
+//get user-detail by id//kyc
+
+router.get(
+  "/devices/:id/kyc",
+  authMiddleware,
+  getDeviceKyc
+);
 
 
 

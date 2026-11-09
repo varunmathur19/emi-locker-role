@@ -10,6 +10,12 @@ const modulesUploadDir = path.join(
   "modules"
 );
 
+const kycUploadDir = path.join(
+  process.cwd(),
+  "uploads",
+  "kyc"
+);
+
 const devicesUploadDir = path.join(
   process.cwd(),
   "uploads",
@@ -17,7 +23,7 @@ const devicesUploadDir = path.join(
 );
 
 // Create directories if they don't exist
-[modulesUploadDir, devicesUploadDir].forEach((uploadDir) => {
+[modulesUploadDir, devicesUploadDir,kycUploadDir].forEach((uploadDir) => {
   if (!fs.existsSync(uploadDir)) {
     fs.mkdirSync(uploadDir, {
       recursive: true,
@@ -56,12 +62,25 @@ const deviceStorage = multer.diskStorage({
   },
 });
 
+// KYC document storage
+const kycStorage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    cb(null, kycUploadDir);
+  },
+
+  filename: (req, file, cb) => {
+    cb(null, `${file.fieldname}-${generateFilename(file)}`);
+  },
+});
+
 // Allow PNG, JPG, JPEG and WEBP images
+// Allow PNG, JPG, JPEG, WEBP and PDF files
 const fileFilter = (req, file, cb) => {
   const allowedMimeTypes = [
     "image/png",
     "image/jpeg",
     "image/webp",
+    "application/pdf",
   ];
 
   if (allowedMimeTypes.includes(file.mimetype)) {
@@ -70,7 +89,7 @@ const fileFilter = (req, file, cb) => {
 
   return cb(
     new Error(
-      "Only PNG, JPG, JPEG and WEBP images are allowed"
+      "Only PNG, JPG, JPEG, WEBP and PDF files are allowed"
     ),
     false
   );
@@ -112,4 +131,21 @@ export const uploadDeviceImages = multer({
 
   { name: "signature", maxCount: 1 },
   { name: "signatureImage", maxCount: 1 },
+]);
+// KYC document upload - all fields optional
+export const uploadKycDocuments = multer({
+  storage: kycStorage,
+  fileFilter,
+  limits: {
+    fileSize: 2 * 1024 * 1024,
+    files: 7,
+  },
+}).fields([
+  { name: "user_photo", maxCount: 1 },
+  { name: "aadhaar_front", maxCount: 1 },
+  { name: "aadhaar_back", maxCount: 1 },
+  { name: "pan_front", maxCount: 1 },
+  { name: "pan_back", maxCount: 1 },
+  { name: "passbook", maxCount: 1 },
+  { name: "signature", maxCount: 1 },
 ]);
