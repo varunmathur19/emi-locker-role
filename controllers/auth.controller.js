@@ -5588,6 +5588,7 @@ const addMonths = (dateString, monthsToAdd) => {
 // POST API - CREATE FINANCE
 // ==========================================
 
+
 export const createFinance = async (req, res) => {
   const {
     device_id,
@@ -5624,7 +5625,7 @@ export const createFinance = async (req, res) => {
       });
     }
 
-    // 2. Validate numeric values
+    // 2. Numeric validation
     const productPrice = Number(product_price);
     const downPayment = Number(down_payment_amount);
     const otherCharge = Number(other_charge);
@@ -5653,6 +5654,7 @@ export const createFinance = async (req, res) => {
       });
     }
 
+    // 3. Due date validation
     if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
       return res.status(400).json({
         success: false,
@@ -5672,7 +5674,7 @@ export const createFinance = async (req, res) => {
       });
     }
 
-    // 3. Validate tenure type
+    // 4. Tenure validation
     if (!["monthly", "yearly"].includes(tenure_type)) {
       return res.status(400).json({
         success: false,
@@ -5680,7 +5682,6 @@ export const createFinance = async (req, res) => {
       });
     }
 
-    // 4. Calculate actual number of monthly EMIs
     const numberOfEmi =
       tenure_type === "yearly"
         ? tenureValue * 12
@@ -5693,85 +5694,118 @@ export const createFinance = async (req, res) => {
       });
     }
 
-    // 5. Calculate finance amounts
+    // 5. Finance calculations
+    const principal = roundAmount(productPrice - downPayment);
 
-    // Product price - Down payment
-    const principal = roundAmount(
-      productPrice - downPayment
-    );
-
-    // Interest only on principal
     const totalInterest = roundAmount(
       (principal * interestRate) / 100
     );
 
-    // Balance includes other charges
     const balanceAmount = roundAmount(
       principal + otherCharge
     );
 
-    // Total repayment includes principal, interest and charges
     const totalEmiAmount = roundAmount(
       principal + totalInterest + otherCharge
     );
 
-    // 6. Verify device exists
-    const device = await db("device_detail")
-      .where({ id: deviceId })
-      .first();
+    // 6. Prepare finance data
+    const financePayload = {
+      loan_number,
+      finance_type,
+      product_price: productPrice,
+      down_payment_amount: downPayment,
+      other_charge: otherCharge,
+      balance_amount: balanceAmount,
+      tenure_type,
+      tenure_value: tenureValue,
+      number_of_emi: numberOfEmi,
+      interest_rate: interestRate,
+      total_emi_amount: totalEmiAmount,
+      emi_per_month: roundAmount(
+        totalEmiAmount / numberOfEmi
+      ),
+      due_date,
+      device_brand: device_brand || null,
+      device_model: device_model || null,
+    };
 
-    if (!device) {
-      return res.status(404).json({
-        success: false,
-        message: "Device not found",
-      });
-    }
-
-    // 7. Prepare EMI amounts in paise to avoid
-    // floating-point rounding differences.
+    // 7. Convert EMI amount into paise
     const totalPaise = Math.round(totalEmiAmount * 100);
 
     const baseEmiPaise = Math.floor(
       totalPaise / numberOfEmi
     );
 
-    const remainingPaise =
-      totalPaise % numberOfEmi;
+    const remainingPaise = totalPaise % numberOfEmi;
 
-    // 8. Create finance and EMI records in one transaction
+    // 8. Create or update using the same POST API
     const result = await db.transaction(async (trx) => {
 
-      const [financeId] = await trx("finance_detail").insert({
-        device_id: deviceId,
-        loan_number,
-        finance_type,
+      // Lock device row to avoid simultaneous duplicate requests
+      const device = await trx("device_detail")
+        .where("id", deviceId)
+        .forUpdate()
+        .first();
 
-        product_price: productPrice,
-        down_payment_amount: downPayment,
-        other_charge: otherCharge,
-        balance_amount: balanceAmount,
+      if (!device) {
+        const error = new Error("DEVICE_NOT_FOUND");
+        throw error;
+      }
 
-        tenure_type,
-        tenure_value: tenureValue,
-        number_of_emi: numberOfEmi,
+      // Find existing finance using device_id
+      const existingFinance = await trx("finance_detail")
+        .where("device_id", deviceId)
+        .forUpdate()
+        .first();
 
-        interest_rate: interestRate,
-        total_emi_amount: totalEmiAmount,
-        emi_per_month: roundAmount(
-          totalEmiAmount / numberOfEmi
-        ),
+      let financeId;
+      let isUpdated = false;
 
-        due_date,
-        device_brand: device_brand || null,
-        device_model: device_model || null,
-      });
+      if (existingFinance) {
+        // IMPORTANT: finance_detail primary key is id
+        financeId = existingFinance.id;
 
-      // Generate all monthly EMIs
+        // Check whether any EMI is already paid
+        const paidEmi = await trx("finance_emi")
+          .where("finance_id", financeId)
+          .where("status", "paid")
+          .first();
+
+        if (paidEmi) {
+          const error = new Error("PAID_EMI_EXISTS");
+          throw error;
+        }
+
+        // Update existing finance record
+        await trx("finance_detail")
+          .where("id", financeId)
+          .update({
+            ...financePayload,
+            updated_at: trx.fn.now(),
+          });
+
+        // Delete old pending EMI schedule
+        await trx("finance_emi")
+          .where("finance_id", financeId)
+          .del();
+
+        isUpdated = true;
+
+      } else {
+        // First time: create new finance record
+        const [insertedId] = await trx("finance_detail").insert({
+          device_id: deviceId,
+          ...financePayload,
+        });
+
+        financeId = insertedId;
+      }
+
+      // Generate updated EMI schedule
       const emiRecords = [];
 
       for (let i = 0; i < numberOfEmi; i++) {
-
-        // Distribute remaining paise across first EMIs
         const emiPaise =
           baseEmiPaise + (i < remainingPaise ? 1 : 0);
 
@@ -5789,41 +5823,24 @@ export const createFinance = async (req, res) => {
       return {
         financeId,
         emiRecords,
+        isUpdated,
       };
     });
 
     // 9. Success response
-    return res.status(201).json({
+    return res.status(result.isUpdated ? 200 : 201).json({
       success: true,
-      message: "Finance created and EMI schedule generated successfully",
+      isUpdated: result.isUpdated,
+      message: result.isUpdated
+        ? "Finance updated and EMI schedule regenerated successfully"
+        : "Finance created and EMI schedule generated successfully",
 
       data: {
+        id: result.financeId,
         finance_id: result.financeId,
         device_id: deviceId,
-        loan_number,
-
-        finance_type,
-        product_price: productPrice,
-        down_payment_amount: downPayment,
-        other_charge: otherCharge,
-        balance_amount: balanceAmount,
-
-        tenure_type,
-        tenure_value: tenureValue,
-        number_of_emi: numberOfEmi,
-
-        interest_rate: interestRate,
+        ...financePayload,
         total_interest: totalInterest,
-        total_emi_amount: totalEmiAmount,
-
-        emi_per_month: roundAmount(
-          totalEmiAmount / numberOfEmi
-        ),
-
-        due_date,
-        device_brand,
-        device_model,
-
         total_emi: result.emiRecords.length,
         pending_emi: result.emiRecords.length,
         emi_schedule: result.emiRecords,
@@ -5831,7 +5848,22 @@ export const createFinance = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Create Finance Error:", error);
+    console.error("Create/Update Finance Error:", error);
+
+    if (error.message === "DEVICE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found",
+      });
+    }
+
+    if (error.message === "PAID_EMI_EXISTS") {
+      return res.status(409).json({
+        success: false,
+        message:
+          "Finance cannot be updated because an EMI payment has already been recorded.",
+      });
+    }
 
     if (error.code === "ER_DUP_ENTRY") {
       return res.status(409).json({
@@ -5849,11 +5881,12 @@ export const createFinance = async (req, res) => {
 
     return res.status(500).json({
       success: false,
-      message: "Failed to create finance",
+      message: "Failed to create/update finance",
       error: error.message,
     });
   }
 };
+
 
 
 // ==========================================
@@ -5983,6 +6016,82 @@ export const getFinanceByDevice = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Failed to fetch finance details",
+      error: error.message,
+    });
+  }
+};
+
+
+// update payment status of emi
+
+export const updateFinancePaymentStatus = async (req, res) => {
+  const { id, payment_status } = req.body;
+
+  try {
+    // 1. Required validation
+    if (id === undefined || payment_status === undefined) {
+      return res.status(400).json({
+        success: false,
+        message: "Finance ID and payment status are required",
+      });
+    }
+
+    // 2. Numeric validation
+    const financeId = Number(id);
+    const paymentStatus = Number(payment_status);
+
+    if (!Number.isSafeInteger(financeId) || financeId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid finance ID",
+      });
+    }
+
+    // Only 0 = Pending and 1 = Paid are allowed
+    if (![0, 1].includes(paymentStatus)) {
+      return res.status(400).json({
+        success: false,
+        message: "Payment status must be 0 (Pending) or 1 (Paid)",
+      });
+    }
+
+    // 3. Check finance record
+    const existingFinance = await db("finance_detail")
+      .where("id", financeId)
+      .first();
+
+    if (!existingFinance) {
+      return res.status(404).json({
+        success: false,
+        message: "Finance record not found",
+      });
+    }
+
+    // 4. Update payment status
+    await db("finance_detail")
+      .where("id", financeId)
+      .update({
+        payment_status: paymentStatus,
+        updated_at: db.fn.now(),
+      });
+
+    // 5. Get updated record
+    const updatedFinance = await db("finance_detail")
+      .where("id", financeId)
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "Finance payment status updated successfully",
+      data: updatedFinance,
+    });
+
+  } catch (error) {
+    console.error("Update Finance Payment Status Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to update finance payment status",
       error: error.message,
     });
   }

@@ -19,3 +19,8 @@ export const BOOLEAN = {
   FALSE: 0,
   TRUE: 1,
 };
+
+export const PAYMENT_STATUS = {
+  PENDING: 0,
+  Paid: 1,
+};

@@ -43,6 +43,7 @@ import {
     getDeviceKyc,
     createFinance,
     getFinanceByDevice,
+    updateFinancePaymentStatus,
 } from "../controllers/auth.controller.js";
 import { authMiddleware } from "../middleware/auth.middleware.js";
 import { validationResult , body } from "express-validator";
@@ -385,7 +386,11 @@ router.post("/finance", createFinance);
 // Get finance and all EMI details by device ID
 router.get("/device/:deviceId", getFinanceByDevice  );
 
-
+router.put(
+  "/finance/payment-status",
+  authMiddleware,
+  updateFinancePaymentStatus
+);
 
 
 
