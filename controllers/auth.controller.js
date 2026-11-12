@@ -4958,7 +4958,6 @@ export const updateCompanySetting = async (req, res) => {
 // add-device / user list
 export const addDevice = async (req, res) => {
   try {
-    // User ID from authentication middleware
     const userId = req.user.id;
 
     const {
@@ -5174,6 +5173,7 @@ export const getDevices = async (req, res) => {
 
 
 // GET single device by ID
+
 export const getDeviceById = async (req, res) => {
   try {
     const { id } = req.params;
@@ -5186,15 +5186,12 @@ export const getDeviceById = async (req, res) => {
       });
     }
 
+    const deviceId = Number(id);
+
     // 2. Fetch device details
     const device = await db("device_detail as d")
-      .leftJoin(
-        "enrollment as e",
-        "e.id",
-        "d.enrollment_type"
-      )
+      .leftJoin("enrollment as e", "e.id", "d.enrollment_type")
       .select(
-        // Device details
         "d.id",
         "d.registration_no",
         "d.retailer_id",
@@ -5209,11 +5206,9 @@ export const getDeviceById = async (req, res) => {
         "d.signature",
         "d.created_by",
         "d.created_at",
-
-        // Enrollment details
         "e.name as enrollment_name"
       )
-      .where("d.id", Number(id))
+      .where("d.id", deviceId)
       .first();
 
     // 3. Check device exists
@@ -5224,11 +5219,49 @@ export const getDeviceById = async (req, res) => {
       });
     }
 
-    // 4. Success response
+    // 4. Fetch finance details according to device ID
+    const financeDetails = await db("finance_detail")
+      .where("device_id", deviceId)
+      .orderBy("id", "desc")
+      .select("*");
+
+    // 5. Get finance IDs
+    const financeIds = financeDetails.map((finance) => finance.id);
+
+    // 6. Fetch all EMI schedules for these finance records
+    let emiSchedules = [];
+
+    if (financeIds.length > 0) {
+      emiSchedules = await db("finance_emi")
+        .whereIn("finance_id", financeIds)
+        .orderBy("emi_number", "asc")
+        .select(
+          "id",
+          "finance_id",
+          "emi_number",
+          "due_date",
+          "emi_amount",
+          "status",
+          "paid_at"
+        );
+    }
+
+    // 7. Attach EMI schedule to respective finance record
+    const financeWithEmi = financeDetails.map((finance) => ({
+      ...finance,
+      emi_schedule: emiSchedules.filter(
+        (emi) => emi.finance_id === finance.id
+      ),
+    }));
+
+    // 8. Success response
     return res.status(200).json({
       success: true,
       message: "Device details fetched successfully.",
-      data: device,
+      data: {
+        ...device,
+        finance_details: financeWithEmi,
+      },
     });
 
   } catch (error) {
@@ -5247,6 +5280,7 @@ export const getDeviceById = async (req, res) => {
     });
   }
 };
+
 
 //getEnrollment  api  
 
@@ -5377,6 +5411,578 @@ export const getBrands = async (req, res) => {
     return res.status(500).json({
       success: false,
       message: "Internal server error",
+      error: error.message,
+    });
+  }
+};
+
+
+//upload kyc user -details
+export const uploadDeviceKyc = async (req, res) => {
+  try {
+    const deviceId = Number(req.params.id);
+
+    if (!Number.isInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const device = await db("device_detail")
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    const allowedFields = [
+      "user_photo",
+      "aadhaar_front",
+      "aadhaar_back",
+      "pan_front",
+      "pan_back",
+      "passbook",
+      "signature",
+    ];
+
+    const updateData = {};
+
+    allowedFields.forEach((field) => {
+      const file = req.files?.[field]?.[0];
+
+      if (file) {
+        updateData[field] = `uploads/kyc/${file.filename}`;
+      }
+    });
+
+    if (Object.keys(updateData).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Please select at least one KYC document.",
+      });
+    }
+
+    await db("device_detail")
+      .where({ id: deviceId })
+      .update(updateData);
+
+    const updatedDevice = await db("device_detail")
+      .select(
+        "id",
+        "user_photo",
+        "aadhaar_front",
+        "aadhaar_back",
+        "pan_front",
+        "pan_back",
+        "passbook",
+        "signature"
+      )
+      .where({ id: deviceId })
+      .first();
+
+    return res.status(200).json({
+      success: true,
+      message: "KYC documents uploaded successfully.",
+      data: updatedDevice,
+      uploadedFields: Object.keys(updateData),
+    });
+  } catch (error) {
+    console.error("UPLOAD DEVICE KYC ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while uploading KYC documents.",
+    });
+  }
+};
+
+
+//get user-detail by id//kyc
+
+export const getDeviceKyc = async (req, res) => {
+  try {
+    const deviceId = Number(req.params.id);
+
+    if (!Number.isInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID.",
+      });
+    }
+
+    const device = await db("device_detail")
+      .select(
+        "id",
+        "user_photo",
+        "aadhaar_front",
+        "aadhaar_back",
+        "pan_front",
+        "pan_back",
+        "passbook",
+        "signature"
+      )
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found.",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Device KYC documents fetched successfully.",
+      data: device,
+    });
+
+  } catch (error) {
+    console.error("GET DEVICE KYC ERROR:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Something went wrong while fetching KYC documents.",
+    });
+  }
+};
+
+
+const roundAmount = (amount) => {
+  return Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
+};
+
+// Add months while keeping the original due day.
+// Example: Jan 31 -> Feb 28 -> Mar 31
+const addMonths = (dateString, monthsToAdd) => {
+  const [year, month, day] = dateString.split("-").map(Number);
+
+  const target = new Date(
+    Date.UTC(year, month - 1 + monthsToAdd, 1)
+  );
+
+  const lastDay = new Date(
+    Date.UTC(
+      target.getUTCFullYear(),
+      target.getUTCMonth() + 1,
+      0
+    )
+  ).getUTCDate();
+
+  const finalDay = Math.min(day, lastDay);
+
+  const y = target.getUTCFullYear();
+  const m = String(target.getUTCMonth() + 1).padStart(2, "0");
+  const d = String(finalDay).padStart(2, "0");
+
+  return `${y}-${m}-${d}`;
+};
+
+
+// ==========================================
+// POST API - CREATE FINANCE
+// ==========================================
+
+export const createFinance = async (req, res) => {
+  const {
+    device_id,
+    loan_number,
+    finance_type,
+    product_price,
+    down_payment_amount,
+    other_charge,
+    tenure_type,
+    tenure_value,
+    interest_rate,
+    due_date,
+    device_brand,
+    device_model,
+  } = req.body;
+
+  try {
+    // 1. Required field validation
+    if (
+      !device_id ||
+      !loan_number ||
+      !finance_type ||
+      product_price === undefined ||
+      down_payment_amount === undefined ||
+      other_charge === undefined ||
+      !tenure_type ||
+      tenure_value === undefined ||
+      interest_rate === undefined ||
+      !due_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Please provide all required finance details",
+      });
+    }
+
+    // 2. Validate numeric values
+    const productPrice = Number(product_price);
+    const downPayment = Number(down_payment_amount);
+    const otherCharge = Number(other_charge);
+    const interestRate = Number(interest_rate);
+    const tenureValue = Number(tenure_value);
+    const deviceId = Number(device_id);
+
+    if (
+      !Number.isSafeInteger(deviceId) ||
+      deviceId <= 0 ||
+      !Number.isFinite(productPrice) ||
+      !Number.isFinite(downPayment) ||
+      !Number.isFinite(otherCharge) ||
+      !Number.isFinite(interestRate) ||
+      !Number.isSafeInteger(tenureValue) ||
+      productPrice <= 0 ||
+      downPayment < 0 ||
+      otherCharge < 0 ||
+      interestRate < 0 ||
+      downPayment > productPrice ||
+      tenureValue <= 0
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid finance amount or tenure",
+      });
+    }
+
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(due_date)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid due date. Use YYYY-MM-DD",
+      });
+    }
+
+    const parsedDueDate = new Date(`${due_date}T00:00:00.000Z`);
+
+    if (
+      Number.isNaN(parsedDueDate.getTime()) ||
+      parsedDueDate.toISOString().slice(0, 10) !== due_date
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid calendar due date",
+      });
+    }
+
+    // 3. Validate tenure type
+    if (!["monthly", "yearly"].includes(tenure_type)) {
+      return res.status(400).json({
+        success: false,
+        message: "Tenure type must be monthly or yearly",
+      });
+    }
+
+    // 4. Calculate actual number of monthly EMIs
+    const numberOfEmi =
+      tenure_type === "yearly"
+        ? tenureValue * 12
+        : tenureValue;
+
+    if (!Number.isSafeInteger(numberOfEmi) || numberOfEmi > 600) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid EMI duration",
+      });
+    }
+
+    // 5. Calculate finance amounts
+
+    // Product price - Down payment
+    const principal = roundAmount(
+      productPrice - downPayment
+    );
+
+    // Interest only on principal
+    const totalInterest = roundAmount(
+      (principal * interestRate) / 100
+    );
+
+    // Balance includes other charges
+    const balanceAmount = roundAmount(
+      principal + otherCharge
+    );
+
+    // Total repayment includes principal, interest and charges
+    const totalEmiAmount = roundAmount(
+      principal + totalInterest + otherCharge
+    );
+
+    // 6. Verify device exists
+    const device = await db("device_detail")
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found",
+      });
+    }
+
+    // 7. Prepare EMI amounts in paise to avoid
+    // floating-point rounding differences.
+    const totalPaise = Math.round(totalEmiAmount * 100);
+
+    const baseEmiPaise = Math.floor(
+      totalPaise / numberOfEmi
+    );
+
+    const remainingPaise =
+      totalPaise % numberOfEmi;
+
+    // 8. Create finance and EMI records in one transaction
+    const result = await db.transaction(async (trx) => {
+
+      const [financeId] = await trx("finance_detail").insert({
+        device_id: deviceId,
+        loan_number,
+        finance_type,
+
+        product_price: productPrice,
+        down_payment_amount: downPayment,
+        other_charge: otherCharge,
+        balance_amount: balanceAmount,
+
+        tenure_type,
+        tenure_value: tenureValue,
+        number_of_emi: numberOfEmi,
+
+        interest_rate: interestRate,
+        total_emi_amount: totalEmiAmount,
+        emi_per_month: roundAmount(
+          totalEmiAmount / numberOfEmi
+        ),
+
+        due_date,
+        device_brand: device_brand || null,
+        device_model: device_model || null,
+      });
+
+      // Generate all monthly EMIs
+      const emiRecords = [];
+
+      for (let i = 0; i < numberOfEmi; i++) {
+
+        // Distribute remaining paise across first EMIs
+        const emiPaise =
+          baseEmiPaise + (i < remainingPaise ? 1 : 0);
+
+        emiRecords.push({
+          finance_id: financeId,
+          emi_number: i + 1,
+          due_date: addMonths(due_date, i),
+          emi_amount: (emiPaise / 100).toFixed(2),
+          status: "pending",
+        });
+      }
+
+      await trx("finance_emi").insert(emiRecords);
+
+      return {
+        financeId,
+        emiRecords,
+      };
+    });
+
+    // 9. Success response
+    return res.status(201).json({
+      success: true,
+      message: "Finance created and EMI schedule generated successfully",
+
+      data: {
+        finance_id: result.financeId,
+        device_id: deviceId,
+        loan_number,
+
+        finance_type,
+        product_price: productPrice,
+        down_payment_amount: downPayment,
+        other_charge: otherCharge,
+        balance_amount: balanceAmount,
+
+        tenure_type,
+        tenure_value: tenureValue,
+        number_of_emi: numberOfEmi,
+
+        interest_rate: interestRate,
+        total_interest: totalInterest,
+        total_emi_amount: totalEmiAmount,
+
+        emi_per_month: roundAmount(
+          totalEmiAmount / numberOfEmi
+        ),
+
+        due_date,
+        device_brand,
+        device_model,
+
+        total_emi: result.emiRecords.length,
+        pending_emi: result.emiRecords.length,
+        emi_schedule: result.emiRecords,
+      },
+    });
+
+  } catch (error) {
+    console.error("Create Finance Error:", error);
+
+    if (error.code === "ER_DUP_ENTRY") {
+      return res.status(409).json({
+        success: false,
+        message: "Loan number already exists",
+      });
+    }
+
+    if (error.code === "ER_NO_REFERENCED_ROW_2") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID",
+      });
+    }
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to create finance",
+      error: error.message,
+    });
+  }
+};
+
+
+// ==========================================
+// GET API - GET FINANCE AND EMI DETAILS
+// ==========================================
+// abhi ye api use ni kr rha ho
+// createFinance iss me hi add kr rkha hai 
+export const getFinanceByDevice = async (req, res) => {
+  try {
+    const deviceId = Number(req.params.deviceId);
+
+    if (!Number.isSafeInteger(deviceId) || deviceId <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid device ID",
+      });
+    }
+
+    // 1. Check device
+    const device = await db("device_detail")
+      .where({ id: deviceId })
+      .first();
+
+    if (!device) {
+      return res.status(404).json({
+        success: false,
+        message: "Device not found",
+      });
+    }
+
+    // 2. Get all finance records of this device
+    const financeRecords = await db("finance_detail")
+      .where({ device_id: deviceId })
+      .orderBy("created_at", "desc");
+
+    if (!financeRecords.length) {
+      return res.status(200).json({
+        success: true,
+        message: "No finance records found for this device",
+        data: {
+          device_id: deviceId,
+          finances: [],
+        },
+      });
+    }
+
+    // 3. Get all EMI records
+    const financeIds = financeRecords.map(
+      (finance) => finance.id
+    );
+
+    const allEmis = await db("finance_emi")
+      .whereIn("finance_id", financeIds)
+      .orderBy("emi_number", "asc");
+
+    // 4. Attach EMI schedule to each finance
+    const finances = financeRecords.map((finance) => {
+
+      const emiSchedule = allEmis.filter(
+        (emi) => emi.finance_id === finance.id
+      );
+
+      const pendingEmis = emiSchedule.filter(
+        (emi) => emi.status === "pending"
+      );
+
+      const paidEmis = emiSchedule.filter(
+        (emi) => emi.status === "paid"
+      );
+
+      const pendingAmount = pendingEmis.reduce(
+        (total, emi) => total + Number(emi.emi_amount),
+        0
+      );
+
+      return {
+        ...finance,
+
+        total_emi: emiSchedule.length,
+        pending_emi: pendingEmis.length,
+        paid_emi: paidEmis.length,
+
+        pending_amount: Number(pendingAmount.toFixed(2)),
+
+        emi_schedule: emiSchedule.map((emi) => ({
+          id: emi.id,
+          emi_number: emi.emi_number,
+          due_date: emi.due_date,
+          emi_amount: emi.emi_amount,
+          status: emi.status,
+          paid_at: emi.paid_at,
+        })),
+      };
+    });
+
+    // 5. Overall pending EMI count
+    const totalPendingEmi = finances.reduce(
+      (total, finance) => total + finance.pending_emi,
+      0
+    );
+
+    return res.status(200).json({
+      success: true,
+      message: "Finance and EMI details fetched successfully",
+
+      data: {
+        device_id: deviceId,
+
+        device: {
+          customer_name: device.customer_name,
+          phone_number: device.phone_number,
+          serial_number: device.serial_number,
+          imei_1: device.imei_1,
+          imei_2: device.imei_2,
+        },
+
+        total_finance: finances.length,
+        total_pending_emi: totalPendingEmi,
+
+        finances,
+      },
+    });
+
+  } catch (error) {
+    console.error("Get Finance Error:", error);
+
+    return res.status(500).json({
+      success: false,
+      message: "Failed to fetch finance details",
       error: error.message,
     });
   }
