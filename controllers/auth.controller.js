@@ -15,6 +15,7 @@ import { BOOLEAN } from "../constants/roles.js";
 import fs from "fs";
 import path from "path";
 import { parsePhoneNumberFromString } from "libphonenumber-js";
+import { PAYMENT_STATUS } from "./../constants/roles.js";
 
 const isPermissionEnabled = (value) => {
     if (typeof value === "boolean") {
@@ -5088,9 +5089,21 @@ export const addDevice = async (req, res) => {
 // GET all devices
 
 
+
 export const getDevices = async (req, res) => {
   try {
-    // 1. Pagination
+    // 1. Get logged-in user details
+    const userId = Number(req.user?.id);
+    const roleId = Number(req.user?.role_id);
+
+    if (!userId || !Number.isInteger(roleId)) {
+      return res.status(401).json({
+        success: false,
+        message: "Unauthorized user.",
+      });
+    }
+
+    // 2. Pagination
     const page = Math.max(
       1,
       Number.parseInt(req.query.page, 10) || 1
@@ -5103,22 +5116,67 @@ export const getDevices = async (req, res) => {
 
     const offset = (page - 1) * limit;
 
-    // 2. Count total devices
-    const countResult = await db("device_detail")
-      .count({ total: "id" })
+    // 3. Build device query
+    let deviceQuery = db("device_detail as d")
+      .leftJoin("enrollment as e", "e.id", "d.enrollment_type");
+
+    // Master Admin (0) and Admin (1): All devices
+    if (roleId !== 0 && roleId !== 1) {
+      // Fetch user hierarchy
+      const allUsers = await db("users")
+        .select("id", "parent_id");
+
+      // Build parent-child mapping
+      const childrenMap = new Map();
+
+      allUsers.forEach((user) => {
+        const parentId = Number(user.parent_id);
+
+        if (!childrenMap.has(parentId)) {
+          childrenMap.set(parentId, []);
+        }
+
+        childrenMap.get(parentId).push(Number(user.id));
+      });
+
+      // Get logged-in user and all descendants
+      const allowedUserIds = new Set([userId]);
+      const queue = [userId];
+
+      while (queue.length > 0) {
+        const currentId = queue.shift();
+
+        const children = childrenMap.get(currentId) || [];
+
+        children.forEach((childId) => {
+          if (!allowedUserIds.has(childId)) {
+            allowedUserIds.add(childId);
+            queue.push(childId);
+          }
+        });
+      }
+
+      const hierarchyIds = [...allowedUserIds];
+
+      // Only devices belonging to this user's hierarchy
+      deviceQuery = deviceQuery.whereIn(
+        "d.retailer_id",
+        hierarchyIds
+      );
+    }
+
+    // 4. Get total count with same filters
+    const countResult = await deviceQuery
+      .clone()
+      .count({ total: "d.id" })
       .first();
 
     const total = Number(countResult?.total || 0);
 
-    // 3. Fetch device records
-    const devices = await db("device_detail as d")
-      .leftJoin(
-        "enrollment as e",
-        "e.id",
-        "d.enrollment_type"
-      )
+    // 5. Fetch paginated devices
+    const devices = await deviceQuery
+      .clone()
       .select(
-        // Device details
         "d.id",
         "d.registration_no",
         "d.retailer_id",
@@ -5133,19 +5191,63 @@ export const getDevices = async (req, res) => {
         "d.signature",
         "d.created_by",
         "d.created_at",
-
-        // Enrollment details
         "e.name as enrollment_name"
       )
       .orderBy("d.id", "desc")
       .limit(limit)
       .offset(offset);
 
-    // 4. Success response
+    // 6. Fetch finance details
+    const deviceIds = devices.map((device) => device.id);
+
+    let financeDetails = [];
+
+    if (deviceIds.length > 0) {
+      financeDetails = await db("finance_detail")
+        .whereIn("device_id", deviceIds)
+        .orderBy("id", "desc")
+        .select("*");
+    }
+
+    // 7. Map latest finance details to devices
+    const financeMap = new Map();
+
+    financeDetails.forEach((finance) => {
+      const deviceId = Number(finance.device_id);
+
+      if (!financeMap.has(deviceId)) {
+        let emiSchedule = finance.emi_schedule || [];
+
+        if (typeof emiSchedule === "string") {
+          try {
+            emiSchedule = JSON.parse(emiSchedule);
+          } catch (error) {
+            emiSchedule = [];
+          }
+        }
+
+        financeMap.set(deviceId, {
+          ...finance,
+          emi_schedule: Array.isArray(emiSchedule)
+            ? emiSchedule
+            : [],
+        });
+      }
+    });
+
+    // 8. Attach finance details
+    const devicesWithFinance = devices.map((device) => ({
+      ...device,
+      finance_details: financeMap.has(Number(device.id))
+        ? [financeMap.get(Number(device.id))]
+        : [],
+    }));
+
+    // 9. Success response
     return res.status(200).json({
       success: true,
       message: "Devices fetched successfully.",
-      data: devices,
+      data: devicesWithFinance,
       pagination: {
         page,
         limit,
@@ -5170,6 +5272,7 @@ export const getDevices = async (req, res) => {
     });
   }
 };
+
 
 
 // GET single device by ID
@@ -5219,42 +5322,32 @@ export const getDeviceById = async (req, res) => {
       });
     }
 
-    // 4. Fetch finance details according to device ID
+    // 4. Fetch finance details
     const financeDetails = await db("finance_detail")
       .where("device_id", deviceId)
       .orderBy("id", "desc")
       .select("*");
 
-    // 5. Get finance IDs
-    const financeIds = financeDetails.map((finance) => finance.id);
+    // 5. Parse EMI schedule
+    const financeWithEmi = financeDetails.map((finance) => {
+      let emiSchedule = finance.emi_schedule || [];
 
-    // 6. Fetch all EMI schedules for these finance records
-    let emiSchedules = [];
+      if (typeof emiSchedule === "string") {
+        try {
+          emiSchedule = JSON.parse(emiSchedule);
+        } catch (error) {
+          console.error("EMI SCHEDULE PARSE ERROR:", error);
+          emiSchedule = [];
+        }
+      }
 
-    if (financeIds.length > 0) {
-      emiSchedules = await db("finance_emi")
-        .whereIn("finance_id", financeIds)
-        .orderBy("emi_number", "asc")
-        .select(
-          "id",
-          "finance_id",
-          "emi_number",
-          "due_date",
-          "emi_amount",
-          "status",
-          "paid_at"
-        );
-    }
+      return {
+        ...finance,
+        emi_schedule: Array.isArray(emiSchedule) ? emiSchedule : [],
+      };
+    });
 
-    // 7. Attach EMI schedule to respective finance record
-    const financeWithEmi = financeDetails.map((finance) => ({
-      ...finance,
-      emi_schedule: emiSchedules.filter(
-        (emi) => emi.finance_id === finance.id
-      ),
-    }));
-
-    // 8. Success response
+    // 6. Success response
     return res.status(200).json({
       success: true,
       message: "Device details fetched successfully.",
@@ -5280,7 +5373,6 @@ export const getDeviceById = async (req, res) => {
     });
   }
 };
-
 
 //getEnrollment  api  
 
@@ -5553,6 +5645,7 @@ export const getDeviceKyc = async (req, res) => {
 };
 
 
+
 const roundAmount = (amount) => {
   return Math.round((Number(amount) + Number.EPSILON) * 100) / 100;
 };
@@ -5585,8 +5678,9 @@ const addMonths = (dateString, monthsToAdd) => {
 
 
 // ==========================================
-// POST API - CREATE FINANCE
+// POST API - CREATE / UPDATE FINANCE
 // ==========================================
+
 
 
 export const createFinance = async (req, res) => {
@@ -5662,7 +5756,9 @@ export const createFinance = async (req, res) => {
       });
     }
 
-    const parsedDueDate = new Date(`${due_date}T00:00:00.000Z`);
+    const parsedDueDate = new Date(
+      `${due_date}T00:00:00.000Z`
+    );
 
     if (
       Number.isNaN(parsedDueDate.getTime()) ||
@@ -5687,7 +5783,10 @@ export const createFinance = async (req, res) => {
         ? tenureValue * 12
         : tenureValue;
 
-    if (!Number.isSafeInteger(numberOfEmi) || numberOfEmi > 600) {
+    if (
+      !Number.isSafeInteger(numberOfEmi) ||
+      numberOfEmi > 600
+    ) {
       return res.status(400).json({
         success: false,
         message: "Invalid EMI duration",
@@ -5695,7 +5794,9 @@ export const createFinance = async (req, res) => {
     }
 
     // 5. Finance calculations
-    const principal = roundAmount(productPrice - downPayment);
+    const principal = roundAmount(
+      productPrice - downPayment
+    );
 
     const totalInterest = roundAmount(
       (principal * interestRate) / 100
@@ -5731,7 +5832,9 @@ export const createFinance = async (req, res) => {
     };
 
     // 7. Convert EMI amount into paise
-    const totalPaise = Math.round(totalEmiAmount * 100);
+    const totalPaise = Math.round(
+      totalEmiAmount * 100
+    );
 
     const baseEmiPaise = Math.floor(
       totalPaise / numberOfEmi
@@ -5739,21 +5842,19 @@ export const createFinance = async (req, res) => {
 
     const remainingPaise = totalPaise % numberOfEmi;
 
-    // 8. Create or update using the same POST API
+    // 8. Create or update finance with EMI schedule
     const result = await db.transaction(async (trx) => {
-
-      // Lock device row to avoid simultaneous duplicate requests
+      // Lock device row
       const device = await trx("device_detail")
         .where("id", deviceId)
         .forUpdate()
         .first();
 
       if (!device) {
-        const error = new Error("DEVICE_NOT_FOUND");
-        throw error;
+        throw new Error("DEVICE_NOT_FOUND");
       }
 
-      // Find existing finance using device_id
+      // Find existing finance
       const existingFinance = await trx("finance_detail")
         .where("device_id", deviceId)
         .forUpdate()
@@ -5763,7 +5864,6 @@ export const createFinance = async (req, res) => {
       let isUpdated = false;
 
       if (existingFinance) {
-        // IMPORTANT: finance_detail primary key is id
         financeId = existingFinance.id;
 
         // Check whether any EMI is already paid
@@ -5773,8 +5873,7 @@ export const createFinance = async (req, res) => {
           .first();
 
         if (paidEmi) {
-          const error = new Error("PAID_EMI_EXISTS");
-          throw error;
+          throw new Error("PAID_EMI_EXISTS");
         }
 
         // Update existing finance record
@@ -5785,29 +5884,30 @@ export const createFinance = async (req, res) => {
             updated_at: trx.fn.now(),
           });
 
-        // Delete old pending EMI schedule
+        // Delete old pending EMI records
         await trx("finance_emi")
           .where("finance_id", financeId)
           .del();
 
         isUpdated = true;
-
       } else {
-        // First time: create new finance record
-        const [insertedId] = await trx("finance_detail").insert({
-          device_id: deviceId,
-          ...financePayload,
-        });
+        // Create new finance record
+        const [insertedId] = await trx("finance_detail")
+          .insert({
+            device_id: deviceId,
+            ...financePayload,
+          });
 
         financeId = insertedId;
       }
 
-      // Generate updated EMI schedule
+      // 9. Generate EMI records
       const emiRecords = [];
 
       for (let i = 0; i < numberOfEmi; i++) {
         const emiPaise =
-          baseEmiPaise + (i < remainingPaise ? 1 : 0);
+          baseEmiPaise +
+          (i < remainingPaise ? 1 : 0);
 
         emiRecords.push({
           finance_id: financeId,
@@ -5818,19 +5918,58 @@ export const createFinance = async (req, res) => {
         });
       }
 
+      // 10. Insert EMI records
       await trx("finance_emi").insert(emiRecords);
+
+      // 11. Fetch saved EMI records
+      const savedEmis = await trx("finance_emi")
+        .where("finance_id", financeId)
+        .orderBy("emi_number", "asc")
+        .select(
+          "id",
+          "emi_amount",
+          "due_date",
+          "created_at",
+          "status"
+        );
+
+      // 12. Prepare JSON EMI schedule
+      // id starts from 1 for every finance
+      // No emi_db_id field
+      // payment_date contains scheduled EMI due date
+      const emiSchedule = savedEmis.map((emi, index) => ({
+        id: index + 1,
+        amount: Number(emi.emi_amount),
+
+        payment_date:
+          emi.due_date instanceof Date
+            ? emi.due_date.toISOString().slice(0, 10)
+            : String(emi.due_date).slice(0, 10),
+
+        created_date: emi.created_at,
+        status: emi.status === "paid" ? 1 : 0,
+      }));
+
+      // 13. Save EMI schedule in finance_detail JSON column
+      await trx("finance_detail")
+        .where("id", financeId)
+        .update({
+          emi_schedule: JSON.stringify(emiSchedule),
+          updated_at: trx.fn.now(),
+        });
 
       return {
         financeId,
-        emiRecords,
+        emiSchedule,
         isUpdated,
       };
     });
 
-    // 9. Success response
+    // 14. Success response
     return res.status(result.isUpdated ? 200 : 201).json({
       success: true,
       isUpdated: result.isUpdated,
+
       message: result.isUpdated
         ? "Finance updated and EMI schedule regenerated successfully"
         : "Finance created and EMI schedule generated successfully",
@@ -5841,9 +5980,13 @@ export const createFinance = async (req, res) => {
         device_id: deviceId,
         ...financePayload,
         total_interest: totalInterest,
-        total_emi: result.emiRecords.length,
-        pending_emi: result.emiRecords.length,
-        emi_schedule: result.emiRecords,
+        total_emi: result.emiSchedule.length,
+
+        pending_emi: result.emiSchedule.filter(
+          (emi) => emi.status === 0
+        ).length,
+
+        emi_schedule: result.emiSchedule,
       },
     });
 
@@ -5886,6 +6029,7 @@ export const createFinance = async (req, res) => {
     });
   }
 };
+
 
 
 
@@ -6025,74 +6169,149 @@ export const getFinanceByDevice = async (req, res) => {
 // update payment status of emi
 
 export const updateFinancePaymentStatus = async (req, res) => {
-  const { id, payment_status } = req.body;
+  const { id } = req.params;
+  const { emi_id, payment_status } = req.body;
 
   try {
     // 1. Required validation
-    if (id === undefined || payment_status === undefined) {
+    if (
+      id === undefined ||
+      emi_id === undefined ||
+      payment_status === undefined
+    ) {
       return res.status(400).json({
         success: false,
-        message: "Finance ID and payment status are required",
+        message: "Finance ID, EMI ID and payment status are required.",
       });
     }
 
     // 2. Numeric validation
     const financeId = Number(id);
+    const emiId = Number(emi_id);
     const paymentStatus = Number(payment_status);
 
     if (!Number.isSafeInteger(financeId) || financeId <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Invalid finance ID",
+        message: "Invalid finance ID.",
       });
     }
 
-    // Only 0 = Pending and 1 = Paid are allowed
-    if (![0, 1].includes(paymentStatus)) {
+    if (!Number.isSafeInteger(emiId) || emiId <= 0) {
       return res.status(400).json({
         success: false,
-        message: "Payment status must be 0 (Pending) or 1 (Paid)",
+        message: "Invalid EMI ID.",
       });
     }
 
-    // 3. Check finance record
-    const existingFinance = await db("finance_detail")
-      .where("id", financeId)
-      .first();
-
-    if (!existingFinance) {
-      return res.status(404).json({
+    // 3. Validate payment status using constants
+    if (
+      ![
+        PAYMENT_STATUS.PENDING,
+        PAYMENT_STATUS.Paid,
+      ].includes(paymentStatus)
+    ) {
+      return res.status(400).json({
         success: false,
-        message: "Finance record not found",
+        message: "Payment status must be 0 (Pending) or 1 (Paid).",
       });
     }
 
-    // 4. Update payment status
-    await db("finance_detail")
-      .where("id", financeId)
-      .update({
-        payment_status: paymentStatus,
-        updated_at: db.fn.now(),
-      });
+    // 4. Start transaction
+    const updatedFinance = await db.transaction(async (trx) => {
+      // Fetch finance record
+      const existingFinance = await trx("finance_detail")
+        .where("id", financeId)
+        .forUpdate()
+        .first();
 
-    // 5. Get updated record
-    const updatedFinance = await db("finance_detail")
-      .where("id", financeId)
-      .first();
+      if (!existingFinance) {
+        throw new Error("FINANCE_NOT_FOUND");
+      }
+
+      // 5. Get EMI schedule
+      let emiSchedule = existingFinance.emi_schedule || [];
+
+      if (typeof emiSchedule === "string") {
+        try {
+          emiSchedule = JSON.parse(emiSchedule);
+        } catch (error) {
+          throw new Error("INVALID_EMI_SCHEDULE");
+        }
+      }
+
+      if (!Array.isArray(emiSchedule)) {
+        throw new Error("INVALID_EMI_SCHEDULE");
+      }
+
+      // 6. Find and update EMI status
+      const emiIndex = emiSchedule.findIndex(
+        (emi) => Number(emi.id) === emiId
+      );
+
+      if (emiIndex === -1) {
+        throw new Error("EMI_NOT_FOUND");
+      }
+
+      emiSchedule[emiIndex] = {
+        ...emiSchedule[emiIndex],
+        status: paymentStatus,
+      };
+
+      // 7. Update finance_detail EMI schedule
+      await trx("finance_detail")
+        .where("id", financeId)
+        .update({
+          emi_schedule: JSON.stringify(emiSchedule),
+          updated_at: trx.fn.now(),
+        });
+
+      // 8. Get updated finance record
+      return await trx("finance_detail")
+        .where("id", financeId)
+        .first();
+    });
 
     return res.status(200).json({
       success: true,
-      message: "Finance payment status updated successfully",
+      message: "EMI payment status updated successfully.",
       data: updatedFinance,
     });
 
   } catch (error) {
-    console.error("Update Finance Payment Status Error:", error);
+    console.error(
+      "UPDATE EMI PAYMENT STATUS ERROR:",
+      error?.stack || error?.message || error
+    );
+
+    if (error.message === "FINANCE_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "Finance record not found.",
+      });
+    }
+
+    if (error.message === "EMI_NOT_FOUND") {
+      return res.status(404).json({
+        success: false,
+        message: "EMI record not found.",
+      });
+    }
+
+    if (error.message === "INVALID_EMI_SCHEDULE") {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid EMI schedule data.",
+      });
+    }
 
     return res.status(500).json({
       success: false,
-      message: "Failed to update finance payment status",
-      error: error.message,
+      message: "Failed to update EMI payment status.",
+      error:
+        process.env.NODE_ENV === "production"
+          ? "Internal server error"
+          : error.message,
     });
   }
 };

@@ -50,13 +50,14 @@ import { validationResult , body } from "express-validator";
 import { uploadDeviceImages, uploadKycDocuments, uploadModuleIcon , uploadModuleNewIcon } from "../middleware/upload.js";
 
 
-import {
-  parsePhoneNumberFromString,
-} from "libphonenumber-js";
 
-import {
-  Country,
-} from "country-state-city";
+// import {
+//   parsePhoneNumberFromString,
+// } from "libphonenumber-js";
+
+// import {
+//   Country,
+// } from "country-state-city";
 
 const router = express.Router();
 
@@ -387,7 +388,7 @@ router.post("/finance", createFinance);
 router.get("/device/:deviceId", getFinanceByDevice  );
 
 router.put(
-  "/finance/payment-status",
+  "/finance/payment-status/:id",
   authMiddleware,
   updateFinancePaymentStatus
 );
